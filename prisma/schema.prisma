@@ -1,0 +1,161 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+enum UserRole {
+  SUPER_ADMIN
+  SCHOOL_OWNER
+  PARENT
+}
+
+enum PaymentStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  DEFAULTED
+}
+
+enum PaymentType {
+  FIRST_PAYMENT
+  INSTALLMENT
+}
+
+enum InstallmentFrequency {
+  WEEKLY
+  MONTHLY
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  role      UserRole
+
+  school    School?  @relation
+  parent    Parent?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model School {
+  id            String   @id @default(uuid())
+
+  // Identity
+  name          String
+  email         String
+  phone         String
+  address       String
+
+  // Ownership
+  ownerId       String   @unique
+  owner         User     @relation(fields: [ownerId], references: [id])
+
+  // Bank / Settlement Info
+  bankName      String
+  accountName   String
+  accountNumber String
+
+  // Relations
+  classes       ClassFee[]
+  students      ChildEnrollment[]
+  payments      Payment[]
+
+  createdAt     DateTime @default(now())
+}
+
+model ClassFee {
+  id         String  @id @default(uuid())
+  schoolId   String
+  className  String
+  feeAmount  Int
+  isActive   Boolean @default(true)
+
+  school     School  @relation(fields: [schoolId], references: [id])
+
+  createdAt  DateTime @default(now())
+
+  @@unique([schoolId, className])
+}
+
+model Parent {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  phoneNumber String
+
+  user        User     @relation(fields: [userId], references: [id])
+  children    Child[]
+
+  createdAt   DateTime @default(now())
+}
+
+model Child {
+  id         String   @id @default(uuid())
+  parentId   String
+  fullName   String
+  className  String
+
+  parent     Parent   @relation(fields: [parentId], references: [id])
+  enrollment ChildEnrollment?
+
+  createdAt  DateTime @default(now())
+}
+
+
+model Payment {
+  id              String      @id @default(uuid())
+  enrollmentId    String
+  schoolId        String
+
+  amountPaid      Int
+  platformAmount  Int
+  schoolAmount    Int
+
+  paymentType     PaymentType
+  paymentDate     DateTime    @default(now())
+
+  enrollment      ChildEnrollment @relation(fields: [enrollmentId], references: [id])
+  school          School          @relation(fields: [schoolId], references: [id])
+}
+model ChildEnrollment {
+  id                    String   @id @default(uuid())
+  childId               String   @unique
+  schoolId              String
+
+  className             String
+
+  totalSchoolFee        Int      // snapshot
+  platformFee           Int      // fixed 2.5%
+  schoolMinimumFee      Int      // 25%
+
+  firstPaymentPaid      Int
+  remainingBalance      Int
+
+  paymentStatus         PaymentStatus
+
+  installmentFrequency  InstallmentFrequency
+  termStartDate         DateTime
+  termEndDate           DateTime
+
+  child                 Child    @relation(fields: [childId], references: [id])
+  school                School   @relation(fields: [schoolId], references: [id])
+  payments              Payment[]
+
+  createdAt             DateTime @default(now())
+}
+
+model PlatformSetting {
+  id        String @id @default(uuid())
+  key       String @unique
+  value     String
+}

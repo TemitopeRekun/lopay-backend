@@ -1,10 +1,15 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
+import { ParentsModule } from './parents/parents.module';
+import { SchoolsModule } from './schools/schools.module';
+import { StudentsModule } from './students/students.module';
+import { PaymentsModule } from './payments/payments.module';
+import { DocumentsModule } from './documents/documents.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { CommonModule } from './common/common.module';
 
 @Module({
-  imports: [],
-  controllers: [AppController],
-  providers: [AppService],
+  imports: [AuthModule, UsersModule, ParentsModule, SchoolsModule, StudentsModule, PaymentsModule, DocumentsModule, NotificationsModule, CommonModule],
 })
 export class AppModule {}
