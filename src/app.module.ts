@@ -8,8 +8,9 @@ import { PaymentsModule } from './payments/payments.module';
 import { DocumentsModule } from './documents/documents.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { CommonModule } from './common/common.module';
+import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
-  imports: [AuthModule, UsersModule, ParentsModule, SchoolsModule, StudentsModule, PaymentsModule, DocumentsModule, NotificationsModule, CommonModule],
+  imports: [AuthModule, UsersModule, ParentsModule, SchoolsModule, StudentsModule, PaymentsModule, DocumentsModule, NotificationsModule, CommonModule, PrismaModule],
 })
 export class AppModule {}

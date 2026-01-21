@@ -6,7 +6,7 @@
 
 generator client {
   provider = "prisma-client"
-  output   = "../generated/prisma"
+  output   = "../generated/client"
 }
 
 datasource db {
@@ -113,20 +113,21 @@ model Child {
 
 
 model Payment {
-  id              String      @id @default(uuid())
+  id              String           @id @default(uuid())
   enrollmentId    String
   schoolId        String
 
-  amountPaid      Int
-  platformAmount  Int
-  schoolAmount    Int
+  amountPaid      Int              // What parent paid
+  platformAmount  Int              // Fixed 2.5% platform fee
+  schoolAmount    Int              // Amount going to school (parent payment minus platform fee)
 
   paymentType     PaymentType
-  paymentDate     DateTime    @default(now())
+  paymentDate     DateTime         @default(now())
 
-  enrollment      ChildEnrollment @relation(fields: [enrollmentId], references: [id])
-  school          School          @relation(fields: [schoolId], references: [id])
+  enrollment      ChildEnrollment  @relation(fields: [enrollmentId], references: [id])
+  school          School           @relation(fields: [schoolId], references: [id])
 }
+
 model ChildEnrollment {
   id                    String   @id @default(uuid())
   childId               String   @unique
@@ -134,12 +135,12 @@ model ChildEnrollment {
 
   className             String
 
-  totalSchoolFee        Int      // snapshot
-  platformFee           Int      // fixed 2.5%
-  schoolMinimumFee      Int      // 25%
+  totalSchoolFee        Int      // Snapshot of class fee at enrollment
+  platformFee           Int      // 2.5% of totalSchoolFee, fixed
+  schoolMinimumFee      Int      // 25% of totalSchoolFee
 
-  firstPaymentPaid      Int
-  remainingBalance      Int
+  firstPaymentPaid      Int      // Amount parent actually paid for first payment
+  remainingBalance      Int      // Remaining balance after first payment & installments
 
   paymentStatus         PaymentStatus
 
@@ -152,6 +153,7 @@ model ChildEnrollment {
   payments              Payment[]
 
   createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 }
 
 model PlatformSetting {
