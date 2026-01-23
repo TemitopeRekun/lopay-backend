@@ -16,10 +16,7 @@ export class SchoolPaymentsController {
   /** ✅ Confirm a single installment payment */
   @Post('confirm')
   async confirmPayment(@Body() dto: ConfirmPaymentDto) {
-    return this.schoolPaymentsService.confirmPayment(
-      dto.paymentId,
-      dto.schoolId,
-    );
+    return this.schoolPaymentsService.confirmPayment(dto.paymentId, dto.schoolId);
   }
 
   /** ✅ Mark an enrollment as defaulted */
