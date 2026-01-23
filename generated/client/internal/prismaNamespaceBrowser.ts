@@ -58,7 +58,8 @@ export const ModelName = {
   Child: 'Child',
   Payment: 'Payment',
   ChildEnrollment: 'ChildEnrollment',
-  PlatformSetting: 'PlatformSetting'
+  PlatformSetting: 'PlatformSetting',
+  Notification: 'Notification'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -145,7 +146,9 @@ export const PaymentScalarFieldEnum = {
   amountPaid: 'amountPaid',
   platformAmount: 'platformAmount',
   schoolAmount: 'schoolAmount',
+  receiver: 'receiver',
   paymentType: 'paymentType',
+  isConfirmed: 'isConfirmed',
   paymentDate: 'paymentDate'
 } as const
 
@@ -182,6 +185,19 @@ export const PlatformSettingScalarFieldEnum = {
 export type PlatformSettingScalarFieldEnum = (typeof PlatformSettingScalarFieldEnum)[keyof typeof PlatformSettingScalarFieldEnum]
 
 
+export const NotificationScalarFieldEnum = {
+  id: 'id',
+  userId: 'userId',
+  title: 'title',
+  message: 'message',
+  isRead: 'isRead',
+  link: 'link',
+  createdAt: 'createdAt'
+} as const
+
+export type NotificationScalarFieldEnum = (typeof NotificationScalarFieldEnum)[keyof typeof NotificationScalarFieldEnum]
+
+
 export const SortOrder = {
   asc: 'asc',
   desc: 'desc'
@@ -196,4 +212,12 @@ export const QueryMode = {
 } as const
 
 export type QueryMode = (typeof QueryMode)[keyof typeof QueryMode]
+
+
+export const NullsOrder = {
+  first: 'first',
+  last: 'last'
+} as const
+
+export type NullsOrder = (typeof NullsOrder)[keyof typeof NullsOrder]
 

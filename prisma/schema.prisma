@@ -30,6 +30,11 @@ enum PaymentType {
   INSTALLMENT
 }
 
+enum PaymentReceiver {
+  PLATFORM
+  SCHOOL
+}
+
 enum InstallmentFrequency {
   WEEKLY
   MONTHLY
@@ -43,6 +48,7 @@ model User {
 
   school    School?  @relation
   parent    Parent?
+  notifications Notification[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -121,7 +127,10 @@ model Payment {
   platformAmount  Int              // Fixed 2.5% platform fee
   schoolAmount    Int              // Amount going to school (parent payment minus platform fee)
 
+  receiver        PaymentReceiver  // School or platform
+
   paymentType     PaymentType
+  isConfirmed     Boolean          @default(false)
   paymentDate     DateTime         @default(now())
 
   enrollment      ChildEnrollment  @relation(fields: [enrollmentId], references: [id])
@@ -160,4 +169,16 @@ model PlatformSetting {
   id        String @id @default(uuid())
   key       String @unique
   value     String
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String   // Who receives this notification (parent or school owner)
+  title       String
+  message     String
+  isRead      Boolean  @default(false)
+  link        String?  // Optional: frontend route to redirect
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id])
 }

@@ -36,6 +36,14 @@ export const PaymentType = {
 export type PaymentType = (typeof PaymentType)[keyof typeof PaymentType]
 
 
+export const PaymentReceiver = {
+  PLATFORM: 'PLATFORM',
+  SCHOOL: 'SCHOOL'
+} as const
+
+export type PaymentReceiver = (typeof PaymentReceiver)[keyof typeof PaymentReceiver]
+
+
 export const InstallmentFrequency = {
   WEEKLY: 'WEEKLY',
   MONTHLY: 'MONTHLY'

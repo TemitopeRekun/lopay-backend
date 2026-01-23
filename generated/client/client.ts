@@ -77,3 +77,8 @@ export type ChildEnrollment = Prisma.ChildEnrollmentModel
  * 
  */
 export type PlatformSetting = Prisma.PlatformSettingModel
+/**
+ * Model Notification
+ * 
+ */
+export type Notification = Prisma.NotificationModel
