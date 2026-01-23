@@ -101,55 +101,6 @@ export class EnrollmentService {
     });
   }
 
-  async confirmFirstPayment(enrollmentId: string, schoolId: string) {
-    const enrollment = await this.prisma.childEnrollment.findFirst({
-      where: {
-        id: enrollmentId,
-        schoolId,
-      },
-    });
-
-    if (!enrollment) {
-      throw new BadRequestException('Enrollment not found for this school');
-    }
-
-    if (enrollment.paymentStatus !== PaymentStatus.PENDING) {
-      throw new BadRequestException('Enrollment is not awaiting confirmation');
-    }
-
-    return this.prisma.childEnrollment.update({
-      where: { id: enrollmentId },
-      data: {
-        paymentStatus: PaymentStatus.ACTIVE,
-      },
-    });
-  }
-
-  async settleFirstPayment(enrollmentId: string) {
-    const enrollment = await this.prisma.childEnrollment.findUnique({
-      where: { id: enrollmentId },
-      include: { school: true },
-    });
-
-    if (!enrollment) throw new BadRequestException('Enrollment not found');
-
-    // Note: This logic seems to duplicate AdminService.settleFirstPayment.
-    // Ensure we update status using the Enum.
-    await this.prisma.childEnrollment.update({
-      where: { id: enrollmentId },
-      data: { paymentStatus: PaymentStatus.ACTIVE },
-    });
-
-    // Notify school
-    await this.notificationsService.create({
-      userId: enrollment.school.ownerId,
-      title: 'First Payment Settled',
-      message: 'The platform has sent your 25% share.',
-    });
-
-    return { success: true };
-  }
-
   async submitInstallmentPayment(enrollmentId: string, amountPaid: number) {
     const enrollment = await this.prisma.childEnrollment.findUnique({
       where: { id: enrollmentId },
@@ -206,67 +157,6 @@ export class EnrollmentService {
           title: 'Installment Payment Submitted',
           message: `An installment payment of ₦${amountPaid} has been submitted and needs confirmation.`,
           link: `/school/payments`,
-        },
-      });
-    });
-  }
-
-  async confirmInstallmentPayment(paymentId: string, schoolId: string) {
-    const payment = await this.prisma.payment.findFirst({
-      where: {
-        id: paymentId,
-        schoolId,
-        isConfirmed: false,
-      },
-      include: { enrollment: true },
-    });
-
-    if (!payment) {
-      throw new BadRequestException('Payment not found or already confirmed');
-    }
-
-    const enrollment = payment.enrollment;
-
-    const child = await this.prisma.child.findUnique({
-      where: { id: enrollment.childId },
-      include: { parent: { include: { user: true } } },
-    });
-
-    if (!child) {
-      throw new BadRequestException('Child not found');
-    }
-
-    const newRemainingBalance =
-      enrollment.remainingBalance - payment.amountPaid;
-
-    const newStatus =
-      newRemainingBalance === 0
-        ? PaymentStatus.COMPLETED
-        : PaymentStatus.ACTIVE;
-
-    return this.prisma.$transaction(async (tx) => {
-      // 1️⃣ Confirm payment
-      await tx.payment.update({
-        where: { id: payment.id },
-        data: { isConfirmed: true },
-      });
-
-      // 2️⃣ Update enrollment
-      await tx.childEnrollment.update({
-        where: { id: enrollment.id },
-        data: {
-          remainingBalance: newRemainingBalance,
-          paymentStatus: newStatus,
-        },
-      });
-
-      // 3️⃣ Notify Parent (Scoped to transaction)
-      await tx.notification.create({
-        data: {
-          userId: child.parent.user.id,
-          title: 'Payment Confirmed',
-          message: `Your payment of ₦${payment.amountPaid} has been confirmed by the school.`,
-          link: `/parent/payments`,
         },
       });
     });

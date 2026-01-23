@@ -1,9 +1,14 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from 'src/notifications/notifications.service';
+import { PaymentStatus } from '../../generated/client/client';
 
 @Injectable()
 export class SchoolPaymentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   /** Fetch all pending payments for a school */
   async getPendingPayments(schoolId: string) {
@@ -23,9 +28,9 @@ export class SchoolPaymentsService {
   }
 
   /** Confirm a pending installment payment */
-  async confirmPayment(paymentId: string) {
-    const payment = await this.prisma.payment.findUnique({
-      where: { id: paymentId },
+  async confirmPayment(paymentId: string, schoolId: string) {
+    const payment = await this.prisma.payment.findFirst({
+      where: { id: paymentId, schoolId },
       include: { enrollment: true },
     });
 
@@ -35,24 +40,86 @@ export class SchoolPaymentsService {
 
     const enrollment = payment.enrollment;
 
-    const newRemainingBalance = enrollment.remainingBalance - payment.amountPaid;
-    const newStatus = newRemainingBalance === 0 ? 'COMPLETED' : 'ACTIVE';
+    // Fetch child to get parent info for notification
+    const child = await this.prisma.child.findUnique({
+      where: { id: enrollment.childId },
+      include: { parent: true },
+    });
 
-    return this.prisma.$transaction([
+    if (!child) throw new BadRequestException('Child record not found');
+
+    const newRemainingBalance =
+      enrollment.remainingBalance - payment.amountPaid;
+    const newStatus =
+      newRemainingBalance === 0
+        ? PaymentStatus.COMPLETED
+        : PaymentStatus.ACTIVE;
+
+    return this.prisma.$transaction(async (tx) => {
       // 1️⃣ Mark payment as confirmed
-      this.prisma.payment.update({
+      await tx.payment.update({
         where: { id: paymentId },
         data: { isConfirmed: true },
-      }),
+      });
 
       // 2️⃣ Update enrollment
-      this.prisma.childEnrollment.update({
+      await tx.childEnrollment.update({
         where: { id: enrollment.id },
         data: {
           remainingBalance: newRemainingBalance,
           paymentStatus: newStatus,
         },
-      }),
-    ]);
+      });
+
+      // 3️⃣ Notify Parent
+      await tx.notification.create({
+        data: {
+          userId: child.parent.userId,
+          title: 'Payment Confirmed',
+          message: `Your payment of ₦${payment.amountPaid} has been confirmed by the school.`,
+          link: `/parent/payments`,
+        },
+      });
+    });
+  }
+
+  async markEnrollmentAsDefaulted(enrollmentId: string, schoolId: string) {
+    const enrollment = await this.prisma.childEnrollment.findFirst({
+      where: { id: enrollmentId, schoolId },
+    });
+
+    if (!enrollment) throw new BadRequestException('Not found');
+
+    if (enrollment.remainingBalance <= 0) {
+      throw new BadRequestException('Cannot default a completed enrollment');
+    }
+
+    // Fetch the child to get the parent user ID
+    const child = await this.prisma.child.findUnique({
+      where: { id: enrollment.childId },
+      include: { parent: true },
+    });
+
+    if (!child || !child.parent) {
+      throw new BadRequestException('Parent user not found');
+    }
+
+    const parentUserId = child.parent.userId;
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.childEnrollment.update({
+        where: { id: enrollmentId },
+        data: { paymentStatus: PaymentStatus.DEFAULTED },
+      });
+
+      await tx.notification.create({
+        data: {
+          userId: parentUserId,
+          title: 'Payment Defaulted',
+          message:
+            'Your child’s payment plan has been marked as defaulted. Please contact the school.',
+        },
+      });
+    });
   }
 }

@@ -1,9 +1,9 @@
 import { IsNotEmpty, IsUUID } from 'class-validator';
 
-export class ConfirmPaymentDto {
+export class MarkDefaultedDto {
   @IsUUID()
   @IsNotEmpty()
-  paymentId: string;
+  enrollmentId: string;
 
   @IsUUID()
   @IsNotEmpty()

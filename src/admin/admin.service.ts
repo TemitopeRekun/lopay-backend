@@ -1,5 +1,9 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { PaymentType, PaymentReceiver, PaymentStatus } from '../../generated/client/client';
+import {
+  PaymentType,
+  PaymentReceiver,
+  PaymentStatus,
+} from '../../generated/client/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -40,7 +44,12 @@ export class AdminService {
       },
       include: {
         enrollment: {
-          include: { school: true },
+          include: {
+            school: true,
+            child: {
+              include: { parent: true },
+            },
+          },
         },
       },
     });
@@ -48,6 +57,8 @@ export class AdminService {
     if (!payment) {
       throw new BadRequestException('Payment not found or already settled');
     }
+
+    const { enrollment } = payment;
 
     return this.prisma.$transaction([
       // 1️⃣ Mark payment as confirmed
@@ -65,11 +76,21 @@ export class AdminService {
       // 3️⃣ Notify School Owner
       this.prisma.notification.create({
         data: {
-          userId: payment.enrollment.school.ownerId,
+          userId: enrollment.school.ownerId,
           title: 'First Payment Settled',
           message:
             'The platform has settled the first payment. Enrollment is now active.',
-          link: `/school/enrollments/${payment.enrollmentId}`,
+          link: `/school/enrollments/${enrollment.id}`,
+        },
+      }),
+
+      // 4️⃣ Notify Parent
+      this.prisma.notification.create({
+        data: {
+          userId: enrollment.child.parent.userId,
+          title: 'Enrollment Confirmed',
+          message: `Your first payment of ₦${payment.amountPaid} has been confirmed. Enrollment is active.`,
+          link: `/parent/enrollments/${enrollment.id}`,
         },
       }),
     ]);
