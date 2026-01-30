@@ -1,9 +1,12 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards } from '@nestjs/common';
 import { EnrollmentService } from './enrollment.service';
 import { CreateEnrollmentDto } from './dto/create.enrollment.dto';
 import { ConfirmEnrollmentDto } from './dto/confirm.enrollment.dto';
+import { AuthGuard } from '@nestjs/passport';
+import { CurrentUser } from '../common/decorators/user.decorator';
 
 @Controller('enrollments')
+@UseGuards(AuthGuard('jwt'))
 export class EnrollmentController {
   constructor(private readonly enrollmentService: EnrollmentService) {}
 
@@ -13,13 +16,13 @@ export class EnrollmentController {
   }
 
   @Post('confirm-first-payment')
-  async confirmFirstPayment(@Body() dto: ConfirmEnrollmentDto) {
-    // ⚠️ TEMP: schoolId will come from auth later
-    const schoolId = 'SCHOOL_ID_FROM_AUTH';
+  async confirmFirstPayment(
+    @Body() dto: ConfirmEnrollmentDto,
+    @CurrentUser() user: any,
+  ) {
+    // School ID comes securely from the JWT token
+    const schoolId = user.schoolId;
 
-    return this.enrollmentService.confirmFirstPayment(
-      dto.enrollmentId,
-      schoolId,
-    );
+   
   }
 }

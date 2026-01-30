@@ -6,6 +6,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { JwtStrategy } from './jwt.strategy';
 import * as admin from 'firebase-admin';
 import { RolesGuard } from './roles.guard';
+import { FirebaseAdminProvider } from 'src/firebase/firebase-admin.provider';
 
 @Module({
   imports: [
@@ -14,19 +15,14 @@ import { RolesGuard } from './roles.guard';
       signOptions: { expiresIn: '1h' },
     }),
   ],
-  providers: [AuthService, PrismaService, JwtStrategy, RolesGuard],
+  providers: [
+    FirebaseAdminProvider,
+    AuthService,
+    PrismaService,
+    JwtStrategy,
+    RolesGuard,
+  ],
   controllers: [AuthController],
-  exports: [AuthService, JwtStrategy, RolesGuard],
+  exports: [FirebaseAdminProvider, AuthService, JwtStrategy, RolesGuard],
 })
-export class AuthModule {
-  constructor() {
-    // Initialize Firebase admin SDK
-    admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId: process.env.FIREBASE_PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-      }),
-    });
-  }
-}
+export class AuthModule {}
