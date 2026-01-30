@@ -1,5 +1,6 @@
-import { Controller, Post, Body, Param, Get } from '@nestjs/common';
+import { Controller, Post, Body, Param, Get, UseGuards } from '@nestjs/common';
 import { PaymentService } from './payment.service';
+import { AuthGuard } from '@nestjs/passport';
 import type {
   DepositCalculationResult,
   InstallmentCalculationResult,
@@ -7,6 +8,7 @@ import type {
 } from './payment.service';
 
 @Controller('payment')
+@UseGuards(AuthGuard('jwt'))
 export class PaymentsController {
   constructor(private readonly paymentService: PaymentService) {}
 

@@ -4,8 +4,4 @@ export class ConfirmPaymentDto {
   @IsUUID()
   @IsNotEmpty()
   paymentId: string;
-
-  @IsUUID()
-  @IsNotEmpty()
-  schoolId: string;
 }

@@ -4,8 +4,4 @@ export class MarkDefaultedDto {
   @IsUUID()
   @IsNotEmpty()
   enrollmentId: string;
-
-  @IsUUID()
-  @IsNotEmpty()
-  schoolId: string;
 }

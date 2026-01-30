@@ -7,7 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateEnrollmentDto } from './dto/create.enrollment.dto';
 import { PaymentService } from '../payments/payment.service';
-import { NotificationsService } from 'src/notifications/notifications.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class EnrollmentService {
@@ -16,6 +16,68 @@ export class EnrollmentService {
     private readonly paymentService: PaymentService,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  async confirmFirstPayment(enrollmentId: string, schoolId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Verify Enrollment
+      const enrollment = await tx.childEnrollment.findUnique({
+        where: { id: enrollmentId },
+        include: { child: { include: { parent: { include: { user: true } } } } },
+      });
+
+      if (!enrollment) {
+        throw new BadRequestException('Enrollment not found');
+      }
+
+      if (enrollment.schoolId !== schoolId) {
+        throw new BadRequestException(
+          'Enrollment does not belong to this school',
+        );
+      }
+
+      if (enrollment.paymentStatus !== PaymentStatus.PENDING) {
+        throw new BadRequestException('Enrollment is not in pending status');
+      }
+
+      // 2. Find Pending First Payment
+      const payment = await tx.payment.findFirst({
+        where: {
+          enrollmentId: enrollmentId,
+          paymentType: PaymentType.FIRST_PAYMENT,
+          isConfirmed: false,
+        },
+      });
+
+      if (!payment) {
+        throw new BadRequestException('No pending first payment found');
+      }
+
+      // 3. Update Payment
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: { isConfirmed: true },
+      });
+
+      // 4. Update Enrollment Status
+      const updatedEnrollment = await tx.childEnrollment.update({
+        where: { id: enrollmentId },
+        data: { paymentStatus: PaymentStatus.ACTIVE },
+      });
+
+      // 5. Notify Parent
+      const parentUserId = enrollment.child.parent.user.id;
+      await tx.notification.create({
+        data: {
+          userId: parentUserId,
+          title: 'Enrollment Confirmed',
+          message: `Your enrollment for ${enrollment.className} has been confirmed!`,
+          link: `/parent/enrollments/${enrollment.id}`,
+        },
+      });
+
+      return updatedEnrollment;
+    });
+  }
 
   async enrollChild(dto: CreateEnrollmentDto) {
     return this.prisma.$transaction(async (tx) => {

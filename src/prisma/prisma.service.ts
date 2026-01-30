@@ -8,13 +8,7 @@ export class PrismaService
   implements OnModuleInit, OnModuleDestroy
 {
   constructor(config: ConfigService) {
-    super({
-      datasources: {
-        db: {
-          url: config.get('DATABASE_URL'),
-        },
-      },
-    } as unknown as Prisma.PrismaClientOptions);
+    super({} as any);
   }
 
   async onModuleInit() {

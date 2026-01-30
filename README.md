@@ -1,37 +1,138 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# LoPay Backend
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+LoPay is a **school fee installment payment platform** designed to enable parents to pay school fees flexibly while ensuring schools receive confirmed payments and the platform earns a fixed service fee.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+This backend is engineered with **security, trust, and financial integrity** as first-class concerns.
 
-## Description
+---
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 🚀 Project Overview
 
-## Project setup
+LoPay addresses critical challenges in education finance:
+
+- **Parents** often struggle with lump-sum school fee payments.
+- **Schools** require guaranteed, traceable payments.
+- **Platforms** need controlled onboarding and robust fraud prevention.
+
+**Key Value Propositions:**
+
+- Controlled school onboarding.
+- Flexible installment-based payments.
+- Manual payment confirmations for security.
+- Role-based access control (RBAC).
+- Immutable financial records.
+
+---
+
+## 🧑‍💼 User Roles
+
+### 👑 SUPER_ADMIN (Platform Owner)
+
+_The administrator of the LoPay platform._
+
+- **Access:** Login only (no public signup).
+- **Responsibilities:**
+  - Onboards schools and creates school owner accounts.
+  - Receives all **first payments**.
+  - Disburses the 25% share to schools.
+  - Views global analytics (Total schools, students, revenue, platform earnings).
+
+### 🏫 SCHOOL_OWNER
+
+_The administrator for a specific school._
+
+- **Creation:** Account created by SUPER_ADMIN.
+- **Constraints:** Owns exactly **one school**; cannot change school identity.
+- **Capabilities:**
+  - Manage class fees.
+  - Confirm payments.
+  - Receive installment payments.
+  - View school analytics.
+  - Mark enrollments as defaulted.
+
+### 👨‍👩‍👧 PARENT
+
+_The end-user making payments._
+
+- **Access:** Public signup.
+- **Capabilities:**
+  - Create child profiles.
+  - Enroll children into schools.
+  - Make first and installment payments.
+  - View payment history and receive notifications.
+
+---
+
+## 💳 Financial Integrity & Payment Rules
+
+### Fee Structure
+
+1.  **Platform Fee:** **2.5% of the total school fee**. Fixed at enrollment.
+2.  **School First Payment:** Minimum of **25% of the total school fee**.
+
+### Minimum First Payment Formula
+
+The system enforces a minimum deposit to ensure the platform fee is collected upfront:
+
+> `minimumDeposit = (25% of school fee) + (2.5% platform fee)`
+
+### Payment Lifecycle
+
+All payments follow a strict status lifecycle controlled by backend logic:
+
+> `PENDING` → `ACTIVE` → `COMPLETED` (or `DEFAULTED`)
+
+1.  **Enrollment & First Payment:**
+    - Parent selects school/class.
+    - System calculates minimum payment.
+    - Enrollment created with fee snapshots.
+    - Status: `PENDING` until confirmed by School.
+2.  **Installment Payments:**
+    - Parent submits installment.
+    - Status: `PENDING`.
+    - School confirms payment → Balance updates.
+
+---
+
+## 🛠 Tech Stack
+
+| Layer              | Technology             |
+| :----------------- | :--------------------- |
+| **Framework**      | NestJS                 |
+| **Language**       | TypeScript             |
+| **ORM**            | Prisma                 |
+| **Database**       | PostgreSQL             |
+| **Authentication** | Firebase Admin + JWT   |
+| **Architecture**   | Modular (Domain-based) |
+
+---
+
+## 🔐 Security & Architecture
+
+### Authentication & Authorization
+
+- **Auth:** Firebase Admin verifies identity; JWT issued for API access.
+- **JWT Payload:** `{ userId, role, schoolId? }`
+- **Guards:** `JwtAuthGuard` (validates user), `RolesGuard` (enforces permissions).
+- **Security Note:** User identity is derived strictly from `req.user`, never from the request body.
+
+### Database Design Principles
+
+- **Snapshots:** Financial data (fees) is snapshotted at enrollment.
+- **Immutability:** Financial records are never mutated, only appended.
+- **Audit:** Full history is preserved to prevent recalculation errors.
+
+---
+
+## Getting Started
+
+### Installation
 
 ```bash
 $ npm install
 ```
 
-## Compile and run the project
+### Running the Application
 
 ```bash
 # development
@@ -44,7 +145,7 @@ $ npm run start:dev
 $ npm run start:prod
 ```
 
-## Run tests
+### Testing
 
 ```bash
 # unit tests
@@ -57,42 +158,14 @@ $ npm run test:e2e
 $ npm run test:cov
 ```
 
-## Deployment
+---
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## 🚧 Roadmap
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+- [ ] Paystack / Flutterwave integration
+- [ ] Automated settlement
+- [ ] Admin dashboards
+- [ ] Penalty handling
+- [ ] Credit scoring
+- [ ] Mobile apps
+- [ ] Webhooks

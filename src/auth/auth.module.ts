@@ -6,13 +6,20 @@ import { JwtModule } from '@nestjs/jwt';
 import { JwtStrategy } from './jwt.strategy';
 import * as admin from 'firebase-admin';
 import { RolesGuard } from './roles.guard';
-import { FirebaseAdminProvider } from 'src/firebase/firebase-admin.provider';
+import { FirebaseAdminProvider } from '../firebase/firebase-admin.provider';
+import { PassportModule } from '@nestjs/passport';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 
 @Module({
   imports: [
-    JwtModule.register({
-      secret: process.env.JWT_SECRET || 'supersecretkey', // Use env variable
-      signOptions: { expiresIn: '1h' },
+    PassportModule,
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        secret: configService.get<string>('JWT_SECRET') || 'supersecretkey',
+        signOptions: { expiresIn: '1h' },
+      }),
+      inject: [ConfigService],
     }),
   ],
   providers: [

@@ -4,6 +4,10 @@ import { CreateEnrollmentDto } from './dto/create.enrollment.dto';
 import { ConfirmEnrollmentDto } from './dto/confirm.enrollment.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../common/decorators/user.decorator';
+import { Roles } from '../auth/roles.decorator';
+import { UserRole } from '../../generated/client/client';
+
+import { CreateInstallmentDto } from './dto/create.installment.dto';
 
 @Controller('enrollments')
 @UseGuards(AuthGuard('jwt'))
@@ -15,7 +19,17 @@ export class EnrollmentController {
     return this.enrollmentService.enrollChild(dto);
   }
 
+  @Post('pay-installment')
+  @Roles(UserRole.PARENT)
+  async payInstallment(@Body() dto: CreateInstallmentDto) {
+    return this.enrollmentService.submitInstallmentPayment(
+      dto.enrollmentId,
+      dto.amountPaid,
+    );
+  }
+
   @Post('confirm-first-payment')
+  @Roles(UserRole.SCHOOL_OWNER)
   async confirmFirstPayment(
     @Body() dto: ConfirmEnrollmentDto,
     @CurrentUser() user: any,
@@ -23,6 +37,9 @@ export class EnrollmentController {
     // School ID comes securely from the JWT token
     const schoolId = user.schoolId;
 
-   
+    return this.enrollmentService.confirmFirstPayment(
+      dto.enrollmentId,
+      schoolId,
+    );
   }
 }
