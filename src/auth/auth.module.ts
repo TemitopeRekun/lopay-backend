@@ -4,7 +4,6 @@ import { AuthController } from './auth.controller';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtModule } from '@nestjs/jwt';
 import { JwtStrategy } from './jwt.strategy';
-import * as admin from 'firebase-admin';
 import { RolesGuard } from './roles.guard';
 import { FirebaseAdminProvider } from '../firebase/firebase-admin.provider';
 import { PassportModule } from '@nestjs/passport';
