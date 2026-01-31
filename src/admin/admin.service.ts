@@ -1,18 +1,89 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import {
   PaymentType,
   PaymentReceiver,
   PaymentStatus,
+  UserRole,
 } from '../../generated/client/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import * as admin from 'firebase-admin';
+import { CreateSchoolDto } from './dto/create.school.dto';
 
 @Injectable()
 export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    @Inject('FIREBASE_ADMIN') private readonly firebaseAdmin: admin.app.App,
   ) {}
+
+  /** Onboard a new school and create the school owner account */
+  async onboardSchool(dto: CreateSchoolDto) {
+    // 1. Create Firebase User
+    let firebaseUser;
+    try {
+      firebaseUser = await this.firebaseAdmin.auth().createUser({
+        email: dto.ownerEmail,
+        password: dto.ownerPassword,
+        displayName: dto.ownerName,
+      });
+    } catch (error) {
+      if (error.code === 'auth/email-already-exists') {
+        // If user exists in Firebase, check if they exist in our DB
+        try {
+            firebaseUser = await this.firebaseAdmin.auth().getUserByEmail(dto.ownerEmail);
+        } catch (retrieveError: any) {
+            throw new BadRequestException(`User exists in Firebase but could not be retrieved: ${retrieveError.message}`);
+        }
+      } else {
+        throw new BadRequestException(`Firebase Error: ${error.message}`);
+      }
+    }
+
+    // If we are reusing an existing firebase user, we must ensure they don't already have a role that conflicts,
+    // or we just overwrite/assign SCHOOL_OWNER role in our DB.
+    // For safety in this MVP, let's assume strict onboarding:
+    // If user exists in DB, fail.
+
+    const existingUser = await this.prisma.user.findUnique({ where: { email: dto.ownerEmail } });
+    if (existingUser) {
+        throw new BadRequestException('User with this email already exists in the database');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // 2. Create User record
+      const user = await tx.user.create({
+        data: {
+          id: firebaseUser.uid,
+          email: dto.ownerEmail,
+          password: 'HASHED_PASSWORD_PLACEHOLDER', // In production, we don't store passwords if using Firebase, but DB schema might require it.
+          role: UserRole.SCHOOL_OWNER,
+        },
+      });
+
+      // 3. Create School record
+      const school = await tx.school.create({
+        data: {
+          name: dto.schoolName,
+          email: dto.ownerEmail, // School email defaults to owner email
+          address: dto.address,
+          phone: dto.phone,
+          // Default bank details until updated by school owner
+          bankName: '',
+          accountName: '',
+          accountNumber: '',
+          ownerId: user.id,
+        },
+      });
+
+      return {
+        school,
+        user,
+        message: 'School and School Owner created successfully',
+      };
+    });
+  }
 
   /** Get all first payments waiting to be settled */
   async getPendingFirstPayments() {
