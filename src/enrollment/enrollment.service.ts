@@ -17,6 +17,49 @@ export class EnrollmentService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  async getParentEnrollments(userId: string) {
+    return this.prisma.childEnrollment.findMany({
+      where: {
+        child: {
+          parent: {
+            userId: userId,
+          },
+        },
+      },
+      include: {
+        child: true,
+        school: true,
+        payments: {
+          orderBy: { paymentDate: 'desc' },
+          take: 1, // Get the latest payment for context
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getEnrollmentHistory(enrollmentId: string, userId: string) {
+    const enrollment = await this.prisma.childEnrollment.findUnique({
+      where: { id: enrollmentId },
+      include: {
+        child: { include: { parent: true } },
+        payments: { orderBy: { paymentDate: 'desc' } },
+        school: true,
+      },
+    });
+
+    if (!enrollment) {
+      throw new BadRequestException('Enrollment not found');
+    }
+
+    // Security check: ensure the user requesting this is the parent of the child
+    if (enrollment.child.parent.userId !== userId) {
+      throw new BadRequestException('Unauthorized access to enrollment history');
+    }
+
+    return enrollment;
+  }
+
   async confirmFirstPayment(enrollmentId: string, schoolId: string) {
     return this.prisma.$transaction(async (tx) => {
       // 1. Verify Enrollment

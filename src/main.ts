@@ -10,6 +10,14 @@ async function bootstrap() {
       transform: true, // Automatically transforms payloads to DTO instances
     }),
   );
+
+  // Enable CORS
+  app.enableCors({
+    origin: '*', // Allow all origins for development. CHANGE THIS IN PRODUCTION!
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    credentials: true,
+  });
+
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
   console.log(`Application is running on: ${await app.getUrl()}`);

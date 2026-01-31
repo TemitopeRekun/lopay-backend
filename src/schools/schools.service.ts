@@ -10,6 +10,114 @@ export class SchoolPaymentsService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  async createClassFee(schoolId: string, className: string, feeAmount: number) {
+    // Check if fee already exists for this class
+    const existingFee = await this.prisma.classFee.findFirst({
+      where: {
+        schoolId,
+        className,
+      },
+    });
+
+    if (existingFee) {
+      // Update existing fee
+      return this.prisma.classFee.update({
+        where: { id: existingFee.id },
+        data: { feeAmount, isActive: true },
+      });
+    }
+
+    // Create new fee
+    return this.prisma.classFee.create({
+      data: {
+        schoolId,
+        className,
+        feeAmount,
+      },
+    });
+  }
+
+  async getClassFees(schoolId: string) {
+    return this.prisma.classFee.findMany({
+      where: { schoolId, isActive: true },
+      orderBy: { className: 'asc' },
+    });
+  }
+
+  async getDashboardStats(schoolId: string) {
+    const [
+      totalStudents,
+      confirmedPayments,
+      pendingPayments,
+      enrollments,
+    ] = await Promise.all([
+      // 1. Total Enrolled Students
+      this.prisma.childEnrollment.count({
+        where: { schoolId },
+      }),
+
+      // 2. Confirmed Payments (Revenue)
+      this.prisma.payment.aggregate({
+        where: { schoolId, isConfirmed: true },
+        _sum: { amountPaid: true },
+      }),
+
+      // 3. Pending Payments
+      this.prisma.payment.aggregate({
+        where: { schoolId, isConfirmed: false },
+        _sum: { amountPaid: true },
+      }),
+
+      // 4. Defaulted Amount (from defaulted enrollments)
+      this.prisma.childEnrollment.findMany({
+        where: { schoolId, paymentStatus: PaymentStatus.DEFAULTED },
+        select: { remainingBalance: true },
+      }),
+    ]);
+
+    const totalRevenue = confirmedPayments._sum.amountPaid || 0;
+    const pendingRevenue = pendingPayments._sum.amountPaid || 0;
+    const defaultedAmount = enrollments.reduce(
+      (sum, e) => sum + e.remainingBalance,
+      0,
+    );
+
+    return {
+      totalStudents,
+      totalRevenue,
+      pendingRevenue,
+      defaultedAmount,
+    };
+  }
+
+  async getStudents(schoolId: string, className?: string, search?: string) {
+    const whereClause: any = { schoolId };
+    if (className) {
+      whereClause.className = className;
+    }
+
+    if (search) {
+      whereClause.OR = [
+        // Search by Child Name
+        { child: { fullName: { contains: search, mode: 'insensitive' } } },
+        // Search by Parent Email
+        { child: { parent: { user: { email: { contains: search, mode: 'insensitive' } } } } },
+        // Search by Parent Phone
+        { child: { parent: { phoneNumber: { contains: search, mode: 'insensitive' } } } },
+      ];
+    }
+
+    return this.prisma.childEnrollment.findMany({
+      where: whereClause,
+      include: {
+        child: { include: { parent: { include: { user: true } } } },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+  }
+
   /** Fetch all pending payments for a school */
   async getPendingPayments(schoolId: string) {
     return this.prisma.payment.findMany({

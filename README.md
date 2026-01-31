@@ -98,6 +98,56 @@ All payments follow a strict status lifecycle controlled by backend logic:
 
 | Layer              | Technology             |
 | :----------------- | :--------------------- |
+| **Framework**      | NestJS (Node.js)       |
+| **Language**       | TypeScript             |
+| **Database**       | PostgreSQL             |
+| **ORM**            | Prisma                 |
+| **Auth**           | Firebase Auth + JWT    |
+| **Validation**     | class-validator + Joi  |
+
+---
+
+## ⚙️ Configuration & Setup
+
+### Environment Variables
+
+Create a `.env` file in the root directory. You **must** define the following variables for the application to start (validation is enforced):
+
+```env
+# Server Config
+NODE_ENV=development  # development | production | test
+PORT=3000
+
+# Database
+DATABASE_URL="postgresql://user:password@localhost:5432/lopay?schema=public"
+
+# Authentication (Backend JWT)
+JWT_SECRET="your-strong-jwt-secret-here"
+
+# Firebase Admin SDK (Get these from Firebase Console > Project Settings > Service Accounts)
+FIREBASE_PROJECT_ID="your-project-id"
+FIREBASE_CLIENT_EMAIL="firebase-adminsdk-xxxxx@your-project-id.iam.gserviceaccount.com"
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n..."
+```
+
+### Installation
+
+```bash
+npm install
+```
+
+### Running the app
+
+```bash
+# development
+npm run start
+
+# watch mode
+npm run start:dev
+
+# production mode
+npm run start:prod
+```
 | **Framework**      | NestJS                 |
 | **Language**       | TypeScript             |
 | **ORM**            | Prisma                 |

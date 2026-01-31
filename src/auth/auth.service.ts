@@ -1,7 +1,8 @@
-import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { UserRole } from '../../generated/client/client';
+import { RegisterDto } from './dto/register.dto';
 
 @Injectable()
 export class AuthService {
@@ -11,6 +12,51 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
   ) {}
+
+  /** Register a new user */
+  async register(dto: RegisterDto) {
+    if (dto.password !== dto.confirmPassword) {
+      throw new BadRequestException('Passwords do not match');
+    }
+
+    try {
+      // 1. Create User in Firebase
+      const firebaseUser = await this.firebase.auth().createUser({
+        email: dto.email,
+        password: dto.password,
+      });
+
+      // 2. Create User in Database
+      const user = await this.prisma.user.create({
+        data: {
+          id: firebaseUser.uid, // Sync UID with Firebase
+          email: dto.email,
+          password: 'firebase-auth-user', // Placeholder
+          role: UserRole.PARENT, // Default role
+        },
+      });
+
+      // 3. Generate Token
+      const payload = {
+        sub: user.id,
+        role: user.role,
+        schoolId: null,
+      };
+
+      return {
+        message: 'User registered successfully',
+        accessToken: this.jwtService.sign(payload),
+        user,
+      };
+    } catch (error) {
+      if (error.code === 'auth/email-already-exists') {
+        throw new BadRequestException('Email already exists');
+      }
+      // If user created in Firebase but DB failed, we might want to rollback (delete from Firebase).
+      // For MVP, we'll just throw.
+      throw new BadRequestException(error.message);
+    }
+  }
 
   /** Verify Firebase token & issue backend JWT */
   async loginWithFirebase(idToken: string) {

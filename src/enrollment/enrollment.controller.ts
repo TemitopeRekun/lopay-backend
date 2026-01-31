@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, UseGuards } from '@nestjs/common';
 import { EnrollmentService } from './enrollment.service';
 import { CreateEnrollmentDto } from './dto/create.enrollment.dto';
 import { ConfirmEnrollmentDto } from './dto/confirm.enrollment.dto';
@@ -10,9 +10,20 @@ import { UserRole } from '../../generated/client/client';
 import { CreateInstallmentDto } from './dto/create.installment.dto';
 
 @Controller('enrollments')
-@UseGuards(AuthGuard('jwt'))
 export class EnrollmentController {
   constructor(private readonly enrollmentService: EnrollmentService) {}
+
+  @Get('my-children')
+  @Roles(UserRole.PARENT)
+  async getMyChildren(@CurrentUser() user: any) {
+    return this.enrollmentService.getParentEnrollments(user.sub);
+  }
+
+  @Get(':id/history')
+  @Roles(UserRole.PARENT)
+  async getEnrollmentHistory(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.enrollmentService.getEnrollmentHistory(id, user.sub);
+  }
 
   @Post()
   enrollChild(@Body() dto: CreateEnrollmentDto) {
