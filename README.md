@@ -1,5 +1,9 @@
 # LoPay Backend
 
+> **👋 Frontend Developers!**  
+> Please read the **[API Integration Guide (API_GUIDE.md)](./API_GUIDE.md)** first.  
+> It contains the "Human-Friendly" instructions, endpoint recipes, and troubleshooting tips you need to connect to this backend.
+
 LoPay is a **school fee installment payment platform** designed to enable parents to pay school fees flexibly while ensuring schools receive confirmed payments and the platform earns a fixed service fee.
 
 This backend is engineered with **security, trust, and financial integrity** as first-class concerns.
