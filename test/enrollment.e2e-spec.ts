@@ -2,8 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from './../src/app.module';
-import { PrismaService } from './../src/prisma/prisma.service';
-import { UserRole, PaymentStatus, PaymentType, InstallmentFrequency } from '../generated/client/client';
+import { PrismaService } from '../src/prisma/prisma.service';
+import { UserRole, PaymentStatus, PaymentType, InstallmentFrequency } from '../src/generated/prisma/client';
 import { FirebaseAdminProvider } from '../src/firebase/firebase-admin.provider';
 import { ThrottlerGuard } from '@nestjs/throttler';
 

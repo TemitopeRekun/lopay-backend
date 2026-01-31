@@ -5,7 +5,7 @@ import { ConfirmEnrollmentDto } from './dto/confirm.enrollment.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../common/decorators/user.decorator';
 import { Roles } from '../auth/roles.decorator';
-import { UserRole } from '../../generated/client/client';
+import { UserRole } from '../generated/prisma/client';
 
 import { CreateInstallmentDto } from './dto/create.installment.dto';
 

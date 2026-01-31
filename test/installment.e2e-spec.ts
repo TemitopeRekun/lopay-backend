@@ -3,7 +3,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
-import { UserRole, PaymentStatus, PaymentType } from '../generated/client/client';
+import { UserRole, PaymentStatus, PaymentType } from '../src/generated/prisma/client';
 import { FirebaseAdminProvider } from '../src/firebase/firebase-admin.provider';
 import { ThrottlerGuard } from '@nestjs/throttler';
 

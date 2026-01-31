@@ -4,7 +4,7 @@ import {
   PaymentReceiver,
   PaymentStatus,
   UserRole,
-} from '../../generated/client/client';
+} from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import * as admin from 'firebase-admin';

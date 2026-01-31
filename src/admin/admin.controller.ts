@@ -3,7 +3,7 @@ import { AdminService } from './admin.service';
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
-import { UserRole } from '../../generated/client/client';
+import { UserRole } from '../generated/prisma/client';
 import { CreateSchoolDto } from './dto/create.school.dto';
 
 @Controller('admin')

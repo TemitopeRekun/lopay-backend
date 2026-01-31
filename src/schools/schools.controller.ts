@@ -11,7 +11,7 @@ import { SchoolPaymentsService } from './schools.service';
 import { ConfirmPaymentDto } from './dto/confim.payment.dto';
 import { MarkDefaultedDto } from './dto/mark-defaulted.dto';
 import { Roles } from '../auth/roles.decorator';
-import { UserRole } from '../../generated/client/client';
+import { UserRole } from '../generated/prisma/client';
 import { CurrentUser } from '../common/decorators/user.decorator';
 
 import { CreateClassFeeDto } from './dto/create-class-fee.dto';

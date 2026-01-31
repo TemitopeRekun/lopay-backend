@@ -5,7 +5,7 @@ import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
 import { FirebaseAdminProvider } from '../src/firebase/firebase-admin.provider';
 import { ThrottlerGuard } from '@nestjs/throttler';
-import { UserRole } from '../generated/client/client';
+import { UserRole } from '../src/generated/prisma/client';
 
 describe('Notifications (e2e)', () => {
   let app: INestApplication;

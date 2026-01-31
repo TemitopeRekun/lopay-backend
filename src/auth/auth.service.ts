@@ -1,7 +1,7 @@
 import { Inject, Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
-import { UserRole } from '../../generated/client/client';
+import { UserRole } from '../generated/prisma/client';
 import { RegisterDto } from './dto/register.dto';
 
 @Injectable()

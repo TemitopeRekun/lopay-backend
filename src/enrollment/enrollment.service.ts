@@ -3,7 +3,7 @@ import {
   PaymentStatus,
   PaymentType,
   PaymentReceiver,
-} from '../../generated/client/client';
+} from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateEnrollmentDto } from './dto/create.enrollment.dto';
 import { PaymentService } from '../payments/payment.service';

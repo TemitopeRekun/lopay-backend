@@ -3,7 +3,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
-import { UserRole } from '../generated/client/client';
+import { UserRole } from '../src/generated/prisma/client';
 import { ThrottlerGuard } from '@nestjs/throttler';
 
 describe('Authentication & Authorization (e2e)', () => {

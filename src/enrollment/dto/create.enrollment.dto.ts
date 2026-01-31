@@ -1,4 +1,4 @@
-import { InstallmentFrequency } from '../../../generated/client/client';
+import { InstallmentFrequency } from '../../generated/prisma/client';
 import { IsString, IsNotEmpty, IsNumber, IsEnum, IsDate, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
