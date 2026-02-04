@@ -122,7 +122,9 @@ Here is every single route in the app, exactly what you need to send, and what y
     {
       "email": "newuser@example.com",
       "password": "secretpassword",
-      "confirmPassword": "secretpassword"
+      "confirmPassword": "secretpassword",
+      "fullName": "John Parent", // Required for parents
+      "phoneNumber": "08012345678" // Required for parents
     }
     ```
 *   **What you get back**:
@@ -163,6 +165,7 @@ Here is every single route in the app, exactly what you need to send, and what y
         "id": "payment-uuid-1",
         "amountPaid": 500,
         "studentName": "John Doe",
+        "receiptUrl": "https://firebase...", // The proof of payment image
         "date": "2023-10-01T10:00:00Z"
       },
       {
@@ -221,11 +224,13 @@ Here is every single route in the app, exactly what you need to send, and what y
 *   **What to send (Body)**:
     ```json
     {
-      "childId": "child-uuid",
+      "childId": "child-uuid", // Optional (if child already exists)
+      "childName": "Little Timmy", // Required if childId is missing (creates new child)
       "schoolId": "school-uuid",
       "className": "Grade 1",
       "installmentFrequency": "MONTHLY",
       "firstPaymentPaid": 500,
+      "receiptUrl": "https://firebase...", // Optional proof of payment
       "termStartDate": "2023-09-01T00:00:00Z",
       "termEndDate": "2023-12-01T00:00:00Z"
     }
@@ -239,7 +244,8 @@ Here is every single route in the app, exactly what you need to send, and what y
     ```json
     {
       "enrollmentId": "enrollment-uuid",
-      "amountPaid": 200
+      "amountPaid": 200,
+      "receiptUrl": "https://firebase..." // Optional
     }
     ```
 

@@ -1,11 +1,15 @@
 import { InstallmentFrequency } from '../../generated/prisma/client';
-import { IsString, IsNotEmpty, IsNumber, IsEnum, IsDate, Min } from 'class-validator';
+import { IsString, IsNotEmpty, IsNumber, IsEnum, IsDate, Min, IsOptional } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateEnrollmentDto {
   @IsString()
-  @IsNotEmpty()
-  childId: string;
+  @IsOptional()
+  childId?: string;
+
+  @IsString()
+  @IsOptional()
+  childName?: string;
 
   @IsString()
   @IsNotEmpty()
@@ -29,4 +33,8 @@ export class CreateEnrollmentDto {
   @Type(() => Date)
   @IsDate()
   termEndDate: Date;
+
+  @IsString()
+  @IsOptional()
+  receiptUrl?: string;
 }

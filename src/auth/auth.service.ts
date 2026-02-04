@@ -31,8 +31,15 @@ export class AuthService {
         data: {
           id: firebaseUser.uid, // Sync UID with Firebase
           email: dto.email,
+          fullName: dto.fullName, // Save full name
           password: 'firebase-auth-user', // Placeholder
           role: UserRole.PARENT, // Default role
+          // Automatically create Parent profile with phone number
+          parent: {
+            create: {
+              phoneNumber: dto.phoneNumber,
+            },
+          },
         },
       });
 

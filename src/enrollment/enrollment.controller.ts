@@ -26,8 +26,9 @@ export class EnrollmentController {
   }
 
   @Post()
-  enrollChild(@Body() dto: CreateEnrollmentDto) {
-    return this.enrollmentService.enrollChild(dto);
+  @Roles(UserRole.PARENT)
+  enrollChild(@Body() dto: CreateEnrollmentDto, @CurrentUser() user: any) {
+    return this.enrollmentService.enrollChild(dto, user.sub);
   }
 
   @Post('pay-installment')
@@ -36,6 +37,7 @@ export class EnrollmentController {
     return this.enrollmentService.submitInstallmentPayment(
       dto.enrollmentId,
       dto.amountPaid,
+      dto.receiptUrl,
     );
   }
 

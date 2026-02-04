@@ -1,4 +1,4 @@
-import { IsUUID, IsNumber, Min, IsNotEmpty } from 'class-validator';
+import { IsUUID, IsNumber, Min, IsNotEmpty, IsString, IsOptional } from 'class-validator';
 
 export class CreateInstallmentDto {
   @IsUUID()
@@ -8,4 +8,8 @@ export class CreateInstallmentDto {
   @IsNumber()
   @Min(1)
   amountPaid: number;
+
+  @IsString()
+  @IsOptional()
+  receiptUrl?: string;
 }

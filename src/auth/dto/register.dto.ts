@@ -13,4 +13,12 @@ export class RegisterDto {
   @IsString()
   @IsNotEmpty()
   confirmPassword: string;
+
+  @IsString()
+  @IsNotEmpty()
+  fullName: string;
+
+  @IsString()
+  @IsNotEmpty()
+  phoneNumber: string;
 }

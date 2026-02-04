@@ -1121,6 +1121,7 @@ export const UserScalarFieldEnum = {
   id: 'id',
   email: 'email',
   password: 'password',
+  fullName: 'fullName',
   role: 'role',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
@@ -1188,7 +1189,8 @@ export const PaymentScalarFieldEnum = {
   receiver: 'receiver',
   paymentType: 'paymentType',
   isConfirmed: 'isConfirmed',
-  paymentDate: 'paymentDate'
+  paymentDate: 'paymentDate',
+  receiptUrl: 'receiptUrl'
 } as const
 
 export type PaymentScalarFieldEnum = (typeof PaymentScalarFieldEnum)[keyof typeof PaymentScalarFieldEnum]

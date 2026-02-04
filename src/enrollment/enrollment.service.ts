@@ -122,8 +122,38 @@ export class EnrollmentService {
     });
   }
 
-  async enrollChild(dto: CreateEnrollmentDto) {
+  async enrollChild(dto: CreateEnrollmentDto, userId: string) {
     return this.prisma.$transaction(async (tx) => {
+      let childId = dto.childId;
+
+      // Handle new child creation
+      if (!childId) {
+        if (!dto.childName) {
+          throw new BadRequestException(
+            'Either childId or childName must be provided',
+          );
+        }
+
+        // Find Parent
+        const parent = await tx.parent.findUnique({
+          where: { userId },
+        });
+
+        if (!parent) {
+          throw new BadRequestException('Parent profile not found');
+        }
+
+        // Create Child
+        const newChild = await tx.child.create({
+          data: {
+            fullName: dto.childName,
+            parentId: parent.id,
+            className: dto.className,
+          },
+        });
+        childId = newChild.id;
+      }
+
       // 1️⃣ Fetch class fee
       const classFee = await tx.classFee.findFirst({
         where: {
@@ -157,7 +187,7 @@ export class EnrollmentService {
       // 3️⃣ Create enrollment (snapshot)
       const enrollment = await tx.childEnrollment.create({
         data: {
-          childId: dto.childId,
+          childId: childId, // Use resolved childId
           schoolId: dto.schoolId,
           className: dto.className,
 
@@ -189,6 +219,7 @@ export class EnrollmentService {
           paymentType: PaymentType.FIRST_PAYMENT,
           receiver: PaymentReceiver.PLATFORM,
           isConfirmed: false,
+          receiptUrl: dto.receiptUrl,
         },
       });
 
@@ -206,7 +237,11 @@ export class EnrollmentService {
     });
   }
 
-  async submitInstallmentPayment(enrollmentId: string, amountPaid: number) {
+  async submitInstallmentPayment(
+    enrollmentId: string,
+    amountPaid: number,
+    receiptUrl?: string,
+  ) {
     const enrollment = await this.prisma.childEnrollment.findUnique({
       where: { id: enrollmentId },
     });
@@ -244,6 +279,7 @@ export class EnrollmentService {
           paymentType: PaymentType.INSTALLMENT,
           receiver: PaymentReceiver.SCHOOL,
           isConfirmed: false,
+          receiptUrl: receiptUrl,
         },
       });
 
