@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Param, Get, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { AuthGuard } from '@nestjs/passport';
 import type {
@@ -11,6 +11,28 @@ import type {
 @UseGuards(AuthGuard('jwt'))
 export class PaymentsController {
   constructor(private readonly paymentService: PaymentService) {}
+
+  /** Calculate full payment structure (New) */
+  @Post('calculate-structure')
+  calculateStructure(
+    @Body() body: {
+      schoolId: string;
+      totalAmount?: number;
+      schoolFees?: number; // Support legacy field
+      feeType: string;
+      grade: string;
+    },
+  ) {
+    // Prefer totalAmount, fallback to schoolFees
+    const amount = body.totalAmount ?? body.schoolFees;
+    
+    if (amount === undefined || amount === null) {
+       throw new Error('Total amount is required');
+    }
+
+    // Ensure we pass a number, even if string was sent
+    return this.paymentService.calculatePaymentStructure(Number(amount));
+  }
 
   /** Calculate deposit and platform fee */
   @Post('calculate-deposit')

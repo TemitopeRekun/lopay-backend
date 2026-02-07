@@ -26,6 +26,18 @@ export class CreateSchoolDto {
   phone: string;
 
   @IsString()
+  @IsNotEmpty()
+  bankName: string;
+
+  @IsString()
+  @IsNotEmpty()
+  accountName: string;
+
+  @IsString()
+  @IsNotEmpty()
+  accountNumber: string;
+
+  @IsString()
   @IsOptional()
   logo?: string;
 }

@@ -1,8 +1,7 @@
-import { Controller, Post, Get, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param } from '@nestjs/common';
 import { EnrollmentService } from './enrollment.service';
 import { CreateEnrollmentDto } from './dto/create.enrollment.dto';
 import { ConfirmEnrollmentDto } from './dto/confirm.enrollment.dto';
-import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../common/decorators/user.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../generated/prisma/client';
@@ -16,19 +15,20 @@ export class EnrollmentController {
   @Get('my-children')
   @Roles(UserRole.PARENT)
   async getMyChildren(@CurrentUser() user: any) {
-    return this.enrollmentService.getParentEnrollments(user.sub);
+    console.log('EnrollmentController: getMyChildren for user:', user);
+    return this.enrollmentService.getParentEnrollments(user.userId);
   }
 
   @Get(':id/history')
   @Roles(UserRole.PARENT)
   async getEnrollmentHistory(@Param('id') id: string, @CurrentUser() user: any) {
-    return this.enrollmentService.getEnrollmentHistory(id, user.sub);
+    return this.enrollmentService.getEnrollmentHistory(id, user.userId);
   }
 
   @Post()
   @Roles(UserRole.PARENT)
   enrollChild(@Body() dto: CreateEnrollmentDto, @CurrentUser() user: any) {
-    return this.enrollmentService.enrollChild(dto, user.sub);
+    return this.enrollmentService.enrollChild(dto, user.userId);
   }
 
   @Post('pay-installment')

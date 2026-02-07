@@ -69,6 +69,16 @@ export class SchoolPaymentsController {
     return this.schoolPaymentsService.getClassFees(schoolId);
   }
 
+  /** ✅ Get School Payment History */
+  @Get('history')
+  @Roles(UserRole.SCHOOL_OWNER)
+  async getHistory(@CurrentUser() user: any) {
+    if (!user.schoolId) {
+      throw new ForbiddenException('User is not associated with any school');
+    }
+    return this.schoolPaymentsService.getHistory(user.schoolId);
+  }
+
   /** ✅ Get School Dashboard Stats */
   @Get('stats')
   @Roles(UserRole.SCHOOL_OWNER)

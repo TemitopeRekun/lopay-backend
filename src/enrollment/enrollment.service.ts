@@ -1,8 +1,13 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   PaymentStatus,
   PaymentType,
   PaymentReceiver,
+  UserRole,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateEnrollmentDto } from './dto/create.enrollment.dto';
@@ -17,25 +22,103 @@ export class EnrollmentService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  private calculateEnrichment(enrollment: any, payments: any[]) {
+    const confirmedPayments = payments.filter((p) => p.isConfirmed);
+    const paidAmount = confirmedPayments.reduce(
+      (sum, p) => sum + p.amountPaid,
+      0,
+    );
+
+    const totalSchoolFee = enrollment.totalSchoolFee;
+
+    let nextDueDate: Date | null = null;
+    let nextInstallmentAmount = 0;
+
+    if (enrollment.remainingBalance > 0) {
+      // Find last confirmed payment
+      const lastPayment = confirmedPayments[0]; // Assuming desc order
+
+      if (lastPayment) {
+        const lastDate = new Date(lastPayment.paymentDate);
+        if (enrollment.installmentFrequency === 'WEEKLY') {
+          lastDate.setDate(lastDate.getDate() + 7);
+        } else if (enrollment.installmentFrequency === 'MONTHLY') {
+          lastDate.setMonth(lastDate.getMonth() + 1);
+        }
+        nextDueDate = lastDate;
+
+      } else {
+        // If first payment pending, next due is now or creation date.
+        // If first payment paid (and no installments yet), use term start date?
+        nextDueDate = enrollment.termStartDate || enrollment.createdAt;
+      }
+
+      // Next installment amount
+      const plan = enrollment.installmentFrequency;
+      const totalInstallments = plan === 'WEEKLY' ? 12 : 3;
+      const paidInstallments = confirmedPayments.filter(
+        (p) => p.paymentType === PaymentType.INSTALLMENT,
+      ).length;
+      const remainingInstallments = totalInstallments - paidInstallments;
+
+      if (remainingInstallments > 0) {
+        nextInstallmentAmount =
+          enrollment.remainingBalance / remainingInstallments;
+      } else {
+        nextInstallmentAmount = enrollment.remainingBalance;
+      }
+    }
+
+    return {
+      ...enrollment,
+      totalFee: totalSchoolFee,
+      paidAmount,
+      nextDueDate,
+      nextInstallmentAmount,
+    };
+  }
+
   async getParentEnrollments(userId: string) {
-    return this.prisma.childEnrollment.findMany({
+    console.log(`EnrollmentService: Fetching enrollments for userId: ${userId}`);
+    
+    // Step 1: Find Parent
+    const parent = await this.prisma.parent.findUnique({
+      where: { userId },
+      include: { children: true }
+    });
+
+    if (!parent) {
+      console.log('EnrollmentService: Parent not found for userId:', userId);
+      return [];
+    }
+    console.log(`EnrollmentService: Parent found. ID: ${parent.id}. Children count: ${parent.children.length}`);
+
+    if (parent.children.length === 0) {
+      return [];
+    }
+
+    const childIds = parent.children.map(c => c.id);
+
+    // Step 2: Find Enrollments for these children
+    const enrollments = await this.prisma.childEnrollment.findMany({
       where: {
-        child: {
-          parent: {
-            userId: userId,
-          },
-        },
+        childId: { in: childIds }
       },
       include: {
         child: true,
         school: true,
         payments: {
           orderBy: { paymentDate: 'desc' },
-          take: 1, // Get the latest payment for context
         },
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    console.log(`EnrollmentService: Found ${enrollments.length} enrollments matching child IDs`);
+
+    return enrollments.map((enrollment) =>
+      this.calculateEnrichment(enrollment, enrollment.payments),
+    );
   }
 
   async getEnrollmentHistory(enrollmentId: string, userId: string) {
@@ -52,12 +135,182 @@ export class EnrollmentService {
       throw new BadRequestException('Enrollment not found');
     }
 
-    // Security check: ensure the user requesting this is the parent of the child
     if (enrollment.child.parent.userId !== userId) {
-      throw new BadRequestException('Unauthorized access to enrollment history');
+      throw new BadRequestException(
+        'Unauthorized access to enrollment history',
+      );
     }
 
-    return enrollment;
+    return this.calculateEnrichment(enrollment, enrollment.payments);
+  }
+
+  async enrollChild(dto: CreateEnrollmentDto, userId: string) {
+    // 1. Resolve Child
+    let childId = dto.childId;
+
+    // Check Parent exists
+    const parent = await this.prisma.parent.findUnique({ where: { userId } });
+    if (!parent) throw new BadRequestException('Parent profile not found');
+
+    if (childId) {
+      const child = await this.prisma.child.findUnique({
+        where: { id: childId },
+      });
+      if (!child || child.parentId !== parent.id) {
+        throw new BadRequestException(
+          'Child not found or does not belong to user',
+        );
+      }
+    } else if (dto.childName) {
+      const newChild = await this.prisma.child.create({
+        data: {
+          fullName: dto.childName,
+          parentId: parent.id,
+          className: dto.className,
+        },
+      });
+      childId = newChild.id;
+    } else {
+      throw new BadRequestException(
+        'Either childId or childName must be provided',
+      );
+    }
+
+    // 2. Get Fees
+    const classFee = await this.prisma.classFee.findFirst({
+      where: {
+        schoolId: dto.schoolId,
+        className: dto.className,
+        isActive: true,
+      },
+    });
+
+    if (!classFee) {
+      throw new BadRequestException(
+        `No fee configuration found for class ${dto.className} in this school`,
+      );
+    }
+
+    // 3. Calculate Deposit
+    const calculation = this.paymentService.calculateInitialPayment(
+      classFee.feeAmount,
+      dto.firstPaymentPaid,
+    );
+
+    // 4. Create Enrollment & Payment
+    const result = await this.prisma.$transaction(async (tx) => {
+      console.log(`EnrollmentService: Creating enrollment for childId: ${childId}, schoolId: ${dto.schoolId}`);
+      const enrollment = await tx.childEnrollment.create({
+        data: {
+          childId,
+          schoolId: dto.schoolId,
+          className: dto.className,
+          totalSchoolFee: calculation.schoolFees,
+          platformFee: calculation.platformFee,
+          schoolMinimumFee: calculation.minimumDeposit,
+          firstPaymentPaid: dto.firstPaymentPaid,
+          remainingBalance: calculation.remainingBalance,
+          paymentStatus: PaymentStatus.PENDING,
+          installmentFrequency: dto.installmentFrequency,
+          termStartDate: dto.termStartDate,
+          termEndDate: dto.termEndDate,
+        },
+      });
+
+      const payment = await tx.payment.create({
+        data: {
+          enrollmentId: enrollment.id,
+          schoolId: dto.schoolId,
+          amountPaid: dto.firstPaymentPaid,
+          platformAmount: calculation.platformFee,
+          schoolAmount: calculation.amountToSchool,
+          receiver: PaymentReceiver.PLATFORM,
+          paymentType: PaymentType.FIRST_PAYMENT,
+          isConfirmed: false,
+          receiptUrl: dto.receiptUrl,
+          paymentDate: new Date(),
+        },
+      });
+
+      const school = await tx.school.findUnique({
+        where: { id: dto.schoolId },
+      });
+
+      // Fetch child name for notification
+      const child = await tx.child.findUnique({
+        where: { id: childId },
+        select: { fullName: true }
+      });
+      const childName = child?.fullName || dto.childName || 'Student';
+
+      return { enrollment, payment, calculation, school, childName };
+    });
+
+    // 5. Notify School Owner (Post-Transaction)
+    if (result.school?.ownerId) {
+      await this.notificationsService.create({
+        userId: result.school.ownerId,
+        title: 'New Enrollment Initiated',
+        message: `New Student: ${result.childName} | Class: ${dto.className} | Amount Paid: ${dto.firstPaymentPaid} | Status: Pending Admin Transfer.`,
+        link: '/school/pending-payments',
+      });
+    }
+
+    // 6. Notify Super Admin (Platform)
+    const admins = await this.prisma.user.findMany({
+      where: { role: UserRole.SUPER_ADMIN },
+    });
+
+    for (const admin of admins) {
+      await this.notificationsService.create({
+        userId: admin.id,
+        title: 'New First Payment Received',
+        message: `Payment of ${dto.firstPaymentPaid} received for ${result.childName} at ${result.school?.name}. Please process 25% payout to school.`,
+        link: '/admin/payments',
+      });
+    }
+
+    return result;
+  }
+
+  async submitInstallmentPayment(
+    enrollmentId: string,
+    amountPaid: number,
+    receiptUrl?: string,
+  ) {
+    const enrollment = await this.prisma.childEnrollment.findUnique({
+      where: { id: enrollmentId },
+      include: { school: true, child: true },
+    });
+
+    if (!enrollment) throw new NotFoundException('Enrollment not found');
+
+    // Create Payment
+    const payment = await this.prisma.payment.create({
+      data: {
+        enrollmentId,
+        schoolId: enrollment.schoolId,
+        amountPaid,
+        platformAmount: 0, // Installments usually 100% to school?
+        schoolAmount: amountPaid,
+        receiver: PaymentReceiver.SCHOOL, // Installments go to school
+        paymentType: PaymentType.INSTALLMENT,
+        isConfirmed: false,
+        receiptUrl,
+        paymentDate: new Date(),
+      },
+    });
+
+    // Notify School Owner
+    if (enrollment.school.ownerId) {
+      await this.notificationsService.create({
+        userId: enrollment.school.ownerId,
+        title: 'New Installment Payment',
+        message: `New payment of ${amountPaid} for ${enrollment.child.fullName} (${enrollment.className}) at ${enrollment.school.name}.`,
+      });
+    }
+
+    return payment;
   }
 
   async confirmFirstPayment(enrollmentId: string, schoolId: string) {
@@ -65,7 +318,10 @@ export class EnrollmentService {
       // 1. Verify Enrollment
       const enrollment = await tx.childEnrollment.findUnique({
         where: { id: enrollmentId },
-        include: { child: { include: { parent: { include: { user: true } } } } },
+        include: {
+          child: { include: { parent: { include: { user: true } } } },
+          school: true,
+        },
       });
 
       if (!enrollment) {
@@ -98,208 +354,26 @@ export class EnrollmentService {
       // 3. Update Payment
       await tx.payment.update({
         where: { id: payment.id },
-        data: { isConfirmed: true },
+        data: {
+          isConfirmed: true,
+          paymentDate: new Date(),
+        },
       });
 
-      // 4. Update Enrollment Status
-      const updatedEnrollment = await tx.childEnrollment.update({
+      // 4. Activate Enrollment
+      await tx.childEnrollment.update({
         where: { id: enrollmentId },
         data: { paymentStatus: PaymentStatus.ACTIVE },
       });
 
       // 5. Notify Parent
-      const parentUserId = enrollment.child.parent.user.id;
-      await tx.notification.create({
-        data: {
-          userId: parentUserId,
-          title: 'Enrollment Confirmed',
-          message: `Your enrollment for ${enrollment.className} has been confirmed!`,
-          link: `/parent/enrollments/${enrollment.id}`,
-        },
+      await this.notificationsService.create({
+        userId: enrollment.child.parent.userId,
+        title: 'Enrollment Confirmed',
+        message: `Your enrollment for ${enrollment.child.fullName} (${enrollment.className}) at ${enrollment.school.name} has been confirmed.`,
       });
 
-      return updatedEnrollment;
-    });
-  }
-
-  async enrollChild(dto: CreateEnrollmentDto, userId: string) {
-    return this.prisma.$transaction(async (tx) => {
-      let childId = dto.childId;
-
-      // Handle new child creation
-      if (!childId) {
-        if (!dto.childName) {
-          throw new BadRequestException(
-            'Either childId or childName must be provided',
-          );
-        }
-
-        // Find Parent
-        const parent = await tx.parent.findUnique({
-          where: { userId },
-        });
-
-        if (!parent) {
-          throw new BadRequestException('Parent profile not found');
-        }
-
-        // Create Child
-        const newChild = await tx.child.create({
-          data: {
-            fullName: dto.childName,
-            parentId: parent.id,
-            className: dto.className,
-          },
-        });
-        childId = newChild.id;
-      }
-
-      // 1️⃣ Fetch class fee
-      const classFee = await tx.classFee.findFirst({
-        where: {
-          schoolId: dto.schoolId,
-          className: dto.className,
-          isActive: true,
-        },
-      });
-
-      const school = await tx.school.findUnique({
-        where: { id: dto.schoolId },
-        select: { ownerId: true },
-      });
-
-      if (!school) {
-        throw new BadRequestException('School not found');
-      }
-
-      if (!classFee) {
-        throw new BadRequestException('Invalid or inactive class selected');
-      }
-
-      const schoolFees = classFee.feeAmount;
-
-      // 2️⃣ Calculate deposit & validate
-      const depositResult = this.paymentService.calculateInitialPayment(
-        schoolFees,
-        dto.firstPaymentPaid,
-      );
-
-      // 3️⃣ Create enrollment (snapshot)
-      const enrollment = await tx.childEnrollment.create({
-        data: {
-          childId: childId, // Use resolved childId
-          schoolId: dto.schoolId,
-          className: dto.className,
-
-          totalSchoolFee: schoolFees,
-          platformFee: Math.floor(depositResult.platformFee),
-          schoolMinimumFee: Math.floor(schoolFees * 0.25),
-
-          firstPaymentPaid: dto.firstPaymentPaid,
-          remainingBalance: depositResult.remainingBalance,
-
-          paymentStatus: PaymentStatus.PENDING,
-
-          installmentFrequency: dto.installmentFrequency,
-          termStartDate: dto.termStartDate,
-          termEndDate: dto.termEndDate,
-        },
-      });
-
-      // 4️⃣ Create FIRST payment record
-      await tx.payment.create({
-        data: {
-          enrollmentId: enrollment.id,
-          schoolId: dto.schoolId,
-
-          amountPaid: dto.firstPaymentPaid,
-          platformAmount: Math.floor(depositResult.platformFee),
-          schoolAmount: Math.floor(depositResult.amountToSchool),
-
-          paymentType: PaymentType.FIRST_PAYMENT,
-          receiver: PaymentReceiver.PLATFORM,
-          isConfirmed: false,
-          receiptUrl: dto.receiptUrl,
-        },
-      });
-
-      // Use tx to ensure notification is only created if enrollment succeeds
-      await tx.notification.create({
-        data: {
-          userId: school.ownerId,
-          title: 'New Enrollment Payment',
-          message: `A parent made a first payment of ₦${dto.firstPaymentPaid}. Awaiting confirmation.`,
-          link: `/school/enrollments/${enrollment.id}`,
-        },
-      });
-
-      return enrollment;
-    });
-  }
-
-  async submitInstallmentPayment(
-    enrollmentId: string,
-    amountPaid: number,
-    receiptUrl?: string,
-  ) {
-    const enrollment = await this.prisma.childEnrollment.findUnique({
-      where: { id: enrollmentId },
-    });
-
-    if (!enrollment) {
-      throw new BadRequestException('Enrollment not found');
-    }
-
-    const school = await this.prisma.school.findUnique({
-      where: { id: enrollment.schoolId },
-      select: { ownerId: true },
-    });
-
-    if (!school) {
-      throw new BadRequestException('School not found');
-    }
-
-    if (enrollment.paymentStatus === PaymentStatus.COMPLETED) {
-      throw new BadRequestException('Enrollment already completed');
-    }
-
-    if (amountPaid > enrollment.remainingBalance) {
-      throw new BadRequestException('Amount exceeds remaining balance');
-    }
-
-    return this.prisma.$transaction(async (tx) => {
-      // 1️⃣ Create unconfirmed payment
-      await tx.payment.create({
-        data: {
-          enrollmentId: enrollment.id,
-          schoolId: enrollment.schoolId,
-          amountPaid,
-          platformAmount: 0,
-          schoolAmount: amountPaid,
-          paymentType: PaymentType.INSTALLMENT,
-          receiver: PaymentReceiver.SCHOOL,
-          isConfirmed: false,
-          receiptUrl: receiptUrl,
-        },
-      });
-
-      // 2️⃣ Lock enrollment while pending confirmation
-      await tx.childEnrollment.update({
-        where: { id: enrollment.id },
-        data: {
-          paymentStatus: PaymentStatus.PENDING,
-        },
-      });
-
-      // 3️⃣ Notify School Owner (Scoped to transaction)
-      await tx.notification.create({
-        data: {
-          userId: school.ownerId,
-          title: 'Installment Payment Submitted',
-          message: `An installment payment of ₦${amountPaid} has been submitted and needs confirmation.`,
-          link: `/school/payments`,
-        },
-      });
+      return { message: 'First payment confirmed and enrollment activated' };
     });
   }
 }

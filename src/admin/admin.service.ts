@@ -23,16 +23,21 @@ export class AdminService {
     // 1. Create Firebase User
     let firebaseUser;
     try {
+      console.log(`Attempting to create Firebase user: ${dto.ownerEmail}`);
       firebaseUser = await this.firebaseAdmin.auth().createUser({
         email: dto.ownerEmail,
         password: dto.ownerPassword,
         displayName: dto.ownerName,
       });
+      console.log(`Firebase user created: ${firebaseUser.uid}`);
     } catch (error) {
+      console.error('Firebase creation error:', error);
       if (error.code === 'auth/email-already-exists') {
         // If user exists in Firebase, check if they exist in our DB
         try {
+            console.log('User exists in Firebase, retrieving...');
             firebaseUser = await this.firebaseAdmin.auth().getUserByEmail(dto.ownerEmail);
+            console.log(`Retrieved existing Firebase user: ${firebaseUser.uid}`);
         } catch (retrieveError: any) {
             throw new BadRequestException(`User exists in Firebase but could not be retrieved: ${retrieveError.message}`);
         }
@@ -69,10 +74,10 @@ export class AdminService {
           email: dto.ownerEmail, // School email defaults to owner email
           address: dto.address,
           phone: dto.phone,
-          // Default bank details until updated by school owner
-          bankName: '',
-          accountName: '',
-          accountNumber: '',
+          // Bank details provided during onboarding
+          bankName: dto.bankName,
+          accountName: dto.accountName,
+          accountNumber: dto.accountNumber,
           ownerId: user.id,
         },
       });

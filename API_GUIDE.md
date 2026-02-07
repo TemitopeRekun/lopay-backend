@@ -73,7 +73,15 @@ Here are the exact steps to build the main pages of the app.
 2.  **Get Kids**: `GET /enrollments/my-children`
     *   *What you get:* List of children, their class, and if they owe money.
 
-### 💰 Recipe C: Confirming a Payment (School Owner)
+### 🏫 Recipe C: The School List (For Parents)
+
+**Goal:** Parents pick a school from a dropdown list.
+
+1.  **Get Schools**: `GET /schools`
+    *   *Auth:* **Public** (No token needed)
+    *   *What you get:* A list of all registered schools (ID, Name, Address).
+
+### 💰 Recipe D: Confirming a Payment (School Owner)
 
 **Goal:** A parent paid cash, and the owner wants to mark it as "Received".
 
@@ -92,6 +100,26 @@ Here are the exact steps to build the main pages of the app.
 Here is every single route in the app, exactly what you need to send, and what you will get back.
 
 ### 🔑 Authentication
+
+#### 0. Global Transaction History
+*   **Method**: `GET`
+*   **URL**: `/transactions`
+*   **Header**: `Authorization: Bearer <token>`
+*   **What you get back**:
+    ```json
+    [
+      {
+        "id": "payment-uuid",
+        "amountPaid": 5000,
+        "paymentDate": "2023-10-01T12:00:00Z",
+        "status": "success",
+        "type": "INSTALLMENT",
+        "studentName": "John Doe",
+        "className": "Grade 1",
+        "schoolName": "Springfield Elementary"
+      }
+    ]
+    ```
 
 #### 1. Login
 *   **Method**: `POST`
@@ -136,11 +164,58 @@ Here is every single route in the app, exactly what you need to send, and what y
     }
     ```
 
+#### 3. Super Admin: Onboard School
+*   **Method**: `POST`
+*   **URL**: `/admin/onboard-school`
+*   **Header**: `Authorization: Bearer <token>` (Must be Super Admin)
+*   **What to send (Body)**:
+    ```json
+    {
+      "schoolName": "Springfield Elementary",
+      "ownerEmail": "school@owner.com",
+      "ownerPassword": "securepassword",
+      "ownerName": "Principal Skinner",
+      "address": "123 School Lane",
+      "phone": "08012345678",
+      "bankName": "Springfield Bank",
+      "accountName": "Springfield Elementary School",
+      "accountNumber": "1234567890"
+    }
+    ```
+*   **What you get back**:
+    ```json
+    {
+      "user": { "id": "...", "email": "...", "role": "SCHOOL_OWNER" },
+      "school": { "id": "...", "name": "..." }
+    }
+    ```
+
 ---
 
 ### 🏫 School Owner Actions
 
-#### 3. Get Dashboard Stats
+#### 4. Manage Class Fees
+*   **Method**: `POST`
+*   **URL**: `/school-payments/fees`
+*   **Header**: `Authorization: Bearer <token>`
+*   **What to send (Body)**:
+    ```json
+    {
+      "className": "Grade 1",
+      "feeAmount": 50000
+    }
+    ```
+*   **What you get back**:
+    ```json
+    {
+      "id": "fee-uuid",
+      "className": "Grade 1",
+      "feeAmount": 50000,
+      "schoolId": "..."
+    }
+    ```
+
+#### 5. Get Dashboard Stats
 *   **Method**: `GET`
 *   **URL**: `/school-payments/stats`
 *   **Header**: `Authorization: Bearer <token>`
@@ -154,7 +229,7 @@ Here is every single route in the app, exactly what you need to send, and what y
     }
     ```
 
-#### 4. Get Pending Payments
+#### 6. Get Pending Payments
 *   **Method**: `GET`
 *   **URL**: `/school-payments/pending`
 *   **Header**: `Authorization: Bearer <token>`
@@ -165,19 +240,38 @@ Here is every single route in the app, exactly what you need to send, and what y
         "id": "payment-uuid-1",
         "amountPaid": 500,
         "studentName": "John Doe",
+        "className": "Grade 1",
+        "schoolName": "Springfield Elementary",
         "receiptUrl": "https://firebase...", // The proof of payment image
-        "date": "2023-10-01T10:00:00Z"
-      },
-      {
-        "id": "payment-uuid-2",
-        "amountPaid": 300,
-        "studentName": "Jane Smith",
-        "date": "2023-10-02T11:00:00Z"
+        "paymentDate": "2023-10-01T10:00:00Z"
       }
     ]
     ```
 
-#### 5. Confirm a Payment
+#### 7. Get All Students (Search & Filter)
+*   **Method**: `GET`
+*   **URL**: `/school-payments/students`
+*   **Header**: `Authorization: Bearer <token>`
+*   **Query Params**:
+    *   `?className=Grade 1` (Optional: Filter by class)
+    *   `?search=John` (Optional: Search by student name, parent email, or phone)
+*   **What you get back**:
+    ```json
+    [
+      {
+        "id": "enrollment-uuid",
+        "childName": "John Doe",
+        "className": "Grade 1",
+        "parentName": "Jane Doe",
+        "parentEmail": "jane@example.com",
+        "parentPhone": "08012345678",
+        "remainingBalance": 50000,
+        "status": "ACTIVE"
+      }
+    ]
+    ```
+
+#### 8. Confirm a Payment
 *   **Method**: `POST`
 *   **URL**: `/school-payments/confirm`
 *   **Header**: `Authorization: Bearer <token>`
@@ -199,7 +293,38 @@ Here is every single route in the app, exactly what you need to send, and what y
 
 ### 👨‍👩‍👧 Parent Actions
 
-#### 6. Get My Children
+#### 8. Get All Schools (For Dropdown)
+*   **Method**: `GET`
+*   **URL**: `/schools`
+*   **Header**: `None` (Public Endpoint)
+*   **Query**: `?search=Name` (Optional)
+*   **What you get back**:
+    ```json
+    [
+      {
+        "id": "school-uuid",
+        "name": "Springfield Elementary",
+        "email": "school@example.com",
+        "address": "123 Lane",
+        "phone": "080..."
+      }
+    ]
+    ```
+
+#### 9. Get School Fees (Public/Read-Only)
+*   **Method**: `GET`
+*   **URL**: `/school-payments/fees/:schoolId`
+*   **What you get back**:
+    ```json
+    [
+      {
+        "className": "Grade 1",
+        "feeAmount": 50000
+      }
+    ]
+    ```
+
+#### 11. Get My Children
 *   **Method**: `GET`
 *   **URL**: `/enrollments/my-children`
 *   **Header**: `Authorization: Bearer <token>`
@@ -208,35 +333,96 @@ Here is every single route in the app, exactly what you need to send, and what y
     [
       {
         "id": "enrollment-uuid",
+        "childId": "child-uuid",
         "childName": "Little Timmy",
         "schoolName": "Springfield Elementary",
+        "schoolId": "school-uuid",
         "className": "Grade 1",
         "remainingBalance": 1500,
-        "paymentStatus": "ACTIVE"
+        "paymentStatus": "ACTIVE",
+        "nextPaymentDue": "2023-11-01",
+        "payments": []
       }
     ]
     ```
 
-#### 7. Enroll a Child
+#### 12. Enroll a Child
 *   **Method**: `POST`
 *   **URL**: `/enrollments`
 *   **Header**: `Authorization: Bearer <token>`
 *   **What to send (Body)**:
     ```json
     {
-      "childId": "child-uuid", // Optional (if child already exists)
-      "childName": "Little Timmy", // Required if childId is missing (creates new child)
+      "childId": "uuid-string", // Optional: If enrolling existing child
+      "childName": "Little Timmy", // Optional: If creating new child
       "schoolId": "school-uuid",
-      "className": "Grade 1",
-      "installmentFrequency": "MONTHLY",
-      "firstPaymentPaid": 500,
-      "receiptUrl": "https://firebase...", // Optional proof of payment
+      "className": "JSS1",
+      "installmentFrequency": "MONTHLY", // or "WEEKLY" (Case-insensitive)
+      "firstPaymentPaid": 41250, // Should match totalInitialPayment from calculation
       "termStartDate": "2023-09-01T00:00:00Z",
-      "termEndDate": "2023-12-01T00:00:00Z"
+      "termEndDate": "2023-12-01T00:00:00Z",
+      "receiptUrl": "https://firebase..." // Optional
+    }
+    ```
+*   **What you get back**:
+    ```json
+    {
+      "enrollment": { ... },
+      "payment": { ... },
+      "calculation": { ... },
+      "school": {
+         "id": "...",
+         "name": "Springfield Elementary",
+         "bankName": "...",
+         "accountNumber": "..."
+      }
     }
     ```
 
-#### 8. Pay an Installment
+#### 13. Calculate Payment Structure (New)
+*   **Method**: `POST`
+*   **URL**: `/payment/calculate-structure`
+*   **Header**: `Authorization: Bearer <token>`
+*   **What to send (Body)**:
+    ```json
+    {
+      "schoolId": "uuid-string",
+      "totalAmount": 150000,
+      "feeType": "Semester",
+      "grade": "JSS1"
+    }
+    ```
+*   **What you get back**:
+    ```json
+    {
+      "originalAmount": 150000,
+      "platformFeeAmount": 3750,
+      "totalPayable": 153750,
+      "depositAmount": 37500,
+      "totalInitialPayment": 41250,
+      "depositPercentage": 0.25,
+      "remainingBalance": 112500,
+      "platformFeePercentage": 0.025,
+      "plans": [
+        {
+          "type": "Weekly",
+          "frequencyLabel": "/ week",
+          "numberOfPayments": 12,
+          "baseAmount": 9375,
+          "totalAmount": 9375
+        },
+        {
+          "type": "Monthly",
+          "frequencyLabel": "/ month",
+          "numberOfPayments": 3,
+          "baseAmount": 37500,
+          "totalAmount": 37500
+        }
+      ]
+    }
+    ```
+
+#### 14. Pay an Installment
 *   **Method**: `POST`
 *   **URL**: `/enrollments/pay-installment`
 *   **Header**: `Authorization: Bearer <token>`
@@ -246,6 +432,38 @@ Here is every single route in the app, exactly what you need to send, and what y
       "enrollmentId": "enrollment-uuid",
       "amountPaid": 200,
       "receiptUrl": "https://firebase..." // Optional
+    }
+    ```
+
+### 🔔 Notifications
+
+#### 15. Get My Notifications
+*   **Method**: `GET`
+*   **URL**: `/notifications`
+*   **Header**: `Authorization: Bearer <token>`
+*   **What you get back (Array)**:
+    ```json
+    [
+      {
+        "id": "notification-uuid",
+        "title": "Payment Confirmed",
+        "message": "Your payment of 5000 for Little Timmy (Grade 1) at Springfield Elementary has been confirmed.",
+        "link": "/school/pending-payments",
+        "isRead": false,
+        "createdAt": "2023-10-01T12:00:00Z"
+      }
+    ]
+    ```
+
+#### 16. Mark Notification as Read
+*   **Method**: `PATCH`
+*   **URL**: `/notifications/:id/read`
+*   **Header**: `Authorization: Bearer <token>`
+*   **What you get back**:
+    ```json
+    {
+      "id": "notification-uuid",
+      "isRead": true
     }
     ```
 

@@ -1,6 +1,8 @@
 // src/services/payment.service.ts
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { UserRole } from '../generated/prisma/client';
 
 export type InstallmentPlan = 'WEEKLY' | 'MONTHLY';
 export type ChildPaymentStatus = 'PENDING' | 'ACTIVE' | 'COMPLETED' | 'DEFAULTED';
@@ -21,45 +23,122 @@ export type InstallmentCalculationResult = {
   plan: InstallmentPlan;
 };
 
+export type PaymentPlan = {
+  type: 'Weekly' | 'Monthly';
+  frequencyLabel: string;
+  numberOfPayments: number;
+  baseAmount: number;
+  totalAmount: number;
+};
+
+export type PaymentStructureResult = {
+  originalAmount: number;
+  platformFeeAmount: number;
+  totalPayable: number; // originalAmount + platformFeeAmount
+  depositAmount: number;
+  totalInitialPayment: number; // deposit + platformFee
+  depositPercentage: number;
+  remainingBalance: number;
+  platformFeePercentage: number;
+  plans: PaymentPlan[];
+};
+
 @Injectable()
 export class PaymentService {
+  constructor(private readonly prisma: PrismaService) {}
 
-  /** Calculate initial deposit and platform fee */
- calculateInitialPayment(schoolFees: number, depositPaid: number): DepositCalculationResult {
-  if (schoolFees <= 0) throw new Error("Invalid school fees");
+  /** Calculate comprehensive payment structure */
+  calculatePaymentStructure(totalAmount: number): PaymentStructureResult {
+    // Strict validation to prevent NaN/undefined bypassing the check
+// src/services/payment.service.ts
+    if (!totalAmount || Number.isNaN(totalAmount) || totalAmount <= 0) {
+      throw new BadRequestException('Invalid total amount. Please provide a valid positive number.');
+    }
 
-  const PLATFORM_FEE_PERCENT = 0.025;
-  const SCHOOL_FIRST_PAYMENT_PERCENT = 0.25;
+    const DEPOSIT_PERCENTAGE = 0.25;
+    const PLATFORM_FEE_PERCENTAGE = 0.025; // 2.5%
 
-  const platformFee = schoolFees * PLATFORM_FEE_PERCENT; // 2.5%
-  const schoolShare = schoolFees * SCHOOL_FIRST_PAYMENT_PERCENT; // 25%
+    const depositAmount = totalAmount * DEPOSIT_PERCENTAGE;
+    
+    // Calculate fees and totals exactly as requested
+    const platformFeeAmount = totalAmount * PLATFORM_FEE_PERCENTAGE;
+    const totalPayable = totalAmount + platformFeeAmount;
+    const totalInitialPayment = depositAmount + platformFeeAmount;
+    
+    // Remaining balance = Total Payable - Total Initial Payment
+    const remainingBalance = totalPayable - totalInitialPayment;
 
-  // Minimum payment includes both school first payment + platform fee
-  const minimumDeposit = schoolShare + platformFee;
+    // Helper to create plan
+    const createPlan = (type: 'Weekly' | 'Monthly', label: string, count: number): PaymentPlan => {
+      const baseAmount = remainingBalance / count;
+      // Service fee is 0 for installments (already paid upfront)
+      return {
+        type,
+        frequencyLabel: label,
+        numberOfPayments: count,
+        baseAmount: Number(baseAmount.toFixed(2)),
+        totalAmount: Number(baseAmount.toFixed(2)),
+      };
+    };
 
-  if (depositPaid < minimumDeposit) {
-    throw new Error(
-      `Deposit is below minimum required. Minimum first payment: ₦${minimumDeposit.toFixed(2)}`
-    );
+    return {
+      originalAmount: totalAmount,
+      platformFeeAmount: Number(platformFeeAmount.toFixed(2)),
+      totalPayable: Number(totalPayable.toFixed(2)),
+      depositAmount: Number(depositAmount.toFixed(2)),
+      totalInitialPayment: Number(totalInitialPayment.toFixed(2)),
+      depositPercentage: DEPOSIT_PERCENTAGE,
+      remainingBalance: Number(remainingBalance.toFixed(2)),
+      platformFeePercentage: PLATFORM_FEE_PERCENTAGE,
+      plans: [
+        createPlan('Weekly', '/ week', 12),
+        createPlan('Monthly', '/ month', 3),
+      ],
+    };
   }
 
-  const amountToSchool = depositPaid - platformFee; // School gets remaining after platform fee
-  const remainingBalance = schoolFees - depositPaid; // balance for installment
+  /** Calculate initial deposit and platform fee */
+  calculateInitialPayment(schoolFees: number, depositPaid: number): DepositCalculationResult {
+    if (schoolFees <= 0) throw new BadRequestException("Invalid school fees");
 
-  return {
-    schoolFees,
-    platformFee,
-    minimumDeposit,
-    depositPaid,
-    amountToSchool,
-    remainingBalance,
-  };
-}
+    const PLATFORM_FEE_PERCENT = 0.025;
+    const SCHOOL_FIRST_PAYMENT_PERCENT = 0.25;
+
+    const platformFee = schoolFees * PLATFORM_FEE_PERCENT; // 2.5%
+    const schoolShare = schoolFees * SCHOOL_FIRST_PAYMENT_PERCENT; // 25%
+
+    // Minimum payment includes both school first payment + platform fee
+    const minimumDeposit = schoolShare + platformFee;
+
+    if (depositPaid < minimumDeposit) {
+      // Allow for small floating point differences (e.g. 0.01)
+      if (Math.abs(depositPaid - minimumDeposit) > 0.1) {
+         throw new BadRequestException(
+          `Deposit is below minimum required. Minimum first payment: ₦${minimumDeposit.toFixed(2)}`
+        );
+      }
+    }
+
+    // IMPORTANT: The platform fee is deducted first. The rest goes to the school.
+    const amountToSchool = depositPaid - platformFee; 
+    
+    // Remaining Balance is School Fees - Amount paid TO SCHOOL (excluding platform fee)
+    const remainingBalance = schoolFees - amountToSchool;
+
+    return {
+      schoolFees,
+      platformFee,
+      minimumDeposit,
+      depositPaid,
+      amountToSchool,
+      remainingBalance,
+    };
+  }
 
 
   /** Calculate installment amounts based on remaining balance */
   calculateInstallments(remainingBalance: number, plan: InstallmentPlan): InstallmentCalculationResult {
-    if (remainingBalance <= 0) throw new Error("No balance to calculate installments");
+    if (remainingBalance <= 0) throw new BadRequestException("No balance to calculate installments");
 
     let numberOfInstallments: number;
 
@@ -71,7 +150,7 @@ export class PaymentService {
         numberOfInstallments = 3; // 3 months
         break;
       default:
-        throw new Error("Invalid installment plan");
+        throw new BadRequestException("Invalid installment plan");
     }
 
     const installmentAmount = remainingBalance / numberOfInstallments;
@@ -86,8 +165,16 @@ export class PaymentService {
 
   /** Update remaining balance after each installment */
   updateRemainingBalance(schoolFees: number, depositPaid: number, installmentsPaid: number): number {
-    const totalPaid = depositPaid + installmentsPaid;
-    const remainingBalance = schoolFees - totalPaid;
+    // We assume depositPaid INCLUDES the platform fee.
+    // We must deduct the platform fee to find what was actually paid towards the school fees.
+    const platformFee = schoolFees * 0.025; 
+    
+    // Check if deposit was enough to cover platform fee (it should be, based on validation)
+    const effectiveDepositToSchool = Math.max(0, depositPaid - platformFee);
+    
+    const totalPaidToSchool = effectiveDepositToSchool + installmentsPaid;
+    const remainingBalance = schoolFees - totalPaidToSchool;
+    
     return Math.max(remainingBalance, 0);
   }
 
@@ -99,26 +186,58 @@ export class PaymentService {
     remainingBalance: number,
     isOverdue: boolean
   ): ChildPaymentStatus {
+      if (currentStatus === 'DEFAULTED') return 'DEFAULTED';
+      if (remainingBalance <= 0) return 'COMPLETED';
+      if (isOverdue) return 'DEFAULTED';
+      if (depositConfirmedBySchool) return 'ACTIVE';
+      return 'PENDING';
+  }
 
-    switch (currentStatus) {
-      case 'PENDING':
-        if (depositConfirmedBySchool) return 'ACTIVE';
-        return 'PENDING';
+  async getHistory(userId: string, role: UserRole, schoolId?: string) {
+    let whereClause: any = {};
 
-      case 'ACTIVE':
-        if (remainingBalance <= 0) return 'COMPLETED';
-        if (isOverdue) return 'DEFAULTED';
-        return 'ACTIVE';
-
-      case 'COMPLETED':
-        return 'COMPLETED';
-
-      case 'DEFAULTED':
-        if (remainingBalance <= 0) return 'COMPLETED';
-        return 'DEFAULTED';
-
-      default:
-        throw new Error('Unknown current status');
+    if (role === UserRole.PARENT) {
+      whereClause = {
+        enrollment: {
+          child: {
+            parent: {
+              userId: userId,
+            },
+          },
+        },
+      };
+    } else if (role === UserRole.SCHOOL_OWNER) {
+      if (!schoolId) {
+        throw new Error('School ID is required for school owners');
+      }
+      whereClause = {
+        schoolId: schoolId,
+      };
+    } else if (role === UserRole.SUPER_ADMIN) {
+      // Super Admin sees all? or no filter?
+      // Assuming empty filter for now
+      whereClause = {};
     }
+
+    const payments = await this.prisma.payment.findMany({
+      where: whereClause,
+      include: {
+        enrollment: {
+          include: {
+            child: true,
+            school: true,
+          },
+        },
+      },
+      orderBy: { paymentDate: 'desc' },
+    });
+
+    return payments.map(p => ({
+      ...p,
+      status: p.isConfirmed ? 'success' : 'pending',
+      studentName: p.enrollment?.child?.fullName,
+      className: p.enrollment?.className,
+      schoolName: p.enrollment?.school?.name,
+    }));
   }
 }

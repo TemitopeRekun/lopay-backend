@@ -1,14 +1,132 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Inject, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { PaymentStatus } from '../generated/prisma/client';
+import { PaymentStatus, UserRole } from '../generated/prisma/client';
+import * as admin from 'firebase-admin';
+import { CreateSchoolDto } from '../admin/dto/create.school.dto';
+import { UpdateSchoolDto } from './dto/update.school.dto';
 
 @Injectable()
 export class SchoolPaymentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    @Inject('FIREBASE_ADMIN') private readonly firebaseAdmin: admin.app.App,
   ) {}
+
+  async createSchool(dto: CreateSchoolDto) {
+    // 1. Create Firebase User
+    let firebaseUser;
+    try {
+      firebaseUser = await this.firebaseAdmin.auth().createUser({
+        email: dto.ownerEmail,
+        password: dto.ownerPassword,
+        displayName: dto.ownerName,
+      });
+    } catch (error) {
+      if (error.code === 'auth/email-already-exists') {
+        try {
+          firebaseUser = await this.firebaseAdmin.auth().getUserByEmail(dto.ownerEmail);
+        } catch (retrieveError: any) {
+          throw new BadRequestException(`User exists in Firebase but could not be retrieved: ${retrieveError.message}`);
+        }
+      } else {
+        throw new BadRequestException(`Firebase Error: ${error.message}`);
+      }
+    }
+
+    const existingUser = await this.prisma.user.findUnique({ where: { email: dto.ownerEmail } });
+    if (existingUser) {
+      throw new BadRequestException('User with this email already exists in the database');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // 2. Create User record
+      const user = await tx.user.create({
+        data: {
+          id: firebaseUser.uid,
+          email: dto.ownerEmail,
+          password: 'HASHED_PASSWORD_PLACEHOLDER', 
+          role: UserRole.SCHOOL_OWNER,
+          fullName: dto.ownerName,
+        },
+      });
+
+      // 3. Create School record
+      const school = await tx.school.create({
+        data: {
+          name: dto.schoolName,
+          email: dto.ownerEmail,
+          address: dto.address,
+          phone: dto.phone,
+          bankName: '',
+          accountName: '',
+          accountNumber: '',
+          ownerId: user.id,
+          // logo: dto.logo, // School model might not have logo yet, checking schema... DTO has it.
+        },
+      });
+
+      return {
+        school,
+        user,
+        message: 'School and School Owner created successfully',
+      };
+    });
+  }
+
+  async updateSchool(id: string, dto: UpdateSchoolDto) {
+    const school = await this.prisma.school.findUnique({ where: { id } });
+    if (!school) throw new NotFoundException('School not found');
+
+    return this.prisma.school.update({
+      where: { id },
+      data: {
+        name: dto.schoolName,
+        address: dto.address,
+        phone: dto.phone,
+        bankName: dto.bankName,
+        accountName: dto.accountName,
+        accountNumber: dto.accountNumber,
+      },
+    });
+  }
+
+  async deleteSchool(id: string) {
+    const school = await this.prisma.school.findUnique({ where: { id } });
+    if (!school) throw new NotFoundException('School not found');
+
+    // Might need to delete associated data or handle constraints
+    // For MVP, just delete school (and cascading deletes if configured in Prisma)
+    return this.prisma.school.delete({
+      where: { id },
+    });
+  }
+
+  async getAllSchools(search?: string) {
+    console.log(`getAllSchools called with search: "${search}"`);
+    const where: any = {};
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const schools = await this.prisma.school.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        address: true,
+        phone: true,
+      },
+      orderBy: { name: 'asc' },
+    });
+    console.log(`getAllSchools found ${schools.length} schools`);
+    return schools;
+  }
 
   async createClassFee(schoolId: string, className: string, feeAmount: number) {
     // Check if fee already exists for this class
@@ -98,136 +216,170 @@ export class SchoolPaymentsService {
 
     if (search) {
       whereClause.OR = [
-        // Search by Child Name
         { child: { fullName: { contains: search, mode: 'insensitive' } } },
-        // Search by Parent Email
-        { child: { parent: { user: { email: { contains: search, mode: 'insensitive' } } } } },
-        // Search by Parent Phone
-        { child: { parent: { phoneNumber: { contains: search, mode: 'insensitive' } } } },
+        { child: { parent: { user: { fullName: { contains: search, mode: 'insensitive' } } } } },
       ];
     }
+    
+    const enrollments = await this.prisma.childEnrollment.findMany({
+        where: whereClause,
+        include: {
+            child: { include: { parent: { include: { user: true } } } },
+            payments: { orderBy: { paymentDate: 'desc' } } // Fetch all payments to calculate paid amount
+        }
+    });
 
-    return this.prisma.childEnrollment.findMany({
-      where: whereClause,
-      include: {
-        child: { include: { parent: { include: { user: true } } } },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
+    return enrollments.map(enrollment => {
+      const confirmedPayments = enrollment.payments.filter(p => p.isConfirmed);
+      const paidAmount = confirmedPayments.reduce((sum, p) => sum + p.amountPaid, 0);
+      
+      // Calculate next due date (simplified logic)
+      let nextDueDate: Date | null = null;
+      if (enrollment.remainingBalance > 0 && confirmedPayments.length > 0) {
+          const lastPayment = confirmedPayments[0];
+          const lastDate = new Date(lastPayment.paymentDate);
+          if (enrollment.installmentFrequency === 'WEEKLY') {
+             lastDate.setDate(lastDate.getDate() + 7);
+          } else {
+             lastDate.setMonth(lastDate.getMonth() + 1);
+          }
+          nextDueDate = lastDate;
+      } else if (enrollment.remainingBalance > 0) {
+          // If no payments yet, due date is start date
+          nextDueDate = enrollment.termStartDate;
+      }
+
+      return {
+        id: enrollment.childId, // Use childId as student ID
+        studentName: enrollment.child.fullName,
+        className: enrollment.className,
+        parentName: enrollment.child.parent.user.fullName || 'Unknown',
+        totalFee: enrollment.totalSchoolFee,
+        paidAmount: paidAmount,
+        paymentStatus: enrollment.paymentStatus,
+        nextDueDate: nextDueDate ? nextDueDate.toISOString().split('T')[0] : null,
+        avatarUrl: null // Placeholder
+      };
     });
   }
 
-  /** Fetch all pending payments for a school */
+  async getHistory(schoolId: string) {
+    const payments = await this.prisma.payment.findMany({
+      where: { 
+        schoolId,
+        isConfirmed: true 
+      },
+      include: {
+        enrollment: {
+          include: {
+            child: true,
+            school: true
+          }
+        }
+      },
+      orderBy: { paymentDate: 'desc' }
+    });
+
+    return payments.map(payment => ({
+      id: payment.id,
+      date: payment.paymentDate,
+      amount: payment.amountPaid,
+      studentName: payment.enrollment.child.fullName,
+      className: payment.enrollment.className,
+      schoolName: payment.enrollment.school.name,
+      type: payment.paymentType,
+      status: 'SUCCESSFUL' // Since we filtered by isConfirmed: true
+    }));
+  }
+
   async getPendingPayments(schoolId: string) {
-    return this.prisma.payment.findMany({
+       const payments = await this.prisma.payment.findMany({
+          where: {
+              schoolId: schoolId,
+              isConfirmed: false,
+              paymentType: 'INSTALLMENT' 
+          },
+          include: {
+              enrollment: {
+                  include: {
+                      child: true,
+                      school: true
+                  }
+              }
+          }
+      });
+
+      return payments.map(p => ({
+        ...p,
+        studentName: p.enrollment?.child?.fullName,
+        className: p.enrollment?.className,
+        schoolName: p.enrollment?.school?.name,
+      }));
+  }
+
+  async confirmPayment(paymentId: string, schoolId: string) {
+    const payment = await this.prisma.payment.findFirst({
       where: {
+        id: paymentId,
         schoolId,
         isConfirmed: false,
       },
-      include: {
-        enrollment: true,
-        school: true,
-      },
-      orderBy: {
-        paymentDate: 'desc',
-      },
-    });
-  }
-
-  /** Confirm a pending installment payment */
-  async confirmPayment(paymentId: string, schoolId: string) {
-    const payment = await this.prisma.payment.findFirst({
-      where: { id: paymentId, schoolId },
-      include: { enrollment: true },
+      include: { enrollment: { include: { school: true, child: { include: { parent: true } } } } },
     });
 
-    if (!payment) throw new BadRequestException('Payment not found');
-    if (payment.isConfirmed)
-      throw new BadRequestException('Payment already confirmed');
-
-    const enrollment = payment.enrollment;
-
-    // Fetch child to get parent info for notification
-    const child = await this.prisma.child.findUnique({
-      where: { id: enrollment.childId },
-      include: { parent: true },
-    });
-
-    if (!child) throw new BadRequestException('Child record not found');
-
-    const newRemainingBalance =
-      enrollment.remainingBalance - payment.amountPaid;
-    const newStatus =
-      newRemainingBalance === 0
-        ? PaymentStatus.COMPLETED
-        : PaymentStatus.ACTIVE;
+    if (!payment) {
+      throw new BadRequestException('Payment not found or already confirmed');
+    }
 
     return this.prisma.$transaction(async (tx) => {
-      // 1️⃣ Mark payment as confirmed
-      await tx.payment.update({
+      // 1. Confirm Payment
+      const updatedPayment = await tx.payment.update({
         where: { id: paymentId },
-        data: { isConfirmed: true },
-      });
-
-      // 2️⃣ Update enrollment
-      await tx.childEnrollment.update({
-        where: { id: enrollment.id },
         data: {
-          remainingBalance: newRemainingBalance,
-          paymentStatus: newStatus,
+            isConfirmed: true,
+            paymentDate: new Date(),
         },
       });
 
-      // 3️⃣ Notify Parent
-      await tx.notification.create({
-        data: {
-          userId: child.parent.userId,
-          title: 'Payment Confirmed',
-          message: `Your payment of ₦${payment.amountPaid} has been confirmed by the school.`,
-          link: `/parent/payments`,
-        },
+      // 2. Notify Parent
+      await this.notificationsService.create({
+        userId: payment.enrollment.child.parent.userId,
+        title: 'Payment Confirmed',
+        message: `Your payment of ${payment.amountPaid} for ${payment.enrollment.child.fullName} (${payment.enrollment.className}) at ${payment.enrollment.school.name} has been confirmed.`,
       });
+
+      return updatedPayment;
     });
   }
 
   async markEnrollmentAsDefaulted(enrollmentId: string, schoolId: string) {
     const enrollment = await this.prisma.childEnrollment.findFirst({
-      where: { id: enrollmentId, schoolId },
+      where: {
+        id: enrollmentId,
+        schoolId,
+      },
+      include: { school: true, child: { include: { parent: true } } },
     });
 
-    if (!enrollment) throw new BadRequestException('Not found');
-
-    if (enrollment.remainingBalance <= 0) {
-      throw new BadRequestException('Cannot default a completed enrollment');
+    if (!enrollment) {
+      throw new BadRequestException('Enrollment not found');
     }
-
-    // Fetch the child to get the parent user ID
-    const child = await this.prisma.child.findUnique({
-      where: { id: enrollment.childId },
-      include: { parent: true },
-    });
-
-    if (!child || !child.parent) {
-      throw new BadRequestException('Parent user not found');
-    }
-
-    const parentUserId = child.parent.userId;
 
     return this.prisma.$transaction(async (tx) => {
-      await tx.childEnrollment.update({
+      // 1. Mark as Defaulted
+      const updatedEnrollment = await tx.childEnrollment.update({
         where: { id: enrollmentId },
         data: { paymentStatus: PaymentStatus.DEFAULTED },
       });
 
-      await tx.notification.create({
-        data: {
-          userId: parentUserId,
-          title: 'Payment Defaulted',
-          message:
-            'Your child’s payment plan has been marked as defaulted. Please contact the school.',
-        },
+      // 2. Notify Parent
+      await this.notificationsService.create({
+        userId: enrollment.child.parent.userId,
+        title: 'Payment Defaulted',
+        message: `Your enrollment for ${enrollment.child.fullName} (${enrollment.className}) at ${enrollment.school.name} has been marked as defaulted. Please contact the school.`,
       });
+
+      return updatedEnrollment;
     });
   }
 }

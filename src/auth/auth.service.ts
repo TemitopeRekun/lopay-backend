@@ -19,9 +19,20 @@ export class AuthService {
       throw new BadRequestException('Passwords do not match');
     }
 
+    // 0. Pre-check: Ensure user doesn't already exist in DB
+    // This prevents "orphan" Firebase accounts if DB creation fails later
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+
+    if (existingUser) {
+      throw new BadRequestException('Email already exists');
+    }
+
+    let firebaseUser;
     try {
       // 1. Create User in Firebase
-      const firebaseUser = await this.firebase.auth().createUser({
+      firebaseUser = await this.firebase.auth().createUser({
         email: dto.email,
         password: dto.password,
       });
@@ -56,9 +67,20 @@ export class AuthService {
         user,
       };
     } catch (error) {
+      console.error('Registration failed:', error);
+
+      // Rollback: If DB creation failed but Firebase succeeded, delete from Firebase
+      if (firebaseUser) {
+        console.warn('Rolling back Firebase user creation for:', firebaseUser.uid);
+        await this.firebase.auth().deleteUser(firebaseUser.uid).catch((rollbackError) => {
+          console.error('Rollback failed:', rollbackError);
+        });
+      }
+
       if (error.code === 'auth/email-already-exists') {
         throw new BadRequestException('Email already exists');
       }
+
       // If user created in Firebase but DB failed, we might want to rollback (delete from Firebase).
       // For MVP, we'll just throw.
       throw new BadRequestException(error.message);
@@ -97,6 +119,12 @@ export class AuthService {
           email, // This is now guaranteed to be a string.
           password: 'firebase-auth-user', // Placeholder, we rely on Firebase
           role: UserRole.PARENT,
+          // Ensure Parent profile is created if user is new
+          parent: {
+            create: {
+              phoneNumber: '', // Placeholder, user should update profile later
+            },
+          },
         },
         // 2. Ensure `include` is here so the created user object also has the `school` relation.
         include: { school: true },
@@ -111,7 +139,14 @@ export class AuthService {
     };
 
     return {
+      message: 'Login successful',
       accessToken: this.jwtService.sign(payload),
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        fullName: user.fullName,
+      },
     };
   }
 }
