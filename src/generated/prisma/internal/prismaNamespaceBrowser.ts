@@ -149,6 +149,7 @@ export const PaymentScalarFieldEnum = {
   schoolAmount: 'schoolAmount',
   receiver: 'receiver',
   paymentType: 'paymentType',
+  status: 'status',
   isConfirmed: 'isConfirmed',
   paymentDate: 'paymentDate',
   receiptUrl: 'receiptUrl'

@@ -22,10 +22,20 @@ export const PaymentStatus = {
   PENDING: 'PENDING',
   ACTIVE: 'ACTIVE',
   COMPLETED: 'COMPLETED',
-  DEFAULTED: 'DEFAULTED'
+  DEFAULTED: 'DEFAULTED',
+  FAILED: 'FAILED'
 } as const
 
 export type PaymentStatus = (typeof PaymentStatus)[keyof typeof PaymentStatus]
+
+
+export const PaymentTransactionStatus = {
+  PENDING: 'PENDING',
+  SUCCESS: 'SUCCESS',
+  FAILED: 'FAILED'
+} as const
+
+export type PaymentTransactionStatus = (typeof PaymentTransactionStatus)[keyof typeof PaymentTransactionStatus]
 
 
 export const PaymentType = {

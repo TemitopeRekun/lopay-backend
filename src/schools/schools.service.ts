@@ -1,7 +1,17 @@
-import { Injectable, BadRequestException, Inject, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  Inject,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { PaymentStatus, UserRole } from '../generated/prisma/client';
+import {
+  PaymentStatus,
+  UserRole,
+  PaymentTransactionStatus,
+  PaymentType,
+} from '../generated/prisma/client';
 import * as admin from 'firebase-admin';
 import { CreateSchoolDto } from '../admin/dto/create.school.dto';
 import { UpdateSchoolDto } from './dto/update.school.dto';
@@ -26,18 +36,26 @@ export class SchoolPaymentsService {
     } catch (error) {
       if (error.code === 'auth/email-already-exists') {
         try {
-          firebaseUser = await this.firebaseAdmin.auth().getUserByEmail(dto.ownerEmail);
+          firebaseUser = await this.firebaseAdmin
+            .auth()
+            .getUserByEmail(dto.ownerEmail);
         } catch (retrieveError: any) {
-          throw new BadRequestException(`User exists in Firebase but could not be retrieved: ${retrieveError.message}`);
+          throw new BadRequestException(
+            `User exists in Firebase but could not be retrieved: ${retrieveError.message}`,
+          );
         }
       } else {
         throw new BadRequestException(`Firebase Error: ${error.message}`);
       }
     }
 
-    const existingUser = await this.prisma.user.findUnique({ where: { email: dto.ownerEmail } });
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: dto.ownerEmail },
+    });
     if (existingUser) {
-      throw new BadRequestException('User with this email already exists in the database');
+      throw new BadRequestException(
+        'User with this email already exists in the database',
+      );
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -46,7 +64,7 @@ export class SchoolPaymentsService {
         data: {
           id: firebaseUser.uid,
           email: dto.ownerEmail,
-          password: 'HASHED_PASSWORD_PLACEHOLDER', 
+          password: 'HASHED_PASSWORD_PLACEHOLDER',
           role: UserRole.SCHOOL_OWNER,
           fullName: dto.ownerName,
         },
@@ -163,35 +181,31 @@ export class SchoolPaymentsService {
   }
 
   async getDashboardStats(schoolId: string) {
-    const [
-      totalStudents,
-      confirmedPayments,
-      pendingPayments,
-      enrollments,
-    ] = await Promise.all([
-      // 1. Total Enrolled Students
-      this.prisma.childEnrollment.count({
-        where: { schoolId },
-      }),
+    const [totalStudents, confirmedPayments, pendingPayments, enrollments] =
+      await Promise.all([
+        // 1. Total Enrolled Students
+        this.prisma.childEnrollment.count({
+          where: { schoolId },
+        }),
 
-      // 2. Confirmed Payments (Revenue)
-      this.prisma.payment.aggregate({
-        where: { schoolId, isConfirmed: true },
-        _sum: { amountPaid: true },
-      }),
+        // 2. Confirmed Payments (Revenue)
+        this.prisma.payment.aggregate({
+          where: { schoolId, isConfirmed: true },
+          _sum: { amountPaid: true },
+        }),
 
-      // 3. Pending Payments
-      this.prisma.payment.aggregate({
-        where: { schoolId, isConfirmed: false },
-        _sum: { amountPaid: true },
-      }),
+        // 3. Pending Payments
+        this.prisma.payment.aggregate({
+          where: { schoolId, isConfirmed: false },
+          _sum: { amountPaid: true },
+        }),
 
-      // 4. Defaulted Amount (from defaulted enrollments)
-      this.prisma.childEnrollment.findMany({
-        where: { schoolId, paymentStatus: PaymentStatus.DEFAULTED },
-        select: { remainingBalance: true },
-      }),
-    ]);
+        // 4. Defaulted Amount (from defaulted enrollments)
+        this.prisma.childEnrollment.findMany({
+          where: { schoolId, paymentStatus: PaymentStatus.DEFAULTED },
+          select: { remainingBalance: true },
+        }),
+      ]);
 
     const totalRevenue = confirmedPayments._sum.amountPaid || 0;
     const pendingRevenue = pendingPayments._sum.amountPaid || 0;
@@ -217,36 +231,47 @@ export class SchoolPaymentsService {
     if (search) {
       whereClause.OR = [
         { child: { fullName: { contains: search, mode: 'insensitive' } } },
-        { child: { parent: { user: { fullName: { contains: search, mode: 'insensitive' } } } } },
+        {
+          child: {
+            parent: {
+              user: { fullName: { contains: search, mode: 'insensitive' } },
+            },
+          },
+        },
       ];
     }
-    
+
     const enrollments = await this.prisma.childEnrollment.findMany({
-        where: whereClause,
-        include: {
-            child: { include: { parent: { include: { user: true } } } },
-            payments: { orderBy: { paymentDate: 'desc' } } // Fetch all payments to calculate paid amount
-        }
+      where: whereClause,
+      include: {
+        child: { include: { parent: { include: { user: true } } } },
+        payments: { orderBy: { paymentDate: 'desc' } }, // Fetch all payments to calculate paid amount
+      },
     });
 
-    return enrollments.map(enrollment => {
-      const confirmedPayments = enrollment.payments.filter(p => p.isConfirmed);
-      const paidAmount = confirmedPayments.reduce((sum, p) => sum + p.amountPaid, 0);
-      
+    return enrollments.map((enrollment) => {
+      const confirmedPayments = enrollment.payments.filter(
+        (p) => p.isConfirmed,
+      );
+      const paidAmount = confirmedPayments.reduce(
+        (sum, p) => sum + p.amountPaid,
+        0,
+      );
+
       // Calculate next due date (simplified logic)
       let nextDueDate: Date | null = null;
       if (enrollment.remainingBalance > 0 && confirmedPayments.length > 0) {
-          const lastPayment = confirmedPayments[0];
-          const lastDate = new Date(lastPayment.paymentDate);
-          if (enrollment.installmentFrequency === 'WEEKLY') {
-             lastDate.setDate(lastDate.getDate() + 7);
-          } else {
-             lastDate.setMonth(lastDate.getMonth() + 1);
-          }
-          nextDueDate = lastDate;
+        const lastPayment = confirmedPayments[0];
+        const lastDate = new Date(lastPayment.paymentDate);
+        if (enrollment.installmentFrequency === 'WEEKLY') {
+          lastDate.setDate(lastDate.getDate() + 7);
+        } else {
+          lastDate.setMonth(lastDate.getMonth() + 1);
+        }
+        nextDueDate = lastDate;
       } else if (enrollment.remainingBalance > 0) {
-          // If no payments yet, due date is start date
-          nextDueDate = enrollment.termStartDate;
+        // If no payments yet, due date is start date
+        nextDueDate = enrollment.termStartDate;
       }
 
       return {
@@ -257,30 +282,32 @@ export class SchoolPaymentsService {
         totalFee: enrollment.totalSchoolFee,
         paidAmount: paidAmount,
         paymentStatus: enrollment.paymentStatus,
-        nextDueDate: nextDueDate ? nextDueDate.toISOString().split('T')[0] : null,
-        avatarUrl: null // Placeholder
+        nextDueDate: nextDueDate
+          ? nextDueDate.toISOString().split('T')[0]
+          : null,
+        avatarUrl: null, // Placeholder
       };
     });
   }
 
   async getHistory(schoolId: string) {
     const payments = await this.prisma.payment.findMany({
-      where: { 
+      where: {
         schoolId,
-        isConfirmed: true 
+        isConfirmed: true,
       },
       include: {
         enrollment: {
           include: {
             child: true,
-            school: true
-          }
-        }
+            school: true,
+          },
+        },
       },
-      orderBy: { paymentDate: 'desc' }
+      orderBy: { paymentDate: 'desc' },
     });
 
-    return payments.map(payment => ({
+    return payments.map((payment) => ({
       id: payment.id,
       date: payment.paymentDate,
       amount: payment.amountPaid,
@@ -288,33 +315,33 @@ export class SchoolPaymentsService {
       className: payment.enrollment.className,
       schoolName: payment.enrollment.school.name,
       type: payment.paymentType,
-      status: 'SUCCESSFUL' // Since we filtered by isConfirmed: true
+      status: 'SUCCESSFUL', // Since we filtered by isConfirmed: true
     }));
   }
 
   async getPendingPayments(schoolId: string) {
-       const payments = await this.prisma.payment.findMany({
-          where: {
-              schoolId: schoolId,
-              isConfirmed: false,
-              paymentType: 'INSTALLMENT' 
-          },
+    const payments = await this.prisma.payment.findMany({
+      where: {
+        schoolId: schoolId,
+        isConfirmed: false,
+        paymentType: 'INSTALLMENT',
+      },
+      include: {
+        enrollment: {
           include: {
-              enrollment: {
-                  include: {
-                      child: true,
-                      school: true
-                  }
-              }
-          }
-      });
+            child: true,
+            school: true,
+          },
+        },
+      },
+    });
 
-      return payments.map(p => ({
-        ...p,
-        studentName: p.enrollment?.child?.fullName,
-        className: p.enrollment?.className,
-        schoolName: p.enrollment?.school?.name,
-      }));
+    return payments.map((p) => ({
+      ...p,
+      studentName: p.enrollment?.child?.fullName,
+      className: p.enrollment?.className,
+      schoolName: p.enrollment?.school?.name,
+    }));
   }
 
   async confirmPayment(paymentId: string, schoolId: string) {
@@ -324,7 +351,11 @@ export class SchoolPaymentsService {
         schoolId,
         isConfirmed: false,
       },
-      include: { enrollment: { include: { school: true, child: { include: { parent: true } } } } },
+      include: {
+        enrollment: {
+          include: { school: true, child: { include: { parent: true } } },
+        },
+      },
     });
 
     if (!payment) {
@@ -336,16 +367,88 @@ export class SchoolPaymentsService {
       const updatedPayment = await tx.payment.update({
         where: { id: paymentId },
         data: {
-            isConfirmed: true,
-            paymentDate: new Date(),
+          isConfirmed: true,
+          status: PaymentTransactionStatus.SUCCESS,
+          paymentDate: new Date(),
         },
       });
 
-      // 2. Notify Parent
+      // 2. Update Enrollment Balance
+      // Note: remainingBalance tracks what is LEFT to pay.
+      const currentBalance = payment.enrollment.remainingBalance;
+      const newBalance = currentBalance - payment.amountPaid;
+      // If newBalance is effectively 0 (or less), mark completed.
+      const isCompleted = newBalance <= 0;
+
+      await tx.childEnrollment.update({
+        where: { id: payment.enrollmentId },
+        data: {
+          remainingBalance: Math.max(0, newBalance),
+          paymentStatus: isCompleted
+            ? PaymentStatus.COMPLETED
+            : payment.enrollment.paymentStatus,
+        },
+      });
+
+      // 3. Notify Parent
+      let message = `Your payment of ${payment.amountPaid} for ${payment.enrollment.child.fullName} (${payment.enrollment.className}) at ${payment.enrollment.school.name} has been confirmed.`;
+      if (isCompleted) {
+        message += ' All payments for this semester are now completed.';
+      }
+
       await this.notificationsService.create({
         userId: payment.enrollment.child.parent.userId,
-        title: 'Payment Confirmed',
-        message: `Your payment of ${payment.amountPaid} for ${payment.enrollment.child.fullName} (${payment.enrollment.className}) at ${payment.enrollment.school.name} has been confirmed.`,
+        title: isCompleted ? 'Payment Completed' : 'Payment Confirmed',
+        message: message,
+      });
+
+      return updatedPayment;
+    });
+  }
+
+  async rejectPayment(paymentId: string, schoolId: string) {
+    const payment = await this.prisma.payment.findFirst({
+      where: {
+        id: paymentId,
+        schoolId,
+        isConfirmed: false,
+      },
+      include: {
+        enrollment: {
+          include: { school: true, child: { include: { parent: true } } },
+        },
+      },
+    });
+
+    if (!payment) {
+      throw new BadRequestException('Payment not found or already processed');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Update Payment Status
+      const updatedPayment = await tx.payment.update({
+        where: { id: paymentId },
+        data: {
+          status: PaymentTransactionStatus.FAILED,
+          // isConfirmed stays false
+        },
+      });
+
+      // 2. If First Payment, Fail Enrollment
+      if (payment.paymentType === PaymentType.FIRST_PAYMENT) {
+        await tx.childEnrollment.update({
+          where: { id: payment.enrollmentId },
+          data: {
+            paymentStatus: PaymentStatus.FAILED,
+          },
+        });
+      }
+
+      // 3. Notify Parent
+      await this.notificationsService.create({
+        userId: payment.enrollment.child.parent.userId,
+        title: 'Payment Rejected',
+        message: `Your payment of ${payment.amountPaid} for ${payment.enrollment.child.fullName} at ${payment.enrollment.school.name} has been rejected. Please contact the school.`,
       });
 
       return updatedPayment;

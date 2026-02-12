@@ -47,6 +47,7 @@ export type PaymentMinAggregateOutputType = {
   schoolAmount: number | null
   receiver: $Enums.PaymentReceiver | null
   paymentType: $Enums.PaymentType | null
+  status: $Enums.PaymentTransactionStatus | null
   isConfirmed: boolean | null
   paymentDate: Date | null
   receiptUrl: string | null
@@ -61,6 +62,7 @@ export type PaymentMaxAggregateOutputType = {
   schoolAmount: number | null
   receiver: $Enums.PaymentReceiver | null
   paymentType: $Enums.PaymentType | null
+  status: $Enums.PaymentTransactionStatus | null
   isConfirmed: boolean | null
   paymentDate: Date | null
   receiptUrl: string | null
@@ -75,6 +77,7 @@ export type PaymentCountAggregateOutputType = {
   schoolAmount: number
   receiver: number
   paymentType: number
+  status: number
   isConfirmed: number
   paymentDate: number
   receiptUrl: number
@@ -103,6 +106,7 @@ export type PaymentMinAggregateInputType = {
   schoolAmount?: true
   receiver?: true
   paymentType?: true
+  status?: true
   isConfirmed?: true
   paymentDate?: true
   receiptUrl?: true
@@ -117,6 +121,7 @@ export type PaymentMaxAggregateInputType = {
   schoolAmount?: true
   receiver?: true
   paymentType?: true
+  status?: true
   isConfirmed?: true
   paymentDate?: true
   receiptUrl?: true
@@ -131,6 +136,7 @@ export type PaymentCountAggregateInputType = {
   schoolAmount?: true
   receiver?: true
   paymentType?: true
+  status?: true
   isConfirmed?: true
   paymentDate?: true
   receiptUrl?: true
@@ -232,6 +238,7 @@ export type PaymentGroupByOutputType = {
   schoolAmount: number
   receiver: $Enums.PaymentReceiver
   paymentType: $Enums.PaymentType
+  status: $Enums.PaymentTransactionStatus
   isConfirmed: boolean
   paymentDate: Date
   receiptUrl: string | null
@@ -269,6 +276,7 @@ export type PaymentWhereInput = {
   schoolAmount?: Prisma.IntFilter<"Payment"> | number
   receiver?: Prisma.EnumPaymentReceiverFilter<"Payment"> | $Enums.PaymentReceiver
   paymentType?: Prisma.EnumPaymentTypeFilter<"Payment"> | $Enums.PaymentType
+  status?: Prisma.EnumPaymentTransactionStatusFilter<"Payment"> | $Enums.PaymentTransactionStatus
   isConfirmed?: Prisma.BoolFilter<"Payment"> | boolean
   paymentDate?: Prisma.DateTimeFilter<"Payment"> | Date | string
   receiptUrl?: Prisma.StringNullableFilter<"Payment"> | string | null
@@ -285,6 +293,7 @@ export type PaymentOrderByWithRelationInput = {
   schoolAmount?: Prisma.SortOrder
   receiver?: Prisma.SortOrder
   paymentType?: Prisma.SortOrder
+  status?: Prisma.SortOrder
   isConfirmed?: Prisma.SortOrder
   paymentDate?: Prisma.SortOrder
   receiptUrl?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -304,6 +313,7 @@ export type PaymentWhereUniqueInput = Prisma.AtLeast<{
   schoolAmount?: Prisma.IntFilter<"Payment"> | number
   receiver?: Prisma.EnumPaymentReceiverFilter<"Payment"> | $Enums.PaymentReceiver
   paymentType?: Prisma.EnumPaymentTypeFilter<"Payment"> | $Enums.PaymentType
+  status?: Prisma.EnumPaymentTransactionStatusFilter<"Payment"> | $Enums.PaymentTransactionStatus
   isConfirmed?: Prisma.BoolFilter<"Payment"> | boolean
   paymentDate?: Prisma.DateTimeFilter<"Payment"> | Date | string
   receiptUrl?: Prisma.StringNullableFilter<"Payment"> | string | null
@@ -320,6 +330,7 @@ export type PaymentOrderByWithAggregationInput = {
   schoolAmount?: Prisma.SortOrder
   receiver?: Prisma.SortOrder
   paymentType?: Prisma.SortOrder
+  status?: Prisma.SortOrder
   isConfirmed?: Prisma.SortOrder
   paymentDate?: Prisma.SortOrder
   receiptUrl?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -342,6 +353,7 @@ export type PaymentScalarWhereWithAggregatesInput = {
   schoolAmount?: Prisma.IntWithAggregatesFilter<"Payment"> | number
   receiver?: Prisma.EnumPaymentReceiverWithAggregatesFilter<"Payment"> | $Enums.PaymentReceiver
   paymentType?: Prisma.EnumPaymentTypeWithAggregatesFilter<"Payment"> | $Enums.PaymentType
+  status?: Prisma.EnumPaymentTransactionStatusWithAggregatesFilter<"Payment"> | $Enums.PaymentTransactionStatus
   isConfirmed?: Prisma.BoolWithAggregatesFilter<"Payment"> | boolean
   paymentDate?: Prisma.DateTimeWithAggregatesFilter<"Payment"> | Date | string
   receiptUrl?: Prisma.StringNullableWithAggregatesFilter<"Payment"> | string | null
@@ -354,6 +366,7 @@ export type PaymentCreateInput = {
   schoolAmount: number
   receiver: $Enums.PaymentReceiver
   paymentType: $Enums.PaymentType
+  status?: $Enums.PaymentTransactionStatus
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
@@ -370,6 +383,7 @@ export type PaymentUncheckedCreateInput = {
   schoolAmount: number
   receiver: $Enums.PaymentReceiver
   paymentType: $Enums.PaymentType
+  status?: $Enums.PaymentTransactionStatus
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
@@ -382,6 +396,7 @@ export type PaymentUpdateInput = {
   schoolAmount?: Prisma.IntFieldUpdateOperationsInput | number
   receiver?: Prisma.EnumPaymentReceiverFieldUpdateOperationsInput | $Enums.PaymentReceiver
   paymentType?: Prisma.EnumPaymentTypeFieldUpdateOperationsInput | $Enums.PaymentType
+  status?: Prisma.EnumPaymentTransactionStatusFieldUpdateOperationsInput | $Enums.PaymentTransactionStatus
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -398,6 +413,7 @@ export type PaymentUncheckedUpdateInput = {
   schoolAmount?: Prisma.IntFieldUpdateOperationsInput | number
   receiver?: Prisma.EnumPaymentReceiverFieldUpdateOperationsInput | $Enums.PaymentReceiver
   paymentType?: Prisma.EnumPaymentTypeFieldUpdateOperationsInput | $Enums.PaymentType
+  status?: Prisma.EnumPaymentTransactionStatusFieldUpdateOperationsInput | $Enums.PaymentTransactionStatus
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -412,6 +428,7 @@ export type PaymentCreateManyInput = {
   schoolAmount: number
   receiver: $Enums.PaymentReceiver
   paymentType: $Enums.PaymentType
+  status?: $Enums.PaymentTransactionStatus
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
@@ -424,6 +441,7 @@ export type PaymentUpdateManyMutationInput = {
   schoolAmount?: Prisma.IntFieldUpdateOperationsInput | number
   receiver?: Prisma.EnumPaymentReceiverFieldUpdateOperationsInput | $Enums.PaymentReceiver
   paymentType?: Prisma.EnumPaymentTypeFieldUpdateOperationsInput | $Enums.PaymentType
+  status?: Prisma.EnumPaymentTransactionStatusFieldUpdateOperationsInput | $Enums.PaymentTransactionStatus
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -438,6 +456,7 @@ export type PaymentUncheckedUpdateManyInput = {
   schoolAmount?: Prisma.IntFieldUpdateOperationsInput | number
   receiver?: Prisma.EnumPaymentReceiverFieldUpdateOperationsInput | $Enums.PaymentReceiver
   paymentType?: Prisma.EnumPaymentTypeFieldUpdateOperationsInput | $Enums.PaymentType
+  status?: Prisma.EnumPaymentTransactionStatusFieldUpdateOperationsInput | $Enums.PaymentTransactionStatus
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -462,6 +481,7 @@ export type PaymentCountOrderByAggregateInput = {
   schoolAmount?: Prisma.SortOrder
   receiver?: Prisma.SortOrder
   paymentType?: Prisma.SortOrder
+  status?: Prisma.SortOrder
   isConfirmed?: Prisma.SortOrder
   paymentDate?: Prisma.SortOrder
   receiptUrl?: Prisma.SortOrder
@@ -482,6 +502,7 @@ export type PaymentMaxOrderByAggregateInput = {
   schoolAmount?: Prisma.SortOrder
   receiver?: Prisma.SortOrder
   paymentType?: Prisma.SortOrder
+  status?: Prisma.SortOrder
   isConfirmed?: Prisma.SortOrder
   paymentDate?: Prisma.SortOrder
   receiptUrl?: Prisma.SortOrder
@@ -496,6 +517,7 @@ export type PaymentMinOrderByAggregateInput = {
   schoolAmount?: Prisma.SortOrder
   receiver?: Prisma.SortOrder
   paymentType?: Prisma.SortOrder
+  status?: Prisma.SortOrder
   isConfirmed?: Prisma.SortOrder
   paymentDate?: Prisma.SortOrder
   receiptUrl?: Prisma.SortOrder
@@ -557,6 +579,10 @@ export type EnumPaymentTypeFieldUpdateOperationsInput = {
   set?: $Enums.PaymentType
 }
 
+export type EnumPaymentTransactionStatusFieldUpdateOperationsInput = {
+  set?: $Enums.PaymentTransactionStatus
+}
+
 export type PaymentCreateNestedManyWithoutEnrollmentInput = {
   create?: Prisma.XOR<Prisma.PaymentCreateWithoutEnrollmentInput, Prisma.PaymentUncheckedCreateWithoutEnrollmentInput> | Prisma.PaymentCreateWithoutEnrollmentInput[] | Prisma.PaymentUncheckedCreateWithoutEnrollmentInput[]
   connectOrCreate?: Prisma.PaymentCreateOrConnectWithoutEnrollmentInput | Prisma.PaymentCreateOrConnectWithoutEnrollmentInput[]
@@ -606,6 +632,7 @@ export type PaymentCreateWithoutSchoolInput = {
   schoolAmount: number
   receiver: $Enums.PaymentReceiver
   paymentType: $Enums.PaymentType
+  status?: $Enums.PaymentTransactionStatus
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
@@ -620,6 +647,7 @@ export type PaymentUncheckedCreateWithoutSchoolInput = {
   schoolAmount: number
   receiver: $Enums.PaymentReceiver
   paymentType: $Enums.PaymentType
+  status?: $Enums.PaymentTransactionStatus
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
@@ -663,6 +691,7 @@ export type PaymentScalarWhereInput = {
   schoolAmount?: Prisma.IntFilter<"Payment"> | number
   receiver?: Prisma.EnumPaymentReceiverFilter<"Payment"> | $Enums.PaymentReceiver
   paymentType?: Prisma.EnumPaymentTypeFilter<"Payment"> | $Enums.PaymentType
+  status?: Prisma.EnumPaymentTransactionStatusFilter<"Payment"> | $Enums.PaymentTransactionStatus
   isConfirmed?: Prisma.BoolFilter<"Payment"> | boolean
   paymentDate?: Prisma.DateTimeFilter<"Payment"> | Date | string
   receiptUrl?: Prisma.StringNullableFilter<"Payment"> | string | null
@@ -675,6 +704,7 @@ export type PaymentCreateWithoutEnrollmentInput = {
   schoolAmount: number
   receiver: $Enums.PaymentReceiver
   paymentType: $Enums.PaymentType
+  status?: $Enums.PaymentTransactionStatus
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
@@ -689,6 +719,7 @@ export type PaymentUncheckedCreateWithoutEnrollmentInput = {
   schoolAmount: number
   receiver: $Enums.PaymentReceiver
   paymentType: $Enums.PaymentType
+  status?: $Enums.PaymentTransactionStatus
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
@@ -728,6 +759,7 @@ export type PaymentCreateManySchoolInput = {
   schoolAmount: number
   receiver: $Enums.PaymentReceiver
   paymentType: $Enums.PaymentType
+  status?: $Enums.PaymentTransactionStatus
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
@@ -740,6 +772,7 @@ export type PaymentUpdateWithoutSchoolInput = {
   schoolAmount?: Prisma.IntFieldUpdateOperationsInput | number
   receiver?: Prisma.EnumPaymentReceiverFieldUpdateOperationsInput | $Enums.PaymentReceiver
   paymentType?: Prisma.EnumPaymentTypeFieldUpdateOperationsInput | $Enums.PaymentType
+  status?: Prisma.EnumPaymentTransactionStatusFieldUpdateOperationsInput | $Enums.PaymentTransactionStatus
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -754,6 +787,7 @@ export type PaymentUncheckedUpdateWithoutSchoolInput = {
   schoolAmount?: Prisma.IntFieldUpdateOperationsInput | number
   receiver?: Prisma.EnumPaymentReceiverFieldUpdateOperationsInput | $Enums.PaymentReceiver
   paymentType?: Prisma.EnumPaymentTypeFieldUpdateOperationsInput | $Enums.PaymentType
+  status?: Prisma.EnumPaymentTransactionStatusFieldUpdateOperationsInput | $Enums.PaymentTransactionStatus
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -767,6 +801,7 @@ export type PaymentUncheckedUpdateManyWithoutSchoolInput = {
   schoolAmount?: Prisma.IntFieldUpdateOperationsInput | number
   receiver?: Prisma.EnumPaymentReceiverFieldUpdateOperationsInput | $Enums.PaymentReceiver
   paymentType?: Prisma.EnumPaymentTypeFieldUpdateOperationsInput | $Enums.PaymentType
+  status?: Prisma.EnumPaymentTransactionStatusFieldUpdateOperationsInput | $Enums.PaymentTransactionStatus
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -780,6 +815,7 @@ export type PaymentCreateManyEnrollmentInput = {
   schoolAmount: number
   receiver: $Enums.PaymentReceiver
   paymentType: $Enums.PaymentType
+  status?: $Enums.PaymentTransactionStatus
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
@@ -792,6 +828,7 @@ export type PaymentUpdateWithoutEnrollmentInput = {
   schoolAmount?: Prisma.IntFieldUpdateOperationsInput | number
   receiver?: Prisma.EnumPaymentReceiverFieldUpdateOperationsInput | $Enums.PaymentReceiver
   paymentType?: Prisma.EnumPaymentTypeFieldUpdateOperationsInput | $Enums.PaymentType
+  status?: Prisma.EnumPaymentTransactionStatusFieldUpdateOperationsInput | $Enums.PaymentTransactionStatus
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -806,6 +843,7 @@ export type PaymentUncheckedUpdateWithoutEnrollmentInput = {
   schoolAmount?: Prisma.IntFieldUpdateOperationsInput | number
   receiver?: Prisma.EnumPaymentReceiverFieldUpdateOperationsInput | $Enums.PaymentReceiver
   paymentType?: Prisma.EnumPaymentTypeFieldUpdateOperationsInput | $Enums.PaymentType
+  status?: Prisma.EnumPaymentTransactionStatusFieldUpdateOperationsInput | $Enums.PaymentTransactionStatus
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -819,6 +857,7 @@ export type PaymentUncheckedUpdateManyWithoutEnrollmentInput = {
   schoolAmount?: Prisma.IntFieldUpdateOperationsInput | number
   receiver?: Prisma.EnumPaymentReceiverFieldUpdateOperationsInput | $Enums.PaymentReceiver
   paymentType?: Prisma.EnumPaymentTypeFieldUpdateOperationsInput | $Enums.PaymentType
+  status?: Prisma.EnumPaymentTransactionStatusFieldUpdateOperationsInput | $Enums.PaymentTransactionStatus
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -835,6 +874,7 @@ export type PaymentSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs 
   schoolAmount?: boolean
   receiver?: boolean
   paymentType?: boolean
+  status?: boolean
   isConfirmed?: boolean
   paymentDate?: boolean
   receiptUrl?: boolean
@@ -851,6 +891,7 @@ export type PaymentSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Exten
   schoolAmount?: boolean
   receiver?: boolean
   paymentType?: boolean
+  status?: boolean
   isConfirmed?: boolean
   paymentDate?: boolean
   receiptUrl?: boolean
@@ -867,6 +908,7 @@ export type PaymentSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Exten
   schoolAmount?: boolean
   receiver?: boolean
   paymentType?: boolean
+  status?: boolean
   isConfirmed?: boolean
   paymentDate?: boolean
   receiptUrl?: boolean
@@ -883,12 +925,13 @@ export type PaymentSelectScalar = {
   schoolAmount?: boolean
   receiver?: boolean
   paymentType?: boolean
+  status?: boolean
   isConfirmed?: boolean
   paymentDate?: boolean
   receiptUrl?: boolean
 }
 
-export type PaymentOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "enrollmentId" | "schoolId" | "amountPaid" | "platformAmount" | "schoolAmount" | "receiver" | "paymentType" | "isConfirmed" | "paymentDate" | "receiptUrl", ExtArgs["result"]["payment"]>
+export type PaymentOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "enrollmentId" | "schoolId" | "amountPaid" | "platformAmount" | "schoolAmount" | "receiver" | "paymentType" | "status" | "isConfirmed" | "paymentDate" | "receiptUrl", ExtArgs["result"]["payment"]>
 export type PaymentInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   enrollment?: boolean | Prisma.ChildEnrollmentDefaultArgs<ExtArgs>
   school?: boolean | Prisma.SchoolDefaultArgs<ExtArgs>
@@ -917,6 +960,7 @@ export type $PaymentPayload<ExtArgs extends runtime.Types.Extensions.InternalArg
     schoolAmount: number
     receiver: $Enums.PaymentReceiver
     paymentType: $Enums.PaymentType
+    status: $Enums.PaymentTransactionStatus
     isConfirmed: boolean
     paymentDate: Date
     receiptUrl: string | null
@@ -1353,6 +1397,7 @@ export interface PaymentFieldRefs {
   readonly schoolAmount: Prisma.FieldRef<"Payment", 'Int'>
   readonly receiver: Prisma.FieldRef<"Payment", 'PaymentReceiver'>
   readonly paymentType: Prisma.FieldRef<"Payment", 'PaymentType'>
+  readonly status: Prisma.FieldRef<"Payment", 'PaymentTransactionStatus'>
   readonly isConfirmed: Prisma.FieldRef<"Payment", 'Boolean'>
   readonly paymentDate: Prisma.FieldRef<"Payment", 'DateTime'>
   readonly receiptUrl: Prisma.FieldRef<"Payment", 'String'>

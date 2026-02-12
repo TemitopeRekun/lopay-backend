@@ -129,6 +129,22 @@ export class SchoolPaymentsController {
     );
   }
 
+  /** ✅ Reject a single installment payment */
+  @Post('reject')
+  @Roles(UserRole.SCHOOL_OWNER)
+  async rejectPayment(
+    @Body() dto: ConfirmPaymentDto, // Reusing DTO as it only needs paymentId
+    @CurrentUser() user: any,
+  ) {
+    if (!user.schoolId) {
+      throw new ForbiddenException('User is not associated with any school');
+    }
+    return this.schoolPaymentsService.rejectPayment(
+      dto.paymentId,
+      user.schoolId,
+    );
+  }
+
   /** ✅ Mark an enrollment as defaulted */
   @Post('default')
   @Roles(UserRole.SCHOOL_OWNER)

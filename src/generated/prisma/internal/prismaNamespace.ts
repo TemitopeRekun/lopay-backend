@@ -1188,6 +1188,7 @@ export const PaymentScalarFieldEnum = {
   schoolAmount: 'schoolAmount',
   receiver: 'receiver',
   paymentType: 'paymentType',
+  status: 'status',
   isConfirmed: 'isConfirmed',
   paymentDate: 'paymentDate',
   receiptUrl: 'receiptUrl'
@@ -1357,6 +1358,20 @@ export type EnumPaymentTypeFieldRefInput<$PrismaModel> = FieldRefInputType<$Pris
  * Reference to a field of type 'PaymentType[]'
  */
 export type ListEnumPaymentTypeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'PaymentType[]'>
+    
+
+
+/**
+ * Reference to a field of type 'PaymentTransactionStatus'
+ */
+export type EnumPaymentTransactionStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'PaymentTransactionStatus'>
+    
+
+
+/**
+ * Reference to a field of type 'PaymentTransactionStatus[]'
+ */
+export type ListEnumPaymentTransactionStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'PaymentTransactionStatus[]'>
     
 
 

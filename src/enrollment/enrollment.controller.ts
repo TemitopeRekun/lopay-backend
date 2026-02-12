@@ -13,26 +13,26 @@ export class EnrollmentController {
   constructor(private readonly enrollmentService: EnrollmentService) {}
 
   @Get('my-children')
-  @Roles(UserRole.PARENT)
+  @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
   async getMyChildren(@CurrentUser() user: any) {
     console.log('EnrollmentController: getMyChildren for user:', user);
     return this.enrollmentService.getParentEnrollments(user.userId);
   }
 
   @Get(':id/history')
-  @Roles(UserRole.PARENT)
+  @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
   async getEnrollmentHistory(@Param('id') id: string, @CurrentUser() user: any) {
     return this.enrollmentService.getEnrollmentHistory(id, user.userId);
   }
 
   @Post()
-  @Roles(UserRole.PARENT)
+  @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
   enrollChild(@Body() dto: CreateEnrollmentDto, @CurrentUser() user: any) {
     return this.enrollmentService.enrollChild(dto, user.userId);
   }
 
   @Post('pay-installment')
-  @Roles(UserRole.PARENT)
+  @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
   async payInstallment(@Body() dto: CreateInstallmentDto) {
     return this.enrollmentService.submitInstallmentPayment(
       dto.enrollmentId,

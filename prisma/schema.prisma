@@ -23,6 +23,13 @@ enum PaymentStatus {
   ACTIVE
   COMPLETED
   DEFAULTED
+  FAILED
+}
+
+enum PaymentTransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
 }
 
 enum PaymentType {
@@ -131,6 +138,7 @@ model Payment {
   receiver        PaymentReceiver  // School or platform
 
   paymentType     PaymentType
+  status          PaymentTransactionStatus @default(PENDING)
   isConfirmed     Boolean          @default(false)
   paymentDate     DateTime         @default(now())
   receiptUrl      String?          // Added for payment verification (receipt image)

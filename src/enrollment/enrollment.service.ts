@@ -8,6 +8,7 @@ import {
   PaymentType,
   PaymentReceiver,
   UserRole,
+  PaymentTransactionStatus,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateEnrollmentDto } from './dto/create.enrollment.dto';
@@ -46,7 +47,6 @@ export class EnrollmentService {
           lastDate.setMonth(lastDate.getMonth() + 1);
         }
         nextDueDate = lastDate;
-
       } else {
         // If first payment pending, next due is now or creation date.
         // If first payment paid (and no installments yet), use term start date?
@@ -79,30 +79,34 @@ export class EnrollmentService {
   }
 
   async getParentEnrollments(userId: string) {
-    console.log(`EnrollmentService: Fetching enrollments for userId: ${userId}`);
-    
+    console.log(
+      `EnrollmentService: Fetching enrollments for userId: ${userId}`,
+    );
+
     // Step 1: Find Parent
     const parent = await this.prisma.parent.findUnique({
       where: { userId },
-      include: { children: true }
+      include: { children: true },
     });
 
     if (!parent) {
       console.log('EnrollmentService: Parent not found for userId:', userId);
       return [];
     }
-    console.log(`EnrollmentService: Parent found. ID: ${parent.id}. Children count: ${parent.children.length}`);
+    console.log(
+      `EnrollmentService: Parent found. ID: ${parent.id}. Children count: ${parent.children.length}`,
+    );
 
     if (parent.children.length === 0) {
       return [];
     }
 
-    const childIds = parent.children.map(c => c.id);
+    const childIds = parent.children.map((c) => c.id);
 
     // Step 2: Find Enrollments for these children
     const enrollments = await this.prisma.childEnrollment.findMany({
       where: {
-        childId: { in: childIds }
+        childId: { in: childIds },
       },
       include: {
         child: true,
@@ -114,7 +118,9 @@ export class EnrollmentService {
       orderBy: { createdAt: 'desc' },
     });
 
-    console.log(`EnrollmentService: Found ${enrollments.length} enrollments matching child IDs`);
+    console.log(
+      `EnrollmentService: Found ${enrollments.length} enrollments matching child IDs`,
+    );
 
     return enrollments.map((enrollment) =>
       this.calculateEnrichment(enrollment, enrollment.payments),
@@ -149,8 +155,27 @@ export class EnrollmentService {
     let childId = dto.childId;
 
     // Check Parent exists
-    const parent = await this.prisma.parent.findUnique({ where: { userId } });
-    if (!parent) throw new BadRequestException('Parent profile not found');
+    let parent = await this.prisma.parent.findUnique({ where: { userId } });
+
+    if (!parent) {
+      // If parent profile doesn't exist, check if user is a School Owner
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        include: { school: true },
+      });
+
+      if (user && user.role === UserRole.SCHOOL_OWNER && user.school) {
+        // Create Parent profile for School Owner
+        parent = await this.prisma.parent.create({
+          data: {
+            userId: user.id,
+            phoneNumber: user.school.phone, // Use school phone
+          },
+        });
+      } else {
+        throw new BadRequestException('Parent profile not found');
+      }
+    }
 
     if (childId) {
       const child = await this.prisma.child.findUnique({
@@ -199,7 +224,9 @@ export class EnrollmentService {
 
     // 4. Create Enrollment & Payment
     const result = await this.prisma.$transaction(async (tx) => {
-      console.log(`EnrollmentService: Creating enrollment for childId: ${childId}, schoolId: ${dto.schoolId}`);
+      console.log(
+        `EnrollmentService: Creating enrollment for childId: ${childId}, schoolId: ${dto.schoolId}`,
+      );
       const enrollment = await tx.childEnrollment.create({
         data: {
           childId,
@@ -226,6 +253,7 @@ export class EnrollmentService {
           schoolAmount: calculation.amountToSchool,
           receiver: PaymentReceiver.PLATFORM,
           paymentType: PaymentType.FIRST_PAYMENT,
+          status: PaymentTransactionStatus.PENDING,
           isConfirmed: false,
           receiptUrl: dto.receiptUrl,
           paymentDate: new Date(),
@@ -239,7 +267,7 @@ export class EnrollmentService {
       // Fetch child name for notification
       const child = await tx.child.findUnique({
         where: { id: childId },
-        select: { fullName: true }
+        select: { fullName: true },
       });
       const childName = child?.fullName || dto.childName || 'Student';
 
@@ -295,6 +323,7 @@ export class EnrollmentService {
         schoolAmount: amountPaid,
         receiver: PaymentReceiver.SCHOOL, // Installments go to school
         paymentType: PaymentType.INSTALLMENT,
+        status: PaymentTransactionStatus.PENDING,
         isConfirmed: false,
         receiptUrl,
         paymentDate: new Date(),
@@ -356,6 +385,7 @@ export class EnrollmentService {
         where: { id: payment.id },
         data: {
           isConfirmed: true,
+          status: PaymentTransactionStatus.SUCCESS,
           paymentDate: new Date(),
         },
       });
