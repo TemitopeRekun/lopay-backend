@@ -64,7 +64,12 @@ export class AuthService {
       return {
         message: 'User registered successfully',
         accessToken: this.jwtService.sign(payload),
-        user,
+        user: {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          fullName: user.fullName,
+        },
       };
     } catch (error) {
       console.error('Registration failed:', error);

@@ -87,7 +87,12 @@ export class SchoolPaymentsService {
 
       return {
         school,
-        user,
+        user: {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          fullName: user.fullName,
+        },
         message: 'School and School Owner created successfully',
       };
     });
@@ -277,6 +282,7 @@ export class SchoolPaymentsService {
       return {
         id: enrollment.childId, // Use childId as student ID
         studentName: enrollment.child.fullName,
+        childName: enrollment.child.fullName, // Alias for consistency
         className: enrollment.className,
         parentName: enrollment.child.parent.user.fullName || 'Unknown',
         totalFee: enrollment.totalSchoolFee,
@@ -310,12 +316,16 @@ export class SchoolPaymentsService {
     return payments.map((payment) => ({
       id: payment.id,
       date: payment.paymentDate,
+      paymentDate: payment.paymentDate,
       amount: payment.amountPaid,
+      amountPaid: payment.amountPaid,
       studentName: payment.enrollment.child.fullName,
+      childName: payment.enrollment.child.fullName,
       className: payment.enrollment.className,
       schoolName: payment.enrollment.school.name,
       type: payment.paymentType,
-      status: 'SUCCESSFUL', // Since we filtered by isConfirmed: true
+      paymentType: payment.paymentType,
+      status: PaymentTransactionStatus.SUCCESS, // Use consistent Enum value
     }));
   }
 
@@ -338,7 +348,10 @@ export class SchoolPaymentsService {
 
     return payments.map((p) => ({
       ...p,
+      date: p.paymentDate,
+      amount: p.amountPaid,
       studentName: p.enrollment?.child?.fullName,
+      childName: p.enrollment?.child?.fullName,
       className: p.enrollment?.className,
       schoolName: p.enrollment?.school?.name,
     }));
@@ -402,7 +415,16 @@ export class SchoolPaymentsService {
         message: message,
       });
 
-      return updatedPayment;
+      return {
+        ...updatedPayment,
+        amount: updatedPayment.amountPaid,
+        date: updatedPayment.paymentDate,
+        type: updatedPayment.paymentType,
+        studentName: payment.enrollment.child.fullName,
+        childName: payment.enrollment.child.fullName,
+        className: payment.enrollment.className,
+        schoolName: payment.enrollment.school.name,
+      };
     });
   }
 
@@ -451,7 +473,16 @@ export class SchoolPaymentsService {
         message: `Your payment of ${payment.amountPaid} for ${payment.enrollment.child.fullName} at ${payment.enrollment.school.name} has been rejected. Please contact the school.`,
       });
 
-      return updatedPayment;
+      return {
+        ...updatedPayment,
+        amount: updatedPayment.amountPaid,
+        date: updatedPayment.paymentDate,
+        type: updatedPayment.paymentType,
+        studentName: payment.enrollment.child.fullName,
+        childName: payment.enrollment.child.fullName,
+        className: payment.enrollment.className,
+        schoolName: payment.enrollment.school.name,
+      };
     });
   }
 

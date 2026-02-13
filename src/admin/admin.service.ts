@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import {
   PaymentType,
   PaymentReceiver,
@@ -64,6 +64,7 @@ export class AdminService {
           email: dto.ownerEmail,
           password: 'HASHED_PASSWORD_PLACEHOLDER', // In production, we don't store passwords if using Firebase, but DB schema might require it.
           role: UserRole.SCHOOL_OWNER,
+          fullName: dto.ownerName,
         },
       });
 
@@ -84,7 +85,12 @@ export class AdminService {
 
       return {
         school,
-        user,
+        user: {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          fullName: user.fullName,
+        },
         message: 'School and School Owner created successfully',
       };
     });
@@ -92,7 +98,7 @@ export class AdminService {
 
   /** Get all first payments waiting to be settled */
   async getPendingFirstPayments() {
-    return this.prisma.payment.findMany({
+    const payments = await this.prisma.payment.findMany({
       where: {
         paymentType: PaymentType.FIRST_PAYMENT,
         receiver: PaymentReceiver.PLATFORM,
@@ -107,6 +113,17 @@ export class AdminService {
         },
       },
     });
+
+    return payments.map((p) => ({
+      ...p,
+      studentName: p.enrollment?.child?.fullName,
+      childName: p.enrollment?.child?.fullName, // Alias
+      schoolName: p.enrollment?.school?.name,
+      className: p.enrollment?.className,
+      amount: p.amountPaid, // Alias
+      date: p.paymentDate, // Alias
+      type: p.paymentType, // Alias
+    }));
   }
 
   /** Settle school share and activate enrollment */
@@ -131,12 +148,12 @@ export class AdminService {
     });
 
     if (!payment) {
-      throw new BadRequestException('Payment not found or already settled');
+      throw new NotFoundException('Payment not found or already settled');
     }
 
     const { enrollment } = payment;
 
-    return this.prisma.$transaction([
+    await this.prisma.$transaction([
       // 1️⃣ Mark payment as confirmed
       this.prisma.payment.update({
         where: { id: payment.id },
@@ -170,6 +187,11 @@ export class AdminService {
         },
       }),
     ]);
+
+    return {
+      message: 'Payment settled and enrollment activated successfully',
+      paymentId: payment.id,
+    };
   }
 
   /** Platform revenue summary */

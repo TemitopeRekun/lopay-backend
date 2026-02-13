@@ -69,11 +69,22 @@ export class EnrollmentService {
       }
     }
 
+    // Enrich payments with aliases
+    const enrichedPayments = payments.map((p) => ({
+      ...p,
+      amount: p.amountPaid,
+      date: p.paymentDate,
+      type: p.paymentType,
+    }));
+
     return {
       ...enrollment,
+      payments: enrichedPayments, // Return enriched payments
+      studentName: enrollment.child?.fullName, // Standardize with School Service
+      childName: enrollment.child?.fullName,   // Handle "childName" case mentioned by frontend
       totalFee: totalSchoolFee,
       paidAmount,
-      nextDueDate,
+      nextDueDate: nextDueDate ? nextDueDate.toISOString().split('T')[0] : null, // Standardize date format
       nextInstallmentAmount,
     };
   }
@@ -138,7 +149,7 @@ export class EnrollmentService {
     });
 
     if (!enrollment) {
-      throw new BadRequestException('Enrollment not found');
+      throw new NotFoundException('Enrollment not found');
     }
 
     if (enrollment.child.parent.userId !== userId) {
@@ -271,7 +282,14 @@ export class EnrollmentService {
       });
       const childName = child?.fullName || dto.childName || 'Student';
 
-      return { enrollment, payment, calculation, school, childName };
+      return {
+        enrollment,
+        payment,
+        calculation,
+        school,
+        childName,
+        studentName: childName, // Alias for consistency
+      };
     });
 
     // 5. Notify School Owner (Post-Transaction)
@@ -339,7 +357,15 @@ export class EnrollmentService {
       });
     }
 
-    return payment;
+    return {
+      ...payment,
+      amount: payment.amountPaid, // Alias
+      date: payment.paymentDate, // Alias
+      type: payment.paymentType, // Alias
+      studentName: enrollment.child.fullName, // Alias
+      childName: enrollment.child.fullName, // Alias
+      schoolName: enrollment.school.name, // Alias
+    };
   }
 
   async confirmFirstPayment(enrollmentId: string, schoolId: string) {

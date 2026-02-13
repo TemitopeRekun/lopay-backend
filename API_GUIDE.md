@@ -131,11 +131,15 @@ Here is every single route in the app, exactly what you need to send, and what y
   [
     {
       "id": "payment-uuid",
+      "amount": 5000, // Alias for amountPaid
       "amountPaid": 5000,
+      "date": "2023-10-01T12:00:00Z", // Alias for paymentDate
       "paymentDate": "2023-10-01T12:00:00Z",
       "status": "SUCCESS", // PENDING, SUCCESS, FAILED
-      "type": "INSTALLMENT",
+      "type": "INSTALLMENT", // Alias for paymentType
+      "paymentType": "INSTALLMENT",
       "studentName": "John Doe",
+      "childName": "John Doe", // Alias for studentName
       "className": "Grade 1",
       "schoolName": "Springfield Elementary"
     }
@@ -159,7 +163,9 @@ Here is every single route in the app, exactly what you need to send, and what y
     "user": {
       "id": "user-uuid",
       "email": "parent@example.com",
-      "role": "PARENT"
+      "fullName": "John Parent",
+      "role": "PARENT",
+      "createdAt": "2023-10-01T12:00:00Z"
     }
   }
   ```
@@ -209,7 +215,12 @@ Here is every single route in the app, exactly what you need to send, and what y
 - **What you get back**:
   ```json
   {
-    "user": { "id": "...", "email": "...", "role": "SCHOOL_OWNER" },
+    "user": { 
+      "id": "...", 
+      "email": "...", 
+      "fullName": "Principal Skinner",
+      "role": "SCHOOL_OWNER" 
+    },
     "school": { "id": "...", "name": "..." }
   }
   ```
@@ -265,12 +276,18 @@ Here is every single route in the app, exactly what you need to send, and what y
   [
     {
       "id": "payment-uuid-1",
+      "amount": 500, // Alias
       "amountPaid": 500,
       "studentName": "John Doe",
+      "childName": "John Doe", // Alias
       "className": "Grade 1",
       "schoolName": "Springfield Elementary",
       "receiptUrl": "https://firebase...", // The proof of payment image
-      "paymentDate": "2023-10-01T10:00:00Z"
+      "date": "2023-10-01T10:00:00Z", // Alias
+      "paymentDate": "2023-10-01T10:00:00Z",
+      "type": "INSTALLMENT", // Alias
+      "paymentType": "INSTALLMENT",
+      "status": "SUCCESS"
     }
   ]
   ```
@@ -288,6 +305,7 @@ Here is every single route in the app, exactly what you need to send, and what y
   [
     {
       "id": "enrollment-uuid",
+      "studentName": "John Doe", // Alias
       "childName": "John Doe",
       "className": "Grade 1",
       "parentName": "Jane Doe",
@@ -313,8 +331,14 @@ Here is every single route in the app, exactly what you need to send, and what y
 - **What you get back**:
   ```json
   {
-    "status": "success",
-    "message": "First payment confirmed and enrollment activated"
+    "id": "payment-uuid-1",
+    "status": "SUCCESS",
+    "amount": 500,
+    "amountPaid": 500,
+    "studentName": "John Doe",
+    "childName": "John Doe",
+    "date": "2023-10-01T12:00:00Z",
+    "type": "INSTALLMENT"
   }
   ```
 
@@ -333,7 +357,12 @@ Here is every single route in the app, exactly what you need to send, and what y
   ```json
   {
     "id": "payment-uuid",
-    "status": "FAILED"
+    "status": "FAILED",
+    "amount": 500,
+    "amountPaid": 500,
+    "studentName": "John Doe",
+    "childName": "John Doe",
+    "type": "INSTALLMENT"
   }
   ```
 
@@ -385,14 +414,24 @@ Here is every single route in the app, exactly what you need to send, and what y
     {
       "id": "enrollment-uuid",
       "childId": "child-uuid",
+      "studentName": "Little Timmy", // Alias
       "childName": "Little Timmy",
       "schoolName": "Springfield Elementary",
       "schoolId": "school-uuid",
       "className": "Grade 1",
       "remainingBalance": 1500,
       "paymentStatus": "ACTIVE", // PENDING, ACTIVE, COMPLETED, DEFAULTED, FAILED
-      "nextPaymentDue": "2023-11-01",
-      "payments": []
+      "nextDueDate": "2023-11-01", // Standardized date format (YYYY-MM-DD)
+      "payments": [
+        {
+           "amount": 500,
+           "amountPaid": 500,
+           "date": "2023-10-01",
+           "paymentDate": "2023-10-01",
+           "type": "INSTALLMENT",
+           "paymentType": "INSTALLMENT"
+        }
+      ]
     }
   ]
   ```
