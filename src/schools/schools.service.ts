@@ -115,6 +115,39 @@ export class SchoolPaymentsService {
     });
   }
 
+  async getSchoolBankDetails(schoolId: string) {
+    const school = await this.prisma.school.findUnique({
+      where: { id: schoolId },
+      select: {
+        bankName: true,
+        accountName: true,
+        accountNumber: true,
+      },
+    });
+
+    if (!school) {
+      throw new NotFoundException('School not found');
+    }
+
+    return school;
+  }
+
+  async updateSchoolBankDetails(schoolId: string, dto: UpdateSchoolDto) {
+    const school = await this.prisma.school.findUnique({ where: { id: schoolId } });
+    if (!school) {
+      throw new NotFoundException('School not found');
+    }
+
+    return this.prisma.school.update({
+      where: { id: schoolId },
+      data: {
+        bankName: dto.bankName,
+        accountName: dto.accountName,
+        accountNumber: dto.accountNumber,
+      },
+    });
+  }
+
   async deleteSchool(id: string) {
     const school = await this.prisma.school.findUnique({ where: { id } });
     if (!school) throw new NotFoundException('School not found');

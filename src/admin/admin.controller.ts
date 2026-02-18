@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, UseGuards, Query } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../auth/roles.guard';
@@ -24,10 +24,32 @@ export class AdminController {
     return this.adminService.getPendingFirstPayments();
   }
 
+  /** View all pending installment payments across schools (read-only) */
+  @Get('pending-installments')
+  getPendingInstallments() {
+    return this.adminService.getPendingInstallments();
+  }
+
+  /** View students/enrollments for a specific school (read-only) */
+  @Get('schools/:schoolId/students')
+  getSchoolStudents(
+    @Param('schoolId') schoolId: string,
+    @Query('className') className?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.adminService.getSchoolStudents(schoolId, className, search);
+  }
+
   /** Settle school share */
   @Post('settle-first-payment/:paymentId')
   settleFirstPayment(@Param('paymentId') paymentId: string) {
     return this.adminService.settleFirstPayment(paymentId);
+  }
+
+  /** Reject a first payment */
+  @Post('reject-first-payment/:paymentId')
+  rejectFirstPayment(@Param('paymentId') paymentId: string) {
+    return this.adminService.rejectFirstPayment(paymentId);
   }
 
   /** Platform revenue */

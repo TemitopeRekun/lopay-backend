@@ -3,6 +3,7 @@ import {
   PaymentType,
   PaymentReceiver,
   PaymentStatus,
+  PaymentTransactionStatus,
   UserRole,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -192,6 +193,177 @@ export class AdminService {
       message: 'Payment settled and enrollment activated successfully',
       paymentId: payment.id,
     };
+  }
+
+  /** Get all pending installment payments across all schools (read-only) */
+  async getPendingInstallments() {
+    const payments = await this.prisma.payment.findMany({
+      where: {
+        paymentType: PaymentType.INSTALLMENT,
+        isConfirmed: false,
+      },
+      include: {
+        enrollment: {
+          include: {
+            child: true,
+            school: true,
+          },
+        },
+      },
+    });
+
+    return payments.map((p) => ({
+      ...p,
+      date: p.paymentDate,
+      amount: p.amountPaid,
+      studentName: p.enrollment?.child?.fullName,
+      childName: p.enrollment?.child?.fullName,
+      className: p.enrollment?.className,
+      schoolName: p.enrollment?.school?.name,
+    }));
+  }
+
+  /** Reject a pending first payment and mark enrollment as failed */
+  async rejectFirstPayment(paymentId: string) {
+    const payment = await this.prisma.payment.findFirst({
+      where: {
+        id: paymentId,
+        paymentType: PaymentType.FIRST_PAYMENT,
+        receiver: PaymentReceiver.PLATFORM,
+        isConfirmed: false,
+      },
+      include: {
+        enrollment: {
+          include: {
+            school: true,
+            child: {
+              include: { parent: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('First payment not found or already processed');
+    }
+
+    const { enrollment } = payment;
+
+    await this.prisma.$transaction([
+      // 1️⃣ Mark payment as failed (not confirmed)
+      this.prisma.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: PaymentTransactionStatus.FAILED,
+        },
+      }),
+
+      // 2️⃣ Mark enrollment as FAILED (no balance changes)
+      this.prisma.childEnrollment.update({
+        where: { id: payment.enrollmentId },
+        data: { paymentStatus: PaymentStatus.FAILED },
+      }),
+
+      // 3️⃣ Notify School Owner (optional visibility)
+      this.prisma.notification.create({
+        data: {
+          userId: enrollment.school.ownerId,
+          title: 'First Payment Rejected',
+          message:
+            'The platform has rejected the first payment for this enrollment. Please review the receipt or contact the parent.',
+          link: `/school/enrollments/${enrollment.id}`,
+        },
+      }),
+
+      // 4️⃣ Notify Parent
+      this.prisma.notification.create({
+        data: {
+          userId: enrollment.child.parent.userId,
+          title: 'First Payment Rejected',
+          message:
+            'Your first payment could not be verified. Please pay again and upload a clearer receipt.',
+          link: `/parent/enrollments/${enrollment.id}`,
+        },
+      }),
+    ]);
+
+    return {
+      message: 'First payment rejected and enrollment marked as failed',
+      paymentId: payment.id,
+    };
+  }
+
+  /** Get students/enrollments for a specific school (admin view) */
+  async getSchoolStudents(
+    schoolId: string,
+    className?: string,
+    search?: string,
+  ) {
+    const whereClause: any = { schoolId };
+    if (className) {
+      whereClause.className = className;
+    }
+
+    if (search) {
+      whereClause.OR = [
+        { child: { fullName: { contains: search, mode: 'insensitive' } } },
+        {
+          child: {
+            parent: {
+              user: { fullName: { contains: search, mode: 'insensitive' } },
+            },
+          },
+        },
+      ];
+    }
+
+    const enrollments = await this.prisma.childEnrollment.findMany({
+      where: whereClause,
+      include: {
+        child: { include: { parent: { include: { user: true } } } },
+        payments: { orderBy: { paymentDate: 'desc' } },
+      },
+    });
+
+    return enrollments.map((enrollment) => {
+      const confirmedPayments = enrollment.payments.filter(
+        (p) => p.isConfirmed,
+      );
+      const paidAmount = confirmedPayments.reduce(
+        (sum, p) => sum + p.amountPaid,
+        0,
+      );
+
+      let nextDueDate: Date | null = null;
+      if (enrollment.remainingBalance > 0 && confirmedPayments.length > 0) {
+        const lastPayment = confirmedPayments[0];
+        const lastDate = new Date(lastPayment.paymentDate);
+        if (enrollment.installmentFrequency === 'WEEKLY') {
+          lastDate.setDate(lastDate.getDate() + 7);
+        } else {
+          lastDate.setMonth(lastDate.getMonth() + 1);
+        }
+        nextDueDate = lastDate;
+      } else if (enrollment.remainingBalance > 0) {
+        nextDueDate = enrollment.termStartDate;
+      }
+
+      return {
+        id: enrollment.childId,
+        studentName: enrollment.child.fullName,
+        childName: enrollment.child.fullName,
+        className: enrollment.className,
+        parentName: enrollment.child.parent.user.fullName || 'Unknown',
+        totalFee: enrollment.totalSchoolFee,
+        paidAmount: paidAmount,
+        paymentStatus: enrollment.paymentStatus,
+        nextDueDate: nextDueDate
+          ? nextDueDate.toISOString().split('T')[0]
+          : null,
+        avatarUrl: null,
+      };
+    });
   }
 
   /** Platform revenue summary */

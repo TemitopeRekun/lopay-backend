@@ -22,10 +22,12 @@ import { RolesGuard } from './auth/roles.guard';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    ThrottlerModule.forRoot([{
-      ttl: 60000,
-      limit: 100, // Increased from 10 to 100 for production usability
-    }]),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 500, // More generous global limit for dashboard/general traffic
+      },
+    ]),
     AuthModule,
     UsersModule,
     ParentsModule,

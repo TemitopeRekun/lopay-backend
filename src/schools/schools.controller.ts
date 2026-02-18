@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Body,
   Param,
   ForbiddenException,
@@ -13,8 +14,10 @@ import { MarkDefaultedDto } from './dto/mark-defaulted.dto';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../generated/prisma/client';
 import { CurrentUser } from '../common/decorators/user.decorator';
+import { SkipThrottle } from '@nestjs/throttler';
 
 import { CreateClassFeeDto } from './dto/create-class-fee.dto';
+import { UpdateSchoolDto } from './dto/update.school.dto';
 
 @Controller('school-payments')
 export class SchoolPaymentsController {
@@ -64,12 +67,37 @@ export class SchoolPaymentsController {
   }
 
   /** ✅ Get Class Fees for a specific school (Public/Parent access) */
+  @SkipThrottle()
   @Get('fees/:schoolId')
   async getClassFeesForSchool(@Param('schoolId') schoolId: string) {
     return this.schoolPaymentsService.getClassFees(schoolId);
   }
 
+  /** ✅ Get School Bank Details for a specific school (Public/Parent access) */
+  @SkipThrottle()
+  @Get('bank-details/:schoolId')
+  async getSchoolBankDetails(@Param('schoolId') schoolId: string) {
+    return this.schoolPaymentsService.getSchoolBankDetails(schoolId);
+  }
+
+  /** ✅ Update School Bank Details (School Owner Profile) */
+  @Put('bank-details')
+  @Roles(UserRole.SCHOOL_OWNER)
+  async updateSchoolBankDetails(
+    @Body() dto: UpdateSchoolDto,
+    @CurrentUser() user: any,
+  ) {
+    if (!user.schoolId) {
+      throw new ForbiddenException('User is not associated with any school');
+    }
+    return this.schoolPaymentsService.updateSchoolBankDetails(
+      user.schoolId,
+      dto,
+    );
+  }
+
   /** ✅ Get School Payment History */
+  @SkipThrottle()
   @Get('history')
   @Roles(UserRole.SCHOOL_OWNER)
   async getHistory(@CurrentUser() user: any) {
@@ -80,6 +108,7 @@ export class SchoolPaymentsController {
   }
 
   /** ✅ Get School Dashboard Stats */
+  @SkipThrottle()
   @Get('stats')
   @Roles(UserRole.SCHOOL_OWNER)
   async getDashboardStats(@CurrentUser() user: any) {
@@ -90,6 +119,7 @@ export class SchoolPaymentsController {
   }
 
   /** ✅ Get All Students (Optional Class Filter & Search) */
+  @SkipThrottle()
   @Get('students')
   @Roles(UserRole.SCHOOL_OWNER)
   async getStudents(
@@ -104,6 +134,7 @@ export class SchoolPaymentsController {
   }
 
   /** ✅ List all pending installment payments for this school */
+  @SkipThrottle()
   @Get('pending')
   @Roles(UserRole.SCHOOL_OWNER)
   async getPendingPayments(@CurrentUser() user: any) {

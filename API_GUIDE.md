@@ -225,6 +225,83 @@ Here is every single route in the app, exactly what you need to send, and what y
   }
   ```
 
+#### 4. Super Admin: View Pending First Payments
+
+- **Method**: `GET`
+- **URL**: `/admin/pending-first-payments`
+- **Header**: `Authorization: Bearer <token>` (Must be Super Admin)
+- **What you get back (Array)**:
+  ```json
+  [
+    {
+      "id": "payment-uuid",
+      "studentName": "John Doe",
+      "childName": "John Doe",
+      "schoolName": "Springfield Elementary",
+      "className": "Grade 1",
+      "amount": 50000,
+      "date": "2023-10-01T10:00:00Z",
+      "type": "FIRST_PAYMENT",
+      "paymentType": "FIRST_PAYMENT"
+    }
+  ]
+  ```
+
+#### 5. Super Admin: Settle or Reject First Payment
+
+- **Settle (Approve)**
+  - **Method**: `POST`
+  - **URL**: `/admin/settle-first-payment/:paymentId`
+  - **Header**: `Authorization: Bearer <token>` (Must be Super Admin)
+  - **What happens**:
+    - First `Payment` → `status = "SUCCESS"`, `isConfirmed = true`.
+    - `ChildEnrollment` → `paymentStatus = "ACTIVE"`.
+
+- **Reject**
+  - **Method**: `POST`
+  - **URL**: `/admin/reject-first-payment/:paymentId`
+  - **Header**: `Authorization: Bearer <token>` (Must be Super Admin)
+  - **What happens**:
+    - First `Payment` → `status = "FAILED"`, `isConfirmed` remains `false`.
+    - `ChildEnrollment` → `paymentStatus = "FAILED"` (no balance changes).
+    - Notifications are sent to School Owner and Parent explaining that the first payment was rejected and parent should pay again with a clearer receipt.
+
+#### 6. Super Admin: View Pending Installment Payments (Read-Only)
+
+- **Method**: `GET`
+- **URL**: `/admin/pending-installments`
+- **Header**: `Authorization: Bearer <token>` (Must be Super Admin)
+- **What you get back (Array)**:
+  ```json
+  [
+    {
+      "id": "payment-uuid-1",
+      "amount": 500,
+      "amountPaid": 500,
+      "studentName": "John Doe",
+      "childName": "John Doe",
+      "className": "Grade 1",
+      "schoolName": "Springfield Elementary",
+      "receiptUrl": "https://firebase...",
+      "date": "2023-10-01T10:00:00Z",
+      "paymentDate": "2023-10-01T10:00:00Z",
+      "type": "INSTALLMENT",
+      "paymentType": "INSTALLMENT"
+    }
+  ]
+  ```
+- **Note**: This endpoint is **read-only**. Only `SCHOOL_OWNER` users can confirm or reject installments via `/school-payments/confirm` and `/school-payments/reject`.
+
+#### 6. Super Admin: View Students for a School (Read-Only)
+
+- **Method**: `GET`
+- **URL**: `/admin/schools/:schoolId/students`
+- **Header**: `Authorization: Bearer <token>` (Must be Super Admin)
+- **Query Params**:
+  - `?className=Grade 1` (Optional: Filter by class)
+  - `?search=John` (Optional: Search by student or parent name)
+- **What you get back**: Same shape as `/school-payments/students` (see below).
+
 ---
 
 ### 🏫 School Owner Actions
@@ -319,6 +396,110 @@ Here is every single route in the app, exactly what you need to send, and what y
 
 #### 8. Confirm a Payment
 
+#### 10. Update School Bank Details (Profile)
+
+- **Method**: `PUT`
+- **URL**: `/school-payments/bank-details`
+- **Header**: `Authorization: Bearer <token>` (Must be School Owner)
+- **What to send (Body)**:
+  ```json
+  {
+    "bankName": "Springfield Bank",
+    "accountName": "Springfield Elementary School",
+    "accountNumber": "1234567890"
+  }
+  ```
+- **What you get back** (example):
+  ```json
+  {
+    "bankName": "Springfield Bank",
+    "accountName": "Springfield Elementary School",
+    "accountNumber": "1234567890"
+  }
+  ```
+
+Use this in the School Owner profile/settings screen when they need to change their payout account.
+
+#### 8. Confirm a Payment
+
+#### 10. Update School Bank Details (Profile)
+
+- **Method**: `PUT`
+- **URL**: `/school-payments/bank-details`
+- **Header**: `Authorization: Bearer <token>` (Must be School Owner)
+- **What to send (Body)**:
+  ```json
+  {
+    "bankName": "Springfield Bank",
+    "accountName": "Springfield Elementary School",
+    "accountNumber": "1234567890"
+  }
+  ```
+- **What you get back** (example):
+  ```json
+  {
+    "bankName": "Springfield Bank",
+    "accountName": "Springfield Elementary School",
+    "accountNumber": "1234567890"
+  }
+  ```
+
+Use this in the School Owner profile/settings screen when they need to change their payout account.
+
+#### 8. Confirm a Payment
+
+#### 10. Update School Bank Details (Profile)
+
+- **Method**: `PUT`
+- **URL**: `/school-payments/bank-details`
+- **Header**: `Authorization: Bearer <token>` (Must be School Owner)
+- **What to send (Body)**:
+  ```json
+  {
+    "bankName": "Springfield Bank",
+    "accountName": "Springfield Elementary School",
+    "accountNumber": "1234567890"
+  }
+  ```
+- **What you get back** (example):
+  ```json
+  {
+    "bankName": "Springfield Bank",
+    "accountName": "Springfield Elementary School",
+    "accountNumber": "1234567890"
+  }
+  ```
+
+Use this in the School Owner profile/settings screen when they need to change their payout account.
+
+#### 8. Confirm a Payment
+
+#### 10. Update School Bank Details (Profile Settings)
+
+- **Method**: `PUT`
+- **URL**: `/school-payments/bank-details`
+- **Header**: `Authorization: Bearer <token>` (Must be School Owner)
+- **What to send (Body)**:
+  ```json
+  {
+    "bankName": "Springfield Bank",
+    "accountName": "Springfield Elementary School",
+    "accountNumber": "1234567890"
+  }
+  ```
+- **What you get back** (example):
+  ```json
+  {
+    "bankName": "Springfield Bank",
+    "accountName": "Springfield Elementary School",
+    "accountNumber": "1234567890"
+  }
+  ```
+
+Use this in the School Owner profile/settings screen when they need to change their payout account.
+
+#### 8. Confirm a Payment
+
 - **Method**: `POST`
 - **URL**: `/school-payments/confirm`
 - **Header**: `Authorization: Bearer <token>`
@@ -402,6 +583,22 @@ Here is every single route in the app, exactly what you need to send, and what y
     }
   ]
   ```
+
+#### 10. Get School Bank Details (For Installment Payments)
+
+- **Method**: `GET`
+- **URL**: `/school-payments/bank-details/:schoolId`
+- **Header**: `None` (Public/Parent access)
+- **What you get back**:
+  ```json
+  {
+    "bankName": "Springfield Bank",
+    "accountName": "Springfield Elementary School",
+    "accountNumber": "1234567890"
+  }
+  ```
+
+> Use this when building the parent installment payment screen so you can display the correct school account details.
 
 #### 11. Get My Children
 
@@ -572,3 +769,110 @@ Here is every single route in the app, exactly what you need to send, and what y
   - _Fix:_ You are logged in as a **Parent** but trying to access a **School Owner** page.
 - **400 Bad Request**: "You sent me garbage."
   - _Fix:_ You are probably missing a field in the Body (like sending `email` instead of `username`). Check the [Swagger Docs](http://localhost:3000/api).
+
+---
+
+## 7. End-to-End Payment Flow (From First Payment to Completion)
+
+This section shows the full payment journey: from the very first deposit to the final installment.
+
+### Step 1: Parent checks school and fees
+
+1. **List schools** (for dropdown)
+   - `GET /schools`
+2. **Get fees for a school**
+   - `GET /school-payments/fees/:schoolId`
+3. **Calculate structure (optional UI helper)**
+   - `POST /payment/calculate-structure`
+
+### Step 2: Parent starts an enrollment (First Payment)
+
+1. **Create enrollment + first payment**
+   - `POST /enrollments`
+   - Body includes: `schoolId`, `className`, `childId` or `childName`, `firstPaymentPaid`, dates, `receiptUrl`.
+   - Backend creates:
+     - `ChildEnrollment` with `paymentStatus = "PENDING"`.
+     - `Payment` record with:
+       - `paymentType = "FIRST_PAYMENT"`
+       - `status = "PENDING"`
+       - `isConfirmed = false`
+       - `receiver = "PLATFORM"`
+
+2. **What parent sees after this**
+   - On `GET /enrollments/my-children` the enrollment appears with:
+     - `paymentStatus = "PENDING"`
+     - `remainingBalance` set
+     - First payment visible in `payments[]` with `type = "FIRST_PAYMENT"` and `status = "PENDING"`.
+
+### Step 3: First payment confirmation (activate enrollment)
+
+There are two supported ways to confirm the first payment. The recommended flow for LoPay is that the **platform admin (SUPER_ADMIN)** settles it.
+
+1. **Platform admin settles the first payment (recommended)**
+   - List pending first payments:
+     - `GET /admin/pending-first-payments`
+   - When the admin clicks "Settle" for a payment:
+     - `POST /admin/settle-first-payment/:paymentId`
+   - Backend updates:
+     - The first `Payment` → `status = "SUCCESS"`, `isConfirmed = true`.
+     - The `ChildEnrollment` → `paymentStatus = "ACTIVE"`.
+
+2. **Alternative: School owner confirms first payment**
+   - `POST /enrollments/confirm-first-payment`
+   - Body: `{ "enrollmentId": "..." }`
+   - Backend performs equivalent updates for that enrollment.
+
+3. **After confirmation (either path)**
+   - Parent’s `GET /enrollments/my-children` now shows:
+     - `paymentStatus = "ACTIVE"`
+     - First payment in `payments[]` with `status = "SUCCESS"`.
+
+### Step 4: Ongoing installment payments (go to the school)
+
+1. **Parent pays an installment**
+   - `POST /enrollments/pay-installment`
+   - Body: `{ "enrollmentId", "amountPaid", "receiptUrl" }`
+   - Backend creates `Payment` with:
+     - `paymentType = "INSTALLMENT"`
+     - `status = "PENDING"`
+     - `isConfirmed = false`
+     - `receiver = "SCHOOL"`
+
+2. **School owner sees pending installments**
+   - `GET /school-payments/pending`
+   - Returns an array of pending **installment** payments only:
+     - `paymentType = "INSTALLMENT"`
+     - `isConfirmed = false`
+
+3. **School approves or rejects an installment**
+   - Approve: `POST /school-payments/confirm` with `{ "paymentId" }`
+     - Payment → `status = "SUCCESS"`, `isConfirmed = true`.
+     - Enrollment → `remainingBalance` reduced; if balance ≤ 0, `paymentStatus = "COMPLETED"`.
+   - Reject: `POST /school-payments/reject` with `{ "paymentId" }`
+     - Payment → `status = "FAILED"` (still `isConfirmed = false`).
+     - If it was a first payment (edge case), enrollment may become `FAILED`.
+
+### Step 5: History and reconciliation
+
+- **Parent view (per child)**
+  - `GET /enrollments/my-children`
+  - Shows each child’s enrollment, `paymentStatus`, `remainingBalance`, and all `payments[]` (first + installments), each with:
+    - `status` (`PENDING`, `SUCCESS`, `FAILED`)
+    - `type` (`FIRST_PAYMENT`, `INSTALLMENT`)
+    - `amount` / `amountPaid`, `date` / `paymentDate`.
+
+- **School view (per school)**
+  - `GET /school-payments/history`
+  - Shows confirmed payments for that school (mostly installments) for their own records.
+
+- **Platform/Admin view (global)**
+  - `GET /transactions`
+  - Shows all payments (first + installments) across all schools and parents for audit and dispute resolution.
+  - `GET /admin/pending-first-payments` – queue of first payments waiting for SUPER_ADMIN settlement.
+  - `GET /admin/pending-installments` – read-only list of pending installment payments across all schools.
+  - `GET /admin/schools/:schoolId/students` – read-only view of students/enrollments for a specific school.
+
+This flow ensures:
+- First payments are controlled and tracked by the platform (onboarding and activation) via the admin endpoints.
+- Installments are controlled by the school (ongoing collections) via `/school-payments/*`.
+- Every payment is recorded and can be audited through the history and transactions endpoints.

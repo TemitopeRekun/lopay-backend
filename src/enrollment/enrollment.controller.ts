@@ -5,6 +5,7 @@ import { ConfirmEnrollmentDto } from './dto/confirm.enrollment.dto';
 import { CurrentUser } from '../common/decorators/user.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../generated/prisma/client';
+import { SkipThrottle } from '@nestjs/throttler';
 
 import { CreateInstallmentDto } from './dto/create.installment.dto';
 
@@ -12,6 +13,7 @@ import { CreateInstallmentDto } from './dto/create.installment.dto';
 export class EnrollmentController {
   constructor(private readonly enrollmentService: EnrollmentService) {}
 
+  @SkipThrottle()
   @Get('my-children')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
   async getMyChildren(@CurrentUser() user: any) {
@@ -19,6 +21,7 @@ export class EnrollmentController {
     return this.enrollmentService.getParentEnrollments(user.userId);
   }
 
+  @SkipThrottle()
   @Get(':id/history')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
   async getEnrollmentHistory(@Param('id') id: string, @CurrentUser() user: any) {
