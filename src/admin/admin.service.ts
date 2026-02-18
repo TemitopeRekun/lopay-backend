@@ -104,6 +104,7 @@ export class AdminService {
         paymentType: PaymentType.FIRST_PAYMENT,
         receiver: PaymentReceiver.PLATFORM,
         isConfirmed: false,
+        status: PaymentTransactionStatus.PENDING,
       },
       include: {
         enrollment: {
@@ -158,7 +159,7 @@ export class AdminService {
       // 1️⃣ Mark payment as confirmed
       this.prisma.payment.update({
         where: { id: payment.id },
-        data: { isConfirmed: true },
+        data: { isConfirmed: true, status: PaymentTransactionStatus.SUCCESS },
       }),
 
       // 2️⃣ Activate enrollment
@@ -201,6 +202,7 @@ export class AdminService {
       where: {
         paymentType: PaymentType.INSTALLMENT,
         isConfirmed: false,
+        status: PaymentTransactionStatus.PENDING,
       },
       include: {
         enrollment: {

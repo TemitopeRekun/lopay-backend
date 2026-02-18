@@ -234,7 +234,7 @@ export class PaymentService {
 
     return payments.map(p => ({
       ...p,
-      status: p.isConfirmed ? 'success' : 'pending',
+      status: p.status,
       studentName: p.enrollment?.child?.fullName,
       className: p.enrollment?.className,
       schoolName: p.enrollment?.school?.name,

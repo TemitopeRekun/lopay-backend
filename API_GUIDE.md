@@ -142,9 +142,24 @@ Here is every single route in the app, exactly what you need to send, and what y
       "childName": "John Doe", // Alias for studentName
       "className": "Grade 1",
       "schoolName": "Springfield Elementary"
+    },
+    {
+      "id": "payment-uuid-2",
+      "amount": 5000, // Alias for amountPaid
+      "amountPaid": 5000,
+      "date": "2023-10-02T12:00:00Z", // Alias for paymentDate
+      "paymentDate": "2023-10-02T12:00:00Z",
+      "status": "FAILED",
+      "type": "FIRST_PAYMENT",
+      "paymentType": "FIRST_PAYMENT",
+      "studentName": "John Doe",
+      "childName": "John Doe",
+      "className": "Grade 1",
+      "schoolName": "Springfield Elementary"
     }
   ]
   ```
+- `status` comes directly from the payment record and is always one of `"PENDING"`, `"SUCCESS"`, or `"FAILED"`. Failed and rejected payments remain in this history so all dashboards (Parent, School Owner, Admin) can see them for audits and support.
 
 #### 1. Login
 
@@ -242,10 +257,12 @@ Here is every single route in the app, exactly what you need to send, and what y
       "amount": 50000,
       "date": "2023-10-01T10:00:00Z",
       "type": "FIRST_PAYMENT",
-      "paymentType": "FIRST_PAYMENT"
+      "paymentType": "FIRST_PAYMENT",
+      "status": "PENDING"
     }
   ]
   ```
+- Only first payments where `status = "PENDING"` and `isConfirmed = false` are returned here. Once the Super Admin settles or rejects a payment, it disappears from this list but remains visible in `/transactions` and in the parent’s enrollment history.
 
 #### 5. Super Admin: Settle or Reject First Payment
 
@@ -286,11 +303,13 @@ Here is every single route in the app, exactly what you need to send, and what y
       "date": "2023-10-01T10:00:00Z",
       "paymentDate": "2023-10-01T10:00:00Z",
       "type": "INSTALLMENT",
-      "paymentType": "INSTALLMENT"
+      "paymentType": "INSTALLMENT",
+      "status": "PENDING"
     }
   ]
   ```
 - **Note**: This endpoint is **read-only**. Only `SCHOOL_OWNER` users can confirm or reject installments via `/school-payments/confirm` and `/school-payments/reject`.
+- Only installment payments where `status = "PENDING"` and `isConfirmed = false` are returned here. After a school owner confirms or rejects an installment, it disappears from this list but remains visible in `/transactions` and in the parent’s enrollment history.
 
 #### 6. Super Admin: View Students for a School (Read-Only)
 
@@ -343,6 +362,17 @@ Here is every single route in the app, exactly what you need to send, and what y
   }
   ```
 
+- **How the numbers are calculated**:
+  - `totalRevenue`:
+    - Sums `schoolAmount` for all **confirmed** payments for this school.
+    - Includes:
+      - The school’s share of each confirmed first payment (after admin settles it).
+      - All confirmed installment payments.
+    - This value increases incrementally as students make first payments and pay installments that get confirmed.
+  - `pendingRevenue`:
+    - Sums `amountPaid` for all **unconfirmed** payments for this school.
+    - Represents what parents claim to have paid but which the school (or admin, for first payment) has not yet approved.
+
 #### 6. Get Pending Payments
 
 - **Method**: `GET`
@@ -364,10 +394,11 @@ Here is every single route in the app, exactly what you need to send, and what y
       "paymentDate": "2023-10-01T10:00:00Z",
       "type": "INSTALLMENT", // Alias
       "paymentType": "INSTALLMENT",
-      "status": "SUCCESS"
+      "status": "PENDING"
     }
   ]
   ```
+- Only installment payments where `status = "PENDING"` and `isConfirmed = false` are returned here. After the school owner confirms or rejects a payment, it disappears from this list but remains visible in `/transactions` and in the parent’s enrollment history.
 
 #### 7. Get All Students (Search & Filter)
 

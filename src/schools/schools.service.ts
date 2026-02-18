@@ -226,13 +226,13 @@ export class SchoolPaymentsService {
           where: { schoolId },
         }),
 
-        // 2. Confirmed Payments (Revenue)
+        // 2. Confirmed Payments (School Revenue)
         this.prisma.payment.aggregate({
           where: { schoolId, isConfirmed: true },
-          _sum: { amountPaid: true },
+          _sum: { schoolAmount: true },
         }),
 
-        // 3. Pending Payments
+        // 3. Pending Payments (Unconfirmed amounts parents claim to have paid)
         this.prisma.payment.aggregate({
           where: { schoolId, isConfirmed: false },
           _sum: { amountPaid: true },
@@ -245,7 +245,7 @@ export class SchoolPaymentsService {
         }),
       ]);
 
-    const totalRevenue = confirmedPayments._sum.amountPaid || 0;
+    const totalRevenue = confirmedPayments._sum.schoolAmount || 0;
     const pendingRevenue = pendingPayments._sum.amountPaid || 0;
     const defaultedAmount = enrollments.reduce(
       (sum, e) => sum + e.remainingBalance,
@@ -368,6 +368,7 @@ export class SchoolPaymentsService {
         schoolId: schoolId,
         isConfirmed: false,
         paymentType: 'INSTALLMENT',
+        status: PaymentTransactionStatus.PENDING,
       },
       include: {
         enrollment: {
