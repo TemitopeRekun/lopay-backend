@@ -45,7 +45,11 @@ export class CreateEnrollmentDto {
   @IsDate()
   termEndDate: Date;
 
-  @ApiPropertyOptional({ example: 'https://firebase-storage...', description: 'Proof of payment URL' })
+  @ApiPropertyOptional({
+    example: 'receipts/user-uuid/uuid_receipt.jpg',
+    description:
+      'Receipt storage path returned by POST /documents/receipts/upload-url',
+  })
   @IsString()
   @IsOptional()
   receiptUrl?: string;

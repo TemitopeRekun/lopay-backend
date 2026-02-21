@@ -3,8 +3,10 @@ import { PaymentService } from './payment.service';
 import { PaymentsController } from './payments.controller';
 import { TransactionsController } from './transactions.controller';
 import { PrismaService } from '../prisma/prisma.service';
+import { DocumentsModule } from '../documents/documents.module';
 
 @Module({
+  imports: [DocumentsModule],
   providers: [PaymentService, PrismaService],
   controllers: [PaymentsController, TransactionsController],
   exports: [PaymentService],

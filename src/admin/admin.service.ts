@@ -10,12 +10,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import * as admin from 'firebase-admin';
 import { CreateSchoolDto } from './dto/create.school.dto';
+import { DocumentsService } from '../documents/documents.service';
 
 @Injectable()
 export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly documentsService: DocumentsService,
     @Inject('FIREBASE_ADMIN') private readonly firebaseAdmin: admin.app.App,
   ) {}
 
@@ -98,7 +100,7 @@ export class AdminService {
   }
 
   /** Get all first payments waiting to be settled */
-  async getPendingFirstPayments() {
+  async getPendingFirstPayments(includeReceiptSignedUrls = false) {
     const payments = await this.prisma.payment.findMany({
       where: {
         paymentType: PaymentType.FIRST_PAYMENT,
@@ -116,7 +118,23 @@ export class AdminService {
       },
     });
 
-    return payments.map((p) => ({
+    const results = await Promise.all(
+      payments.map(async (p) => {
+        let receiptSignedUrl: string | null = null;
+        if (includeReceiptSignedUrls && p.receiptUrl) {
+          try {
+            receiptSignedUrl = (
+              await this.documentsService.createSignedUrlForPath(
+                p.receiptUrl,
+              )
+            ).signedUrl;
+          } catch {
+            // If the object no longer exists in storage, don't fail the whole list.
+            receiptSignedUrl = null;
+          }
+        }
+
+        return {
       ...p,
       studentName: p.enrollment?.child?.fullName,
       childName: p.enrollment?.child?.fullName, // Alias
@@ -125,7 +143,12 @@ export class AdminService {
       amount: p.amountPaid, // Alias
       date: p.paymentDate, // Alias
       type: p.paymentType, // Alias
-    }));
+          receiptSignedUrl,
+        };
+      }),
+    );
+
+    return results;
   }
 
   /** Settle school share and activate enrollment */
@@ -382,6 +405,199 @@ export class AdminService {
 
     return {
       totalRevenue: result._sum.platformAmount ?? 0,
+    };
+  }
+
+  /** Global transactions for admin dashboard */
+  async getTransactions(
+    includeReceiptSignedUrls = false,
+    receiptType: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT' = 'ALL',
+  ) {
+    const whereClause: any = {};
+    if (receiptType !== 'ALL') {
+      whereClause.paymentType = receiptType;
+    }
+
+    const payments = await this.prisma.payment.findMany({
+      where: whereClause,
+      include: {
+        enrollment: {
+          include: {
+            child: true,
+            school: true,
+          },
+        },
+      },
+      orderBy: { paymentDate: 'desc' },
+    });
+
+    const results = await Promise.all(
+      payments.map(async (p) => {
+        let receiptSignedUrl: string | null = null;
+        if (includeReceiptSignedUrls && p.receiptUrl) {
+          try {
+            receiptSignedUrl = (
+              await this.documentsService.createSignedUrlForPath(
+                p.receiptUrl,
+              )
+            ).signedUrl;
+          } catch {
+            // If the object no longer exists in storage, don't fail the whole list.
+            receiptSignedUrl = null;
+          }
+        }
+
+        return {
+          ...p,
+          amount: p.amountPaid,
+          date: p.paymentDate,
+          type: p.paymentType,
+          studentName: p.enrollment?.child?.fullName,
+          childName: p.enrollment?.child?.fullName,
+          schoolName: p.enrollment?.school?.name,
+          className: p.enrollment?.className,
+          platformFeeAmount: p.platformAmount,
+          platformFeePercentage: 0.025,
+          receiptSignedUrl,
+        };
+      }),
+    );
+
+    return results;
+  }
+
+  /** Global student summary for admin dashboard */
+  async getStudentsSummary() {
+    const [
+      totalStudents,
+      activeStudents,
+      pendingFirstPayments,
+      defaultedStudents,
+      outstandingBalance,
+    ] = await Promise.all([
+      this.prisma.childEnrollment.count(),
+      this.prisma.childEnrollment.count({
+        where: { paymentStatus: PaymentStatus.ACTIVE },
+      }),
+      this.prisma.payment.count({
+        where: {
+          paymentType: PaymentType.FIRST_PAYMENT,
+          receiver: PaymentReceiver.PLATFORM,
+          isConfirmed: false,
+          status: PaymentTransactionStatus.PENDING,
+        },
+      }),
+      this.prisma.childEnrollment.count({
+        where: { paymentStatus: PaymentStatus.DEFAULTED },
+      }),
+      this.prisma.childEnrollment.aggregate({
+        where: {
+          paymentStatus: {
+            in: [PaymentStatus.PENDING, PaymentStatus.ACTIVE, PaymentStatus.DEFAULTED],
+          },
+        },
+        _sum: { remainingBalance: true },
+      }),
+    ]);
+
+    return {
+      totalStudents,
+      activeStudents,
+      pendingFirstPayments,
+      defaultedStudents,
+      totalOutstandingBalance: outstandingBalance._sum.remainingBalance ?? 0,
+    };
+  }
+
+  /** Optional: per-school summary */
+  async getSchoolsSummary() {
+    const schools = await this.prisma.school.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+
+    const enrollmentCounts = await this.prisma.childEnrollment.groupBy({
+      by: ['schoolId'],
+      _count: { _all: true },
+    });
+
+    const pendingAmounts = await this.prisma.payment.groupBy({
+      by: ['schoolId'],
+      where: { isConfirmed: false },
+      _sum: { amountPaid: true },
+    });
+
+    const collectedAmounts = await this.prisma.payment.groupBy({
+      by: ['schoolId'],
+      where: { isConfirmed: true },
+      _sum: { schoolAmount: true },
+    });
+
+    const enrollmentMap = new Map(
+      enrollmentCounts.map((e) => [e.schoolId, e._count._all]),
+    );
+    const pendingMap = new Map(
+      pendingAmounts.map((p) => [p.schoolId, p._sum.amountPaid ?? 0]),
+    );
+    const collectedMap = new Map(
+      collectedAmounts.map((c) => [c.schoolId, c._sum.schoolAmount ?? 0]),
+    );
+
+    return schools.map((s) => ({
+      schoolId: s.id,
+      schoolName: s.name,
+      totalStudents: enrollmentMap.get(s.id) ?? 0,
+      pendingAmount: pendingMap.get(s.id) ?? 0,
+      collectedAmount: collectedMap.get(s.id) ?? 0,
+    }));
+  }
+
+  /** One-call admin overview */
+  async getOverview() {
+    const [revenue, studentsSummary, recentTransactions] = await Promise.all([
+      this.getPlatformRevenue(),
+      this.getStudentsSummary(),
+      this.getTransactions(false, 'ALL'),
+    ]);
+
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+    const paymentsForSeries = await this.prisma.payment.findMany({
+      where: {
+        receiver: PaymentReceiver.PLATFORM,
+        isConfirmed: true,
+        paymentDate: { gte: start },
+      },
+      select: { paymentDate: true, platformAmount: true },
+      orderBy: { paymentDate: 'asc' },
+    });
+
+    const months: { key: string; label: string; value: number }[] = [];
+    for (let i = 5; i >= 0; i -= 1) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const label = d.toLocaleString('en-US', { month: 'short' });
+      months.push({ key, label, value: 0 });
+    }
+
+    const monthMap = new Map(months.map((m) => [m.key, m]));
+    for (const p of paymentsForSeries) {
+      const d = new Date(p.paymentDate);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const bucket = monthMap.get(key);
+      if (bucket) {
+        bucket.value += p.platformAmount ?? 0;
+      }
+    }
+
+    return {
+      totalRevenue: revenue.totalRevenue,
+      totalStudents: studentsSummary.totalStudents,
+      activeStudents: studentsSummary.activeStudents,
+      pendingApprovals: studentsSummary.pendingFirstPayments,
+      totalOutstandingBalance: studentsSummary.totalOutstandingBalance,
+      recentTransactions: recentTransactions.slice(0, 10),
+      revenueSeries: months.map(({ label, value }) => ({ label, value })),
     };
   }
 }

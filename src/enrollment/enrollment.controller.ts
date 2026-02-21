@@ -17,7 +17,6 @@ export class EnrollmentController {
   @Get('my-children')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
   async getMyChildren(@CurrentUser() user: any) {
-    console.log('EnrollmentController: getMyChildren for user:', user);
     return this.enrollmentService.getParentEnrollments(user.userId);
   }
 

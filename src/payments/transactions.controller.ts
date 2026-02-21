@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../common/decorators/user.decorator';
@@ -12,8 +12,18 @@ export class TransactionsController {
 
   @SkipThrottle()
   @Get()
-  async getTransactions(@CurrentUser() user: any) {
-    console.log('TransactionsController: getTransactions for user:', user);
-    return this.paymentService.getHistory(user.userId, user.role, user.schoolId);
+  async getTransactions(
+    @CurrentUser() user: any,
+    @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
+    @Query('receiptType') receiptType?: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT',
+  ) {
+    const include = includeReceiptSignedUrls === 'true';
+    return this.paymentService.getHistory(
+      user.userId,
+      user.role,
+      user.schoolId,
+      include,
+      receiptType ?? 'ALL',
+    );
   }
 }

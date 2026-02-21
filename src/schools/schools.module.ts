@@ -5,9 +5,10 @@ import { SchoolPaymentsService } from './schools.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { FirebaseModule } from '../firebase/firebase.module';
+import { DocumentsModule } from '../documents/documents.module';
 
 @Module({
-  imports: [PrismaModule, NotificationsModule, FirebaseModule],
+  imports: [PrismaModule, NotificationsModule, FirebaseModule, DocumentsModule],
   controllers: [SchoolPaymentsController, SchoolsManagementController],
   providers: [SchoolPaymentsService],
 })

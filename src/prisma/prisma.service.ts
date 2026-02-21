@@ -11,7 +11,17 @@ export class PrismaService
 {
   constructor(config: ConfigService) {
     const connectionString = config.get<string>('DATABASE_URL');
-    const pool = new Pool({ connectionString });
+    const nodeEnv = config.get<string>('NODE_ENV') ?? 'development';
+    const pool = new Pool({
+      connectionString,
+      ...(nodeEnv === 'production'
+        ? {
+            ssl: {
+              rejectUnauthorized: false,
+            },
+          }
+        : {}),
+    });
     const adapter = new PrismaPg(pool);
     super({ adapter });
   }

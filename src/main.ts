@@ -2,9 +2,12 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import * as bodyParser from 'body-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.use(bodyParser.json({ limit: '10mb' }));
+  app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true, // Strips properties that are not in the DTO
@@ -13,10 +16,22 @@ async function bootstrap() {
   );
 
   // Enable CORS
+  const nodeEnv = process.env.NODE_ENV ?? 'development';
+  const corsOriginsRaw = process.env.CORS_ORIGINS ?? '';
+  const corsOrigins = corsOriginsRaw
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+
   app.enableCors({
-    origin: '*', // Allow all origins for development. CHANGE THIS IN PRODUCTION!
+    origin:
+      corsOrigins.length > 0
+        ? corsOrigins
+        : nodeEnv === 'development'
+          ? true
+          : false,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    credentials: true,
+    credentials: corsOrigins.length > 0,
   });
 
   // Swagger Configuration

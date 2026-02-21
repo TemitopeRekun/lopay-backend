@@ -15,12 +15,14 @@ import {
 import * as admin from 'firebase-admin';
 import { CreateSchoolDto } from '../admin/dto/create.school.dto';
 import { UpdateSchoolDto } from './dto/update.school.dto';
+import { DocumentsService } from '../documents/documents.service';
 
 @Injectable()
 export class SchoolPaymentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly documentsService: DocumentsService,
     @Inject('FIREBASE_ADMIN') private readonly firebaseAdmin: admin.app.App,
   ) {}
 
@@ -329,11 +331,14 @@ export class SchoolPaymentsService {
     });
   }
 
-  async getHistory(schoolId: string) {
+  async getHistory(
+    schoolId: string,
+    includeReceiptSignedUrls = false,
+    receiptType: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT' = 'ALL',
+  ) {
     const payments = await this.prisma.payment.findMany({
       where: {
         schoolId,
-        isConfirmed: true,
       },
       include: {
         enrollment: {
@@ -346,23 +351,72 @@ export class SchoolPaymentsService {
       orderBy: { paymentDate: 'desc' },
     });
 
-    return payments.map((payment) => ({
-      id: payment.id,
-      date: payment.paymentDate,
-      paymentDate: payment.paymentDate,
-      amount: payment.amountPaid,
-      amountPaid: payment.amountPaid,
-      studentName: payment.enrollment.child.fullName,
-      childName: payment.enrollment.child.fullName,
-      className: payment.enrollment.className,
-      schoolName: payment.enrollment.school.name,
-      type: payment.paymentType,
-      paymentType: payment.paymentType,
-      status: PaymentTransactionStatus.SUCCESS, // Use consistent Enum value
-    }));
+    if (!includeReceiptSignedUrls) {
+      return payments.map((payment) => ({
+        id: payment.id,
+        schoolId: payment.schoolId,
+        date: payment.paymentDate,
+        paymentDate: payment.paymentDate,
+        amount: payment.amountPaid,
+        amountPaid: payment.amountPaid,
+        studentName: payment.enrollment.child.fullName,
+        childName: payment.enrollment.child.fullName,
+        className: payment.enrollment.className,
+        schoolName: payment.enrollment.school.name,
+        type: payment.paymentType,
+        paymentType: payment.paymentType,
+        status: payment.status,
+        receiptUrl: payment.receiptUrl,
+      }));
+    }
+
+    const shouldSign = (paymentType: string) =>
+      receiptType === 'ALL' || paymentType === receiptType;
+
+    const enriched = await Promise.all(
+      payments.map(async (payment) => {
+        let receiptSignedUrl: string | null = null;
+        if (payment.receiptUrl && shouldSign(payment.paymentType)) {
+          try {
+            receiptSignedUrl = (
+              await this.documentsService.createSignedUrlForPath(
+                payment.receiptUrl,
+              )
+            ).signedUrl;
+          } catch {
+            // If the object no longer exists in storage, don't fail the whole list.
+            receiptSignedUrl = null;
+          }
+        }
+
+        return {
+          id: payment.id,
+          schoolId: payment.schoolId,
+          date: payment.paymentDate,
+          paymentDate: payment.paymentDate,
+          amount: payment.amountPaid,
+          amountPaid: payment.amountPaid,
+          studentName: payment.enrollment.child.fullName,
+          childName: payment.enrollment.child.fullName,
+          className: payment.enrollment.className,
+          schoolName: payment.enrollment.school.name,
+          type: payment.paymentType,
+          paymentType: payment.paymentType,
+          status: payment.status,
+          receiptUrl: payment.receiptUrl,
+          receiptSignedUrl,
+        };
+      }),
+    );
+
+    return enriched;
   }
 
-  async getPendingPayments(schoolId: string) {
+  async getPendingPayments(
+    schoolId: string,
+    includeReceiptSignedUrls = false,
+    receiptType: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT' = 'ALL',
+  ) {
     const payments = await this.prisma.payment.findMany({
       where: {
         schoolId: schoolId,
@@ -380,15 +434,49 @@ export class SchoolPaymentsService {
       },
     });
 
-    return payments.map((p) => ({
-      ...p,
-      date: p.paymentDate,
-      amount: p.amountPaid,
-      studentName: p.enrollment?.child?.fullName,
-      childName: p.enrollment?.child?.fullName,
-      className: p.enrollment?.className,
-      schoolName: p.enrollment?.school?.name,
-    }));
+    if (!includeReceiptSignedUrls) {
+      return payments.map((p) => ({
+        ...p,
+        date: p.paymentDate,
+        amount: p.amountPaid,
+        studentName: p.enrollment?.child?.fullName,
+        childName: p.enrollment?.child?.fullName,
+        className: p.enrollment?.className,
+        schoolName: p.enrollment?.school?.name,
+      }));
+    }
+
+    const shouldSign = (paymentType: string) =>
+      receiptType === 'ALL' || paymentType === receiptType;
+
+    const enriched = await Promise.all(
+      payments.map(async (p) => {
+        let receiptSignedUrl: string | null = null;
+        if (p.receiptUrl && shouldSign(p.paymentType)) {
+          try {
+            receiptSignedUrl = (
+              await this.documentsService.createSignedUrlForPath(p.receiptUrl)
+            ).signedUrl;
+          } catch {
+            // If the object no longer exists in storage, don't fail the whole list.
+            receiptSignedUrl = null;
+          }
+        }
+
+        return {
+          ...p,
+          date: p.paymentDate,
+          amount: p.amountPaid,
+          studentName: p.enrollment?.child?.fullName,
+          childName: p.enrollment?.child?.fullName,
+          className: p.enrollment?.className,
+          schoolName: p.enrollment?.school?.name,
+          receiptSignedUrl,
+        };
+      }),
+    );
+
+    return enriched;
   }
 
   async confirmPayment(paymentId: string, schoolId: string) {

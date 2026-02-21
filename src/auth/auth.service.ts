@@ -94,7 +94,6 @@ export class AuthService {
 
   /** Verify Firebase token & issue backend JWT */
   async loginWithFirebase(idToken: string) {
-    console.log('Login attempt initiated with token:', idToken);
     const decodedToken = await this.firebase
       .auth()
       .verifyIdToken(idToken)
@@ -102,7 +101,6 @@ export class AuthService {
         console.error('Token verification failed:', error);
         throw new UnauthorizedException('Invalid Firebase token');
       });
-    console.log('Token verified. Email:', decodedToken.email);
     const { email } = decodedToken;
 
     // 1. Validate that the Firebase token contains an email.
@@ -135,7 +133,6 @@ export class AuthService {
         include: { school: true },
       }));
 
-    console.log('User authenticated successfully:', user.id);
     // Create backend JWT
     const payload = {
       sub: user.id,

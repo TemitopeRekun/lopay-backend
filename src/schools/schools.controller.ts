@@ -100,11 +100,40 @@ export class SchoolPaymentsController {
   @SkipThrottle()
   @Get('history')
   @Roles(UserRole.SCHOOL_OWNER)
-  async getHistory(@CurrentUser() user: any) {
+  async getHistory(
+    @CurrentUser() user: any,
+    @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
+    @Query('receiptType') receiptType?: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT',
+  ) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
     }
-    return this.schoolPaymentsService.getHistory(user.schoolId);
+    const include = includeReceiptSignedUrls === 'true';
+    return this.schoolPaymentsService.getHistory(
+      user.schoolId,
+      include,
+      receiptType ?? 'ALL',
+    );
+  }
+
+  /** âœ… Get School Payment History (All statuses) */
+  @SkipThrottle()
+  @Get('history/all')
+  @Roles(UserRole.SCHOOL_OWNER)
+  async getHistoryAll(
+    @CurrentUser() user: any,
+    @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
+    @Query('receiptType') receiptType?: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT',
+  ) {
+    if (!user.schoolId) {
+      throw new ForbiddenException('User is not associated with any school');
+    }
+    const include = includeReceiptSignedUrls === 'true';
+    return this.schoolPaymentsService.getHistory(
+      user.schoolId,
+      include,
+      receiptType ?? 'ALL',
+    );
   }
 
   /** ✅ Get School Dashboard Stats */
@@ -137,11 +166,20 @@ export class SchoolPaymentsController {
   @SkipThrottle()
   @Get('pending')
   @Roles(UserRole.SCHOOL_OWNER)
-  async getPendingPayments(@CurrentUser() user: any) {
+  async getPendingPayments(
+    @CurrentUser() user: any,
+    @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
+    @Query('receiptType') receiptType?: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT',
+  ) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
     }
-    return this.schoolPaymentsService.getPendingPayments(user.schoolId);
+    const include = includeReceiptSignedUrls === 'true';
+    return this.schoolPaymentsService.getPendingPayments(
+      user.schoolId,
+      include,
+      receiptType ?? 'ALL',
+    );
   }
 
   /** ✅ Confirm a single installment payment */

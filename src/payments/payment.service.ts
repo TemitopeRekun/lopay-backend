@@ -3,6 +3,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserRole } from '../generated/prisma/client';
+import { DocumentsService } from '../documents/documents.service';
 
 export type InstallmentPlan = 'WEEKLY' | 'MONTHLY';
 export type ChildPaymentStatus = 'PENDING' | 'ACTIVE' | 'COMPLETED' | 'DEFAULTED';
@@ -45,7 +46,10 @@ export type PaymentStructureResult = {
 
 @Injectable()
 export class PaymentService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly documentsService: DocumentsService,
+  ) {}
 
   /** Calculate comprehensive payment structure */
   calculatePaymentStructure(totalAmount: number): PaymentStructureResult {
@@ -193,7 +197,13 @@ export class PaymentService {
       return 'PENDING';
   }
 
-  async getHistory(userId: string, role: UserRole, schoolId?: string) {
+  async getHistory(
+    userId: string,
+    role: UserRole,
+    schoolId?: string,
+    includeReceiptSignedUrls = false,
+    receiptType: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT' = 'ALL',
+  ) {
     let whereClause: any = {};
 
     if (role === UserRole.PARENT) {
@@ -232,12 +242,44 @@ export class PaymentService {
       orderBy: { paymentDate: 'desc' },
     });
 
-    return payments.map(p => ({
-      ...p,
-      status: p.status,
-      studentName: p.enrollment?.child?.fullName,
-      className: p.enrollment?.className,
-      schoolName: p.enrollment?.school?.name,
-    }));
+    if (!includeReceiptSignedUrls) {
+      return payments.map(p => ({
+        ...p,
+        status: p.status,
+        studentName: p.enrollment?.child?.fullName,
+        className: p.enrollment?.className,
+        schoolName: p.enrollment?.school?.name,
+      }));
+    }
+
+    const shouldSign = (paymentType: string) =>
+      receiptType === 'ALL' || paymentType === receiptType;
+
+    const enriched = await Promise.all(
+      payments.map(async (p) => {
+        let receiptSignedUrl: string | null = null;
+        if (p.receiptUrl && shouldSign(p.paymentType)) {
+          try {
+            receiptSignedUrl = (
+              await this.documentsService.createSignedUrlForPath(p.receiptUrl)
+            ).signedUrl;
+          } catch {
+            // If the object no longer exists in storage, don't fail the whole list.
+            receiptSignedUrl = null;
+          }
+        }
+
+        return {
+          ...p,
+          status: p.status,
+          studentName: p.enrollment?.child?.fullName,
+          className: p.enrollment?.className,
+          schoolName: p.enrollment?.school?.name,
+          receiptSignedUrl,
+        };
+      }),
+    );
+
+    return enriched;
   }
 }

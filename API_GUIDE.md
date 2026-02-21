@@ -52,6 +52,23 @@ axios.get('http://localhost:3000/school-payments/stats', {
 
 ---
 
+## 3.1 Receipt Uploads (Supabase Signed URLs)
+
+We now use **backend-signed uploads/downloads** to a **private Supabase Storage bucket**.  
+**Frontend must NOT use Supabase API keys anymore.**
+
+**Receipt flow (frontend):**
+1. Call `POST /documents/receipts/upload-url` to get `signedUrl` + `path`.
+2. Upload file with `PUT` to `signedUrl`.
+3. Send the returned `path` as `receiptUrl` when creating an enrollment or installment.
+4. To display receipts, request signed URLs via list endpoints or `POST /documents/receipts/download-url`.
+
+**Important:**
+- `receiptUrl` is now a **storage path**, not a public URL.
+- Signed URLs are short-lived and must be re-requested when needed.
+
+---
+
 ## 4. "Recipes" (How to build the pages)
 
 Here are the exact steps to build the main pages of the app.
@@ -126,6 +143,9 @@ Here is every single route in the app, exactly what you need to send, and what y
 - **Method**: `GET`
 - **URL**: `/transactions`
 - **Header**: `Authorization: Bearer <token>`
+- **Query Params (optional)**:
+  - `includeReceiptSignedUrls=true|false` (default `false`)
+  - `receiptType=ALL|FIRST_PAYMENT|INSTALLMENT` (default `ALL`)
 - **What you get back**:
   ```json
   [
@@ -138,6 +158,7 @@ Here is every single route in the app, exactly what you need to send, and what y
       "status": "SUCCESS", // PENDING, SUCCESS, FAILED
       "type": "INSTALLMENT", // Alias for paymentType
       "paymentType": "INSTALLMENT",
+      "receiptSignedUrl": "https://signed-url...", // Only when includeReceiptSignedUrls=true and receiptUrl exists
       "studentName": "John Doe",
       "childName": "John Doe", // Alias for studentName
       "className": "Grade 1",
@@ -208,6 +229,48 @@ Here is every single route in the app, exactly what you need to send, and what y
   }
   ```
 
+#### 2.1 Receipts: Create Signed Upload URL
+
+- **Method**: `POST`
+- **URL**: `/documents/receipts/upload-url`
+- **Header**: `Authorization: Bearer <token>`
+- **What to send (Body)**:
+  ```json
+  {
+    "fileName": "receipt.jpg",
+    "contentType": "image/jpeg"
+  }
+  ```
+- **What you get back**:
+  ```json
+  {
+    "path": "receipts/user-uuid/uuid_receipt.jpg",
+    "signedUrl": "https://signed-upload-url...",
+    "token": "upload-token",
+    "expiresIn": 600
+  }
+  ```
+
+#### 2.2 Receipts: Create Signed Download URL
+
+- **Method**: `POST`
+- **URL**: `/documents/receipts/download-url`
+- **Header**: `Authorization: Bearer <token>`
+- **What to send (Body)**:
+  ```json
+  {
+    "paymentId": "payment-uuid"
+  }
+  ```
+- **What you get back**:
+  ```json
+  {
+    "path": "receipts/user-uuid/uuid_receipt.jpg",
+    "signedUrl": "https://signed-download-url...",
+    "expiresIn": 600
+  }
+  ```
+
 #### 3. Super Admin: Onboard School
 
 - **Method**: `POST`
@@ -237,6 +300,91 @@ Here is every single route in the app, exactly what you need to send, and what y
       "role": "SCHOOL_OWNER" 
     },
     "school": { "id": "...", "name": "..." }
+  }
+  ```
+
+#### 3.1 Super Admin: Global Transactions (Dashboard)
+
+- **Method**: `GET`
+- **URL**: `/admin/transactions`
+- **Header**: `Authorization: Bearer <token>` (Must be Super Admin)
+- **Query Params (optional)**:
+  - `includeReceiptSignedUrls=true|false` (default `false`)
+  - `receiptType=ALL|FIRST_PAYMENT|INSTALLMENT` (default `ALL`)
+- **What you get back (Array)**:
+  ```json
+  [
+    {
+      "id": "payment-uuid",
+      "amount": 5000,
+      "amountPaid": 5000,
+      "date": "2023-10-01T12:00:00Z",
+      "paymentDate": "2023-10-01T12:00:00Z",
+      "status": "SUCCESS",
+      "type": "INSTALLMENT",
+      "paymentType": "INSTALLMENT",
+      "childName": "John Doe",
+      "studentName": "John Doe",
+      "schoolName": "Springfield Elementary",
+      "platformFeeAmount": 125,
+      "platformFeePercentage": 0.025,
+      "receiptSignedUrl": "https://signed-url..."
+    }
+  ]
+  ```
+
+#### 3.2 Super Admin: Students Summary (Dashboard)
+
+- **Method**: `GET`
+- **URL**: `/admin/students/summary`
+- **Header**: `Authorization: Bearer <token>` (Must be Super Admin)
+- **What you get back**:
+  ```json
+  {
+    "totalStudents": 120,
+    "activeStudents": 95,
+    "pendingFirstPayments": 8,
+    "defaultedStudents": 3,
+    "totalOutstandingBalance": 250000
+  }
+  ```
+
+#### 3.3 Super Admin: Schools Summary (Dashboard)
+
+- **Method**: `GET`
+- **URL**: `/admin/schools/summary`
+- **Header**: `Authorization: Bearer <token>` (Must be Super Admin)
+- **What you get back (Array)**:
+  ```json
+  [
+    {
+      "schoolId": "school-uuid",
+      "schoolName": "Springfield Elementary",
+      "totalStudents": 42,
+      "pendingAmount": 15000,
+      "collectedAmount": 350000
+    }
+  ]
+  ```
+
+#### 3.4 Super Admin: Overview (Single-Call Dashboard)
+
+- **Method**: `GET`
+- **URL**: `/admin/overview`
+- **Header**: `Authorization: Bearer <token>` (Must be Super Admin)
+- **What you get back**:
+  ```json
+  {
+    "totalRevenue": 125000,
+    "totalStudents": 120,
+    "activeStudents": 95,
+    "pendingApprovals": 8,
+    "totalOutstandingBalance": 250000,
+    "recentTransactions": [ ... ],
+    "revenueSeries": [
+      { "label": "Sep", "value": 12000 },
+      { "label": "Oct", "value": 15000 }
+    ]
   }
   ```
 
@@ -299,7 +447,7 @@ Here is every single route in the app, exactly what you need to send, and what y
       "childName": "John Doe",
       "className": "Grade 1",
       "schoolName": "Springfield Elementary",
-      "receiptUrl": "https://firebase...",
+      "receiptUrl": "receipts/user-uuid/uuid_receipt.jpg",
       "date": "2023-10-01T10:00:00Z",
       "paymentDate": "2023-10-01T10:00:00Z",
       "type": "INSTALLMENT",
@@ -373,11 +521,34 @@ Here is every single route in the app, exactly what you need to send, and what y
     - Sums `amountPaid` for all **unconfirmed** payments for this school.
     - Represents what parents claim to have paid but which the school (or admin, for first payment) has not yet approved.
 
+#### 5.1 Get Payment History (School)
+
+- **Method**: `GET`
+- **URL**: `/school-payments/history`
+- **Header**: `Authorization: Bearer <token>`
+- **Query Params (optional)**:
+  - `includeReceiptSignedUrls=true|false` (default `false`)
+  - `receiptType=ALL|FIRST_PAYMENT|INSTALLMENT` (default `ALL`)
+- **What you get back**: Same payment objects as `/transactions`, filtered to this school.
+
+#### 5.2 Get Payment History (All statuses)
+
+- **Method**: `GET`
+- **URL**: `/school-payments/history/all`
+- **Header**: `Authorization: Bearer <token>`
+- **Query Params (optional)**:
+  - `includeReceiptSignedUrls=true|false` (default `false`)
+  - `receiptType=ALL|FIRST_PAYMENT|INSTALLMENT` (default `ALL`)
+- **What you get back**: Same shape as `/school-payments/history`.
+
 #### 6. Get Pending Payments
 
 - **Method**: `GET`
 - **URL**: `/school-payments/pending`
 - **Header**: `Authorization: Bearer <token>`
+- **Query Params (optional)**:
+  - `includeReceiptSignedUrls=true|false` (default `false`)
+  - `receiptType=ALL|FIRST_PAYMENT|INSTALLMENT` (default `ALL`)
 - **What you get back (Array)**:
   ```json
   [
@@ -389,7 +560,7 @@ Here is every single route in the app, exactly what you need to send, and what y
       "childName": "John Doe", // Alias
       "className": "Grade 1",
       "schoolName": "Springfield Elementary",
-      "receiptUrl": "https://firebase...", // The proof of payment image
+      "receiptUrl": "receipts/user-uuid/uuid_receipt.jpg", // Storage path for receipt
       "date": "2023-10-01T10:00:00Z", // Alias
       "paymentDate": "2023-10-01T10:00:00Z",
       "type": "INSTALLMENT", // Alias
@@ -680,7 +851,7 @@ Use this in the School Owner profile/settings screen when they need to change th
     "firstPaymentPaid": 41250, // Should match totalInitialPayment from calculation
     "termStartDate": "2023-09-01T00:00:00Z",
     "termEndDate": "2023-12-01T00:00:00Z",
-    "receiptUrl": "https://firebase..." // Optional
+    "receiptUrl": "receipts/user-uuid/uuid_receipt.jpg" // Optional (from /documents/receipts/upload-url)
   }
   ```
 - **What you get back**:
@@ -752,7 +923,7 @@ Use this in the School Owner profile/settings screen when they need to change th
   {
     "enrollmentId": "enrollment-uuid",
     "amountPaid": 200,
-    "receiptUrl": "https://firebase..." // Optional
+    "receiptUrl": "receipts/user-uuid/uuid_receipt.jpg" // Optional (from /documents/receipts/upload-url)
   }
   ```
 
