@@ -2,7 +2,7 @@ version: "1"
 
 databases:
   - name: "lopay db"
-    databaseName: lopay-db
+    databaseName: lopaydb
     user: lopay
     plan: free
 
