@@ -15,7 +15,8 @@ export class PaymentsController {
   /** Calculate full payment structure (New) */
   @Post('calculate-structure')
   calculateStructure(
-    @Body() body: {
+    @Body()
+    body: {
       schoolId: string;
       totalAmount?: number;
       schoolFees?: number; // Support legacy field
@@ -25,9 +26,9 @@ export class PaymentsController {
   ) {
     // Prefer totalAmount, fallback to schoolFees
     const amount = body.totalAmount ?? body.schoolFees;
-    
+
     if (amount === undefined || amount === null) {
-       throw new Error('Total amount is required');
+      throw new Error('Total amount is required');
     }
 
     // Ensure we pass a number, even if string was sent

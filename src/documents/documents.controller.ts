@@ -29,9 +29,6 @@ export class DocumentsController {
     @Body() dto: CreateReceiptDownloadDto,
     @CurrentUser() user: any,
   ) {
-    return this.documentsService.createReceiptDownloadUrl(
-      dto.paymentId,
-      user,
-    );
+    return this.documentsService.createReceiptDownloadUrl(dto.paymentId, user);
   }
 }

@@ -28,7 +28,9 @@ describe('School Dashboard (e2e)', () => {
   };
 
   const prismaMock = {
-    $transaction: jest.fn().mockImplementation((callback) => callback(prismaMock)),
+    $transaction: jest
+      .fn()
+      .mockImplementation((callback) => callback(prismaMock)),
     user: {
       findUnique: jest.fn().mockImplementation((args) => {
         if (args.where.email === 'school@example.com') {
@@ -48,7 +50,7 @@ describe('School Dashboard (e2e)', () => {
       findMany: jest.fn().mockImplementation((args) => {
         // If getting defaulted enrollments (for stats)
         if (args.where?.paymentStatus === PaymentStatus.DEFAULTED) {
-            return Promise.resolve([{ remainingBalance: 20000 }]);
+          return Promise.resolve([{ remainingBalance: 20000 }]);
         }
         // If getting students list
         return Promise.resolve([
@@ -84,9 +86,9 @@ describe('School Dashboard (e2e)', () => {
         className: 'Grade 1',
         feeAmount: 50000,
       }),
-      findMany: jest.fn().mockResolvedValue([
-        { className: 'Grade 1', feeAmount: 50000 },
-      ]),
+      findMany: jest
+        .fn()
+        .mockResolvedValue([{ className: 'Grade 1', feeAmount: 50000 }]),
     },
   };
 
@@ -161,9 +163,23 @@ describe('School Dashboard (e2e)', () => {
         expect.objectContaining({
           where: expect.objectContaining({
             OR: expect.arrayContaining([
-              { child: { fullName: { contains: 'John', mode: 'insensitive' } } },
-              { child: { parent: { user: { email: { contains: 'John', mode: 'insensitive' } } } } },
-              { child: { parent: { phoneNumber: { contains: 'John', mode: 'insensitive' } } } },
+              {
+                child: { fullName: { contains: 'John', mode: 'insensitive' } },
+              },
+              {
+                child: {
+                  parent: {
+                    user: { email: { contains: 'John', mode: 'insensitive' } },
+                  },
+                },
+              },
+              {
+                child: {
+                  parent: {
+                    phoneNumber: { contains: 'John', mode: 'insensitive' },
+                  },
+                },
+              },
             ]),
           }),
         }),
@@ -187,23 +203,23 @@ describe('School Dashboard (e2e)', () => {
   });
 
   describe('Class Fee Management', () => {
-      it('/school-payments/fees (POST) - Should create class fee', async () => {
-          await request(app.getHttpServer())
-            .post('/school-payments/fees')
-            .set('Authorization', `Bearer ${schoolOwnerToken}`)
-            .send({ className: 'Grade 1', feeAmount: 50000 })
-            .expect(201);
-          
-          expect(prismaMock.classFee.create).toHaveBeenCalled();
-      });
+    it('/school-payments/fees (POST) - Should create class fee', async () => {
+      await request(app.getHttpServer())
+        .post('/school-payments/fees')
+        .set('Authorization', `Bearer ${schoolOwnerToken}`)
+        .send({ className: 'Grade 1', feeAmount: 50000 })
+        .expect(201);
 
-      it('/school-payments/fees (GET) - Should list fees', async () => {
-        const res = await request(app.getHttpServer())
-          .get('/school-payments/fees')
-          .set('Authorization', `Bearer ${schoolOwnerToken}`)
-          .expect(200);
+      expect(prismaMock.classFee.create).toHaveBeenCalled();
+    });
 
-        expect(res.body[0].className).toBe('Grade 1');
-      });
+    it('/school-payments/fees (GET) - Should list fees', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/school-payments/fees')
+        .set('Authorization', `Bearer ${schoolOwnerToken}`)
+        .expect(200);
+
+      expect(res.body[0].className).toBe('Grade 1');
+    });
   });
 });

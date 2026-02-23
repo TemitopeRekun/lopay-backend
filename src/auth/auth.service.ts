@@ -1,4 +1,9 @@
-import { Inject, Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  UnauthorizedException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { UserRole } from '../generated/prisma/client';
@@ -76,10 +81,16 @@ export class AuthService {
 
       // Rollback: If DB creation failed but Firebase succeeded, delete from Firebase
       if (firebaseUser) {
-        console.warn('Rolling back Firebase user creation for:', firebaseUser.uid);
-        await this.firebase.auth().deleteUser(firebaseUser.uid).catch((rollbackError) => {
-          console.error('Rollback failed:', rollbackError);
-        });
+        console.warn(
+          'Rolling back Firebase user creation for:',
+          firebaseUser.uid,
+        );
+        await this.firebase
+          .auth()
+          .deleteUser(firebaseUser.uid)
+          .catch((rollbackError) => {
+            console.error('Rollback failed:', rollbackError);
+          });
       }
 
       if (error.code === 'auth/email-already-exists') {

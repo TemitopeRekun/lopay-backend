@@ -3,7 +3,12 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { UserRole, PaymentStatus, PaymentType, InstallmentFrequency } from '../src/generated/prisma/client';
+import {
+  UserRole,
+  PaymentStatus,
+  PaymentType,
+  InstallmentFrequency,
+} from '../src/generated/prisma/client';
 import { FirebaseAdminProvider } from '../src/firebase/firebase-admin.provider';
 import { ThrottlerGuard } from '@nestjs/throttler';
 
@@ -35,7 +40,9 @@ describe('Enrollment (e2e)', () => {
   };
 
   const prismaMock = {
-    $transaction: jest.fn().mockImplementation((callback) => callback(prismaMock)),
+    $transaction: jest
+      .fn()
+      .mockImplementation((callback) => callback(prismaMock)),
     user: {
       findUnique: jest.fn().mockImplementation((args) => {
         if (args.where.email === 'school@example.com') {
@@ -46,7 +53,7 @@ describe('Enrollment (e2e)', () => {
             school: { id: 'school-123' },
           });
         } else if (args.where.email === 'parent@example.com') {
-           return Promise.resolve({
+          return Promise.resolve({
             id: 'user-parent',
             email: 'parent@example.com',
             role: UserRole.PARENT,
@@ -87,15 +94,15 @@ describe('Enrollment (e2e)', () => {
           child: {
             parent: {
               user: {
-                id: 'user-parent'
-              }
-            }
-          }
+                id: 'user-parent',
+              },
+            },
+          },
         });
       }),
       update: jest.fn().mockResolvedValue({
-         id: '550e8400-e29b-41d4-a716-446655440000',
-         paymentStatus: PaymentStatus.ACTIVE,
+        id: '550e8400-e29b-41d4-a716-446655440000',
+        paymentStatus: PaymentStatus.ACTIVE,
       }),
     },
     payment: {
@@ -164,7 +171,7 @@ describe('Enrollment (e2e)', () => {
         .set('Authorization', `Bearer ${parentToken}`)
         .send(dto)
         .expect(201);
-      
+
       expect(prismaMock.childEnrollment.create).toHaveBeenCalled();
       expect(prismaMock.payment.create).toHaveBeenCalled();
       expect(prismaMock.notification.create).toHaveBeenCalled();
@@ -178,19 +185,25 @@ describe('Enrollment (e2e)', () => {
         .expect(201);
 
       expect(prismaMock.payment.update).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'payment-123' }, data: { isConfirmed: true } })
+        expect.objectContaining({
+          where: { id: 'payment-123' },
+          data: { isConfirmed: true },
+        }),
       );
       expect(prismaMock.childEnrollment.update).toHaveBeenCalledWith(
-         expect.objectContaining({ where: { id: '550e8400-e29b-41d4-a716-446655440000' }, data: { paymentStatus: PaymentStatus.ACTIVE } })
+        expect.objectContaining({
+          where: { id: '550e8400-e29b-41d4-a716-446655440000' },
+          data: { paymentStatus: PaymentStatus.ACTIVE },
+        }),
       );
     });
 
     it('/enrollments/confirm-first-payment (POST) - Parent should NOT be able to confirm', async () => {
-       await request(app.getHttpServer())
+      await request(app.getHttpServer())
         .post('/enrollments/confirm-first-payment')
         .set('Authorization', `Bearer ${parentToken}`)
         .send({ enrollmentId: '550e8400-e29b-41d4-a716-446655440000' })
-        .expect(403); 
+        .expect(403);
     });
   });
 });

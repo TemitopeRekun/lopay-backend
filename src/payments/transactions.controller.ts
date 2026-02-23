@@ -4,7 +4,6 @@ import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../common/decorators/user.decorator';
 import { SkipThrottle } from '@nestjs/throttler';
 
-
 @Controller('transactions')
 @UseGuards(AuthGuard('jwt'))
 export class TransactionsController {

@@ -135,7 +135,9 @@ export class SchoolPaymentsService {
   }
 
   async updateSchoolBankDetails(schoolId: string, dto: UpdateSchoolDto) {
-    const school = await this.prisma.school.findUnique({ where: { id: schoolId } });
+    const school = await this.prisma.school.findUnique({
+      where: { id: schoolId },
+    });
     if (!school) {
       throw new NotFoundException('School not found');
     }

@@ -81,7 +81,7 @@ export class EnrollmentService {
       ...enrollment,
       payments: enrichedPayments, // Return enriched payments
       studentName: enrollment.child?.fullName, // Standardize with School Service
-      childName: enrollment.child?.fullName,   // Handle "childName" case mentioned by frontend
+      childName: enrollment.child?.fullName, // Handle "childName" case mentioned by frontend
       totalFee: totalSchoolFee,
       paidAmount,
       nextDueDate: nextDueDate ? nextDueDate.toISOString().split('T')[0] : null, // Standardize date format
@@ -164,6 +164,7 @@ export class EnrollmentService {
   async enrollChild(dto: CreateEnrollmentDto, userId: string) {
     // 1. Resolve Child
     let childId = dto.childId;
+    let retryEnrollmentId: string | null = null;
 
     // Check Parent exists
     let parent = await this.prisma.parent.findUnique({ where: { userId } });
@@ -198,18 +199,59 @@ export class EnrollmentService {
         );
       }
     } else if (dto.childName) {
-      const newChild = await this.prisma.child.create({
-        data: {
-          fullName: dto.childName,
-          parentId: parent.id,
-          className: dto.className,
+      // If a failed enrollment exists for this parent/child/school, reuse it.
+      const failedEnrollment = await this.prisma.childEnrollment.findFirst({
+        where: {
+          paymentStatus: PaymentStatus.FAILED,
+          schoolId: dto.schoolId,
+          child: {
+            parentId: parent.id,
+            fullName: dto.childName,
+            className: dto.className,
+          },
         },
       });
-      childId = newChild.id;
+
+      if (failedEnrollment) {
+        childId = failedEnrollment.childId;
+        retryEnrollmentId = failedEnrollment.id;
+      } else {
+        const newChild = await this.prisma.child.create({
+          data: {
+            fullName: dto.childName,
+            parentId: parent.id,
+            className: dto.className,
+          },
+        });
+        childId = newChild.id;
+      }
     } else {
       throw new BadRequestException(
         'Either childId or childName must be provided',
       );
+    }
+
+    // If this child already has an enrollment, ensure we only allow retries for FAILED
+    if (childId) {
+      const existingEnrollment = await this.prisma.childEnrollment.findUnique({
+        where: { childId },
+      });
+
+      if (existingEnrollment) {
+        if (existingEnrollment.paymentStatus !== PaymentStatus.FAILED) {
+          throw new BadRequestException(
+            'Enrollment already exists for this child',
+          );
+        }
+
+        if (existingEnrollment.schoolId !== dto.schoolId) {
+          throw new BadRequestException(
+            'Failed enrollment belongs to a different school',
+          );
+        }
+
+        retryEnrollmentId = existingEnrollment.id;
+      }
     }
 
     // 2. Get Fees
@@ -235,25 +277,47 @@ export class EnrollmentService {
 
     // 4. Create Enrollment & Payment
     const result = await this.prisma.$transaction(async (tx) => {
-      console.log(
-        `EnrollmentService: Creating enrollment for childId: ${childId}, schoolId: ${dto.schoolId}`,
-      );
-      const enrollment = await tx.childEnrollment.create({
-        data: {
-          childId,
-          schoolId: dto.schoolId,
-          className: dto.className,
-          totalSchoolFee: calculation.schoolFees,
-          platformFee: calculation.platformFee,
-          schoolMinimumFee: calculation.minimumDeposit,
-          firstPaymentPaid: dto.firstPaymentPaid,
-          remainingBalance: calculation.remainingBalance,
-          paymentStatus: PaymentStatus.PENDING,
-          installmentFrequency: dto.installmentFrequency,
-          termStartDate: dto.termStartDate,
-          termEndDate: dto.termEndDate,
-        },
-      });
+      let enrollment;
+      if (retryEnrollmentId) {
+        console.log(
+          `EnrollmentService: Retrying first payment for enrollmentId: ${retryEnrollmentId}`,
+        );
+        enrollment = await tx.childEnrollment.update({
+          where: { id: retryEnrollmentId },
+          data: {
+            className: dto.className,
+            totalSchoolFee: calculation.schoolFees,
+            platformFee: calculation.platformFee,
+            schoolMinimumFee: calculation.minimumDeposit,
+            firstPaymentPaid: dto.firstPaymentPaid,
+            remainingBalance: calculation.remainingBalance,
+            paymentStatus: PaymentStatus.PENDING,
+            installmentFrequency: dto.installmentFrequency,
+            termStartDate: dto.termStartDate,
+            termEndDate: dto.termEndDate,
+          },
+        });
+      } else {
+        console.log(
+          `EnrollmentService: Creating enrollment for childId: ${childId}, schoolId: ${dto.schoolId}`,
+        );
+        enrollment = await tx.childEnrollment.create({
+          data: {
+            childId,
+            schoolId: dto.schoolId,
+            className: dto.className,
+            totalSchoolFee: calculation.schoolFees,
+            platformFee: calculation.platformFee,
+            schoolMinimumFee: calculation.minimumDeposit,
+            firstPaymentPaid: dto.firstPaymentPaid,
+            remainingBalance: calculation.remainingBalance,
+            paymentStatus: PaymentStatus.PENDING,
+            installmentFrequency: dto.installmentFrequency,
+            termStartDate: dto.termStartDate,
+            termEndDate: dto.termEndDate,
+          },
+        });
+      }
 
       const payment = await tx.payment.create({
         data: {

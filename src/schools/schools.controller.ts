@@ -159,7 +159,11 @@ export class SchoolPaymentsController {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
     }
-    return this.schoolPaymentsService.getStudents(user.schoolId, className, search);
+    return this.schoolPaymentsService.getStudents(
+      user.schoolId,
+      className,
+      search,
+    );
   }
 
   /** ✅ List all pending installment payments for this school */

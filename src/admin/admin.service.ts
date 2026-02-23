@@ -1,4 +1,9 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   PaymentType,
   PaymentReceiver,
@@ -38,11 +43,15 @@ export class AdminService {
       if (error.code === 'auth/email-already-exists') {
         // If user exists in Firebase, check if they exist in our DB
         try {
-            console.log('User exists in Firebase, retrieving...');
-            firebaseUser = await this.firebaseAdmin.auth().getUserByEmail(dto.ownerEmail);
-            console.log(`Retrieved existing Firebase user: ${firebaseUser.uid}`);
+          console.log('User exists in Firebase, retrieving...');
+          firebaseUser = await this.firebaseAdmin
+            .auth()
+            .getUserByEmail(dto.ownerEmail);
+          console.log(`Retrieved existing Firebase user: ${firebaseUser.uid}`);
         } catch (retrieveError: any) {
-            throw new BadRequestException(`User exists in Firebase but could not be retrieved: ${retrieveError.message}`);
+          throw new BadRequestException(
+            `User exists in Firebase but could not be retrieved: ${retrieveError.message}`,
+          );
         }
       } else {
         throw new BadRequestException(`Firebase Error: ${error.message}`);
@@ -54,9 +63,13 @@ export class AdminService {
     // For safety in this MVP, let's assume strict onboarding:
     // If user exists in DB, fail.
 
-    const existingUser = await this.prisma.user.findUnique({ where: { email: dto.ownerEmail } });
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: dto.ownerEmail },
+    });
     if (existingUser) {
-        throw new BadRequestException('User with this email already exists in the database');
+      throw new BadRequestException(
+        'User with this email already exists in the database',
+      );
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -124,9 +137,7 @@ export class AdminService {
         if (includeReceiptSignedUrls && p.receiptUrl) {
           try {
             receiptSignedUrl = (
-              await this.documentsService.createSignedUrlForPath(
-                p.receiptUrl,
-              )
+              await this.documentsService.createSignedUrlForPath(p.receiptUrl)
             ).signedUrl;
           } catch {
             // If the object no longer exists in storage, don't fail the whole list.
@@ -135,14 +146,14 @@ export class AdminService {
         }
 
         return {
-      ...p,
-      studentName: p.enrollment?.child?.fullName,
-      childName: p.enrollment?.child?.fullName, // Alias
-      schoolName: p.enrollment?.school?.name,
-      className: p.enrollment?.className,
-      amount: p.amountPaid, // Alias
-      date: p.paymentDate, // Alias
-      type: p.paymentType, // Alias
+          ...p,
+          studentName: p.enrollment?.child?.fullName,
+          childName: p.enrollment?.child?.fullName, // Alias
+          schoolName: p.enrollment?.school?.name,
+          className: p.enrollment?.className,
+          amount: p.amountPaid, // Alias
+          date: p.paymentDate, // Alias
+          type: p.paymentType, // Alias
           receiptSignedUrl,
         };
       }),
@@ -270,7 +281,9 @@ export class AdminService {
     });
 
     if (!payment) {
-      throw new NotFoundException('First payment not found or already processed');
+      throw new NotFoundException(
+        'First payment not found or already processed',
+      );
     }
 
     const { enrollment } = payment;
@@ -437,9 +450,7 @@ export class AdminService {
         if (includeReceiptSignedUrls && p.receiptUrl) {
           try {
             receiptSignedUrl = (
-              await this.documentsService.createSignedUrlForPath(
-                p.receiptUrl,
-              )
+              await this.documentsService.createSignedUrlForPath(p.receiptUrl)
             ).signedUrl;
           } catch {
             // If the object no longer exists in storage, don't fail the whole list.
@@ -493,7 +504,11 @@ export class AdminService {
       this.prisma.childEnrollment.aggregate({
         where: {
           paymentStatus: {
-            in: [PaymentStatus.PENDING, PaymentStatus.ACTIVE, PaymentStatus.DEFAULTED],
+            in: [
+              PaymentStatus.PENDING,
+              PaymentStatus.ACTIVE,
+              PaymentStatus.DEFAULTED,
+            ],
           },
         },
         _sum: { remainingBalance: true },

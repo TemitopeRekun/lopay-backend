@@ -17,8 +17,7 @@ import { AdminModule } from './admin/admin.module';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
-
-
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -28,7 +27,7 @@ import { RolesGuard } from './auth/roles.guard';
         NODE_ENV: Joi.string()
           .valid('development', 'production', 'test')
           .default('development'),
-        PORT: Joi.number().default(3000),
+        PORT: Joi.number().default(3001),
         DATABASE_URL: Joi.string().uri().required(),
         JWT_SECRET: Joi.string().min(32).required(),
         FIREBASE_PROJECT_ID: Joi.string().required(),
@@ -68,9 +67,10 @@ import { RolesGuard } from './auth/roles.guard';
     PrismaModule,
     EnrollmentModule,
     AdminModule,
+    HealthModule,
   ],
 
-   providers: [
+  providers: [
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,

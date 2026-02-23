@@ -120,7 +120,7 @@ Create a `.env` file in the root directory. You **must** define the following va
 ```env
 # Server Config
 NODE_ENV=development  # development | production | test
-PORT=3000
+PORT=3001
 
 # Database
 DATABASE_URL="postgresql://user:password@localhost:5432/lopay?schema=public"

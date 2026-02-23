@@ -1,0 +1,68 @@
+name: Node CI
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm run test
+      - name: Build
+        run: npm run build
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: production
+      PORT: ${{ secrets.PORT }}
+      CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+      FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
+      FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_STORAGE_BUCKET: ${{ secrets.SUPABASE_STORAGE_BUCKET }}
+      SUPABASE_SIGNED_URL_TTL_SECONDS: ${{ secrets.SUPABASE_SIGNED_URL_TTL_SECONDS }}
+      ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install
+        run: npm ci
+      - name: Secrets sanity check
+        run: |
+          node -e "const req=['DATABASE_URL','JWT_SECRET','FIREBASE_PROJECT_ID','FIREBASE_CLIENT_EMAIL','FIREBASE_PRIVATE_KEY','SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY','SUPABASE_STORAGE_BUCKET']; const opt=['PORT','CORS_ORIGINS','SUPABASE_SIGNED_URL_TTL_SECONDS','ADMIN_EMAIL','ADMIN_PASSWORD']; const miss=req.filter(k=>!process.env[k]||!String(process.env[k]).trim()); if(miss.length){console.error('Missing required secrets:', miss.join(', ')); process.exit(1)} const missOpt=opt.filter(k=>!process.env[k]||!String(process.env[k]).trim()); if(missOpt.length){console.warn('Missing optional secrets:', missOpt.join(', '))}"
+      - name: Run Prisma migrations
+        run: npm run migrate:deploy
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Build
+        run: npm run build
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lopay-backend-dist
+          path: |
+            dist/**
+            package.json
+            package-lock.json

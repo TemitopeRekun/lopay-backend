@@ -34,7 +34,9 @@ describe('Admin Onboarding (e2e)', () => {
   };
 
   const prismaMock = {
-    $transaction: jest.fn().mockImplementation((callback) => callback(prismaMock)),
+    $transaction: jest
+      .fn()
+      .mockImplementation((callback) => callback(prismaMock)),
     user: {
       findUnique: jest.fn().mockImplementation((args) => {
         if (args.where.email === 'admin@lopay.com') {
@@ -122,7 +124,7 @@ describe('Admin Onboarding (e2e)', () => {
             email: dto.ownerEmail,
             role: UserRole.SCHOOL_OWNER,
           }),
-        })
+        }),
       );
 
       // Verify DB School creation
@@ -134,7 +136,7 @@ describe('Admin Onboarding (e2e)', () => {
             phone: dto.phone,
             email: dto.ownerEmail,
           }),
-        })
+        }),
       );
     });
   });

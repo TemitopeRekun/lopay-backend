@@ -23,7 +23,10 @@ export class EnrollmentController {
   @SkipThrottle()
   @Get(':id/history')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
-  async getEnrollmentHistory(@Param('id') id: string, @CurrentUser() user: any) {
+  async getEnrollmentHistory(
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
     return this.enrollmentService.getEnrollmentHistory(id, user.userId);
   }
 

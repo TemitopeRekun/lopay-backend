@@ -68,7 +68,10 @@ describe('Notifications (e2e)', () => {
         return Promise.resolve([]);
       }),
       findFirst: jest.fn().mockImplementation((args) => {
-        if (args.where.id === 'notif-1' && args.where.userId === 'user-parent') {
+        if (
+          args.where.id === 'notif-1' &&
+          args.where.userId === 'user-parent'
+        ) {
           return Promise.resolve({
             id: 'notif-1',
             userId: 'user-parent',
@@ -127,7 +130,7 @@ describe('Notifications (e2e)', () => {
       expect(res.body).toHaveLength(1);
       expect(res.body[0].id).toBe('notif-1');
       expect(prismaMock.notification.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { userId: 'user-parent' } })
+        expect.objectContaining({ where: { userId: 'user-parent' } }),
       );
     });
 
@@ -141,7 +144,7 @@ describe('Notifications (e2e)', () => {
         expect.objectContaining({
           where: { id: 'notif-1' },
           data: { isRead: true },
-        })
+        }),
       );
     });
 

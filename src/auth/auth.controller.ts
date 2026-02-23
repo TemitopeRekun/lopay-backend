@@ -7,7 +7,10 @@ import { IsNotEmpty, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class LoginDto {
-  @ApiProperty({ example: 'firebase-id-token-xyz...', description: 'Firebase ID Token' })
+  @ApiProperty({
+    example: 'firebase-id-token-xyz...',
+    description: 'Firebase ID Token',
+  })
   @IsString()
   @IsNotEmpty()
   idToken: string;

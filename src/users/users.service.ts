@@ -42,7 +42,7 @@ export class UsersService {
   async update(id: string, updateUserDto: UpdateUserDto) {
     // Check if user exists
     await this.findOne(id);
-    
+
     return this.prisma.user.update({
       where: { id },
       data: updateUserDto,

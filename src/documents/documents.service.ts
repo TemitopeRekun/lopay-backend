@@ -37,7 +37,9 @@ export class DocumentsService {
     const url = this.config.get<string>('SUPABASE_URL');
     const key = this.config.get<string>('SUPABASE_SERVICE_ROLE_KEY');
     if (!url || !key) {
-      throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
+      throw new Error(
+        'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required',
+      );
     }
 
     this.supabase = createClient(url, key, {

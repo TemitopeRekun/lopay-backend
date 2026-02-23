@@ -6,7 +6,11 @@ import { UserRole } from '../generated/prisma/client';
 import { DocumentsService } from '../documents/documents.service';
 
 export type InstallmentPlan = 'WEEKLY' | 'MONTHLY';
-export type ChildPaymentStatus = 'PENDING' | 'ACTIVE' | 'COMPLETED' | 'DEFAULTED';
+export type ChildPaymentStatus =
+  | 'PENDING'
+  | 'ACTIVE'
+  | 'COMPLETED'
+  | 'DEFAULTED';
 
 export type DepositCalculationResult = {
   schoolFees: number;
@@ -54,26 +58,32 @@ export class PaymentService {
   /** Calculate comprehensive payment structure */
   calculatePaymentStructure(totalAmount: number): PaymentStructureResult {
     // Strict validation to prevent NaN/undefined bypassing the check
-// src/services/payment.service.ts
+    // src/services/payment.service.ts
     if (!totalAmount || Number.isNaN(totalAmount) || totalAmount <= 0) {
-      throw new BadRequestException('Invalid total amount. Please provide a valid positive number.');
+      throw new BadRequestException(
+        'Invalid total amount. Please provide a valid positive number.',
+      );
     }
 
     const DEPOSIT_PERCENTAGE = 0.25;
     const PLATFORM_FEE_PERCENTAGE = 0.025; // 2.5%
 
     const depositAmount = totalAmount * DEPOSIT_PERCENTAGE;
-    
+
     // Calculate fees and totals exactly as requested
     const platformFeeAmount = totalAmount * PLATFORM_FEE_PERCENTAGE;
     const totalPayable = totalAmount + platformFeeAmount;
     const totalInitialPayment = depositAmount + platformFeeAmount;
-    
+
     // Remaining balance = Total Payable - Total Initial Payment
     const remainingBalance = totalPayable - totalInitialPayment;
 
     // Helper to create plan
-    const createPlan = (type: 'Weekly' | 'Monthly', label: string, count: number): PaymentPlan => {
+    const createPlan = (
+      type: 'Weekly' | 'Monthly',
+      label: string,
+      count: number,
+    ): PaymentPlan => {
       const baseAmount = remainingBalance / count;
       // Service fee is 0 for installments (already paid upfront)
       return {
@@ -102,8 +112,11 @@ export class PaymentService {
   }
 
   /** Calculate initial deposit and platform fee */
-  calculateInitialPayment(schoolFees: number, depositPaid: number): DepositCalculationResult {
-    if (schoolFees <= 0) throw new BadRequestException("Invalid school fees");
+  calculateInitialPayment(
+    schoolFees: number,
+    depositPaid: number,
+  ): DepositCalculationResult {
+    if (schoolFees <= 0) throw new BadRequestException('Invalid school fees');
 
     const PLATFORM_FEE_PERCENT = 0.025;
     const SCHOOL_FIRST_PAYMENT_PERCENT = 0.25;
@@ -117,15 +130,15 @@ export class PaymentService {
     if (depositPaid < minimumDeposit) {
       // Allow for small floating point differences (e.g. 0.01)
       if (Math.abs(depositPaid - minimumDeposit) > 0.1) {
-         throw new BadRequestException(
-          `Deposit is below minimum required. Minimum first payment: ₦${minimumDeposit.toFixed(2)}`
+        throw new BadRequestException(
+          `Deposit is below minimum required. Minimum first payment: ₦${minimumDeposit.toFixed(2)}`,
         );
       }
     }
 
     // IMPORTANT: The platform fee is deducted first. The rest goes to the school.
-    const amountToSchool = depositPaid - platformFee; 
-    
+    const amountToSchool = depositPaid - platformFee;
+
     // Remaining Balance is School Fees - Amount paid TO SCHOOL (excluding platform fee)
     const remainingBalance = schoolFees - amountToSchool;
 
@@ -139,10 +152,13 @@ export class PaymentService {
     };
   }
 
-
   /** Calculate installment amounts based on remaining balance */
-  calculateInstallments(remainingBalance: number, plan: InstallmentPlan): InstallmentCalculationResult {
-    if (remainingBalance <= 0) throw new BadRequestException("No balance to calculate installments");
+  calculateInstallments(
+    remainingBalance: number,
+    plan: InstallmentPlan,
+  ): InstallmentCalculationResult {
+    if (remainingBalance <= 0)
+      throw new BadRequestException('No balance to calculate installments');
 
     let numberOfInstallments: number;
 
@@ -154,7 +170,7 @@ export class PaymentService {
         numberOfInstallments = 3; // 3 months
         break;
       default:
-        throw new BadRequestException("Invalid installment plan");
+        throw new BadRequestException('Invalid installment plan');
     }
 
     const installmentAmount = remainingBalance / numberOfInstallments;
@@ -163,38 +179,42 @@ export class PaymentService {
       totalBalance: remainingBalance,
       numberOfInstallments,
       installmentAmount,
-      plan
+      plan,
     };
   }
 
   /** Update remaining balance after each installment */
-  updateRemainingBalance(schoolFees: number, depositPaid: number, installmentsPaid: number): number {
+  updateRemainingBalance(
+    schoolFees: number,
+    depositPaid: number,
+    installmentsPaid: number,
+  ): number {
     // We assume depositPaid INCLUDES the platform fee.
     // We must deduct the platform fee to find what was actually paid towards the school fees.
-    const platformFee = schoolFees * 0.025; 
-    
+    const platformFee = schoolFees * 0.025;
+
     // Check if deposit was enough to cover platform fee (it should be, based on validation)
     const effectiveDepositToSchool = Math.max(0, depositPaid - platformFee);
-    
+
     const totalPaidToSchool = effectiveDepositToSchool + installmentsPaid;
     const remainingBalance = schoolFees - totalPaidToSchool;
-    
+
     return Math.max(remainingBalance, 0);
   }
 
   /** Determine the next payment status based on current conditions */
   getNextStatus(
     currentStatus: ChildPaymentStatus,
-     depositPaid: number,
+    depositPaid: number,
     depositConfirmedBySchool: boolean,
     remainingBalance: number,
-    isOverdue: boolean
+    isOverdue: boolean,
   ): ChildPaymentStatus {
-      if (currentStatus === 'DEFAULTED') return 'DEFAULTED';
-      if (remainingBalance <= 0) return 'COMPLETED';
-      if (isOverdue) return 'DEFAULTED';
-      if (depositConfirmedBySchool) return 'ACTIVE';
-      return 'PENDING';
+    if (currentStatus === 'DEFAULTED') return 'DEFAULTED';
+    if (remainingBalance <= 0) return 'COMPLETED';
+    if (isOverdue) return 'DEFAULTED';
+    if (depositConfirmedBySchool) return 'ACTIVE';
+    return 'PENDING';
   }
 
   async getHistory(
@@ -243,7 +263,7 @@ export class PaymentService {
     });
 
     if (!includeReceiptSignedUrls) {
-      return payments.map(p => ({
+      return payments.map((p) => ({
         ...p,
         status: p.status,
         studentName: p.enrollment?.child?.fullName,

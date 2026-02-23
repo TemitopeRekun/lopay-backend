@@ -3,7 +3,11 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
-import { UserRole, PaymentStatus, PaymentType } from '../src/generated/prisma/client';
+import {
+  UserRole,
+  PaymentStatus,
+  PaymentType,
+} from '../src/generated/prisma/client';
 import { FirebaseAdminProvider } from '../src/firebase/firebase-admin.provider';
 import { ThrottlerGuard } from '@nestjs/throttler';
 
@@ -34,7 +38,9 @@ describe('Installment Payment (e2e)', () => {
   };
 
   const prismaMock = {
-    $transaction: jest.fn().mockImplementation((callback) => callback(prismaMock)),
+    $transaction: jest
+      .fn()
+      .mockImplementation((callback) => callback(prismaMock)),
     user: {
       findUnique: jest.fn().mockImplementation((args) => {
         if (args.where.email === 'school@example.com') {
@@ -45,7 +51,7 @@ describe('Installment Payment (e2e)', () => {
             school: { id: 'school-123' },
           });
         } else if (args.where.email === 'parent@example.com') {
-           return Promise.resolve({
+          return Promise.resolve({
             id: 'user-parent',
             email: 'parent@example.com',
             role: UserRole.PARENT,
@@ -71,13 +77,14 @@ describe('Installment Payment (e2e)', () => {
         childId: 'child-123',
       }),
       update: jest.fn().mockResolvedValue({
-         id: '550e8400-e29b-41d4-a716-446655440000',
-         paymentStatus: PaymentStatus.PENDING,
+        id: '550e8400-e29b-41d4-a716-446655440000',
+        paymentStatus: PaymentStatus.PENDING,
       }),
-      findFirst: jest.fn().mockResolvedValue({ // For markEnrollmentAsDefaulted if needed, but safe to mock
-         id: '550e8400-e29b-41d4-a716-446655440000',
-         remainingBalance: 50000,
-      }), 
+      findFirst: jest.fn().mockResolvedValue({
+        // For markEnrollmentAsDefaulted if needed, but safe to mock
+        id: '550e8400-e29b-41d4-a716-446655440000',
+        remainingBalance: 50000,
+      }),
     },
     payment: {
       create: jest.fn().mockResolvedValue({ id: 'payment-installment-1' }),
@@ -88,7 +95,7 @@ describe('Installment Payment (e2e)', () => {
           isConfirmed: false,
           enrollment: { id: '550e8400-e29b-41d4-a716-446655440000' },
           school: { id: 'school-123' },
-        }
+        },
       ]),
       findFirst: jest.fn().mockResolvedValue({
         id: '550e8400-e29b-41d4-a716-446655441111',
@@ -160,7 +167,7 @@ describe('Installment Payment (e2e)', () => {
         .set('Authorization', `Bearer ${parentToken}`)
         .send(dto)
         .expect(201);
-      
+
       expect(prismaMock.payment.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
@@ -168,48 +175,53 @@ describe('Installment Payment (e2e)', () => {
             paymentType: PaymentType.INSTALLMENT,
             isConfirmed: false,
           }),
-        })
+        }),
       );
       expect(prismaMock.childEnrollment.update).toHaveBeenCalledWith(
         expect.objectContaining({
-            where: { id: dto.enrollmentId },
-            data: { paymentStatus: PaymentStatus.PENDING }
-        })
+          where: { id: dto.enrollmentId },
+          data: { paymentStatus: PaymentStatus.PENDING },
+        }),
       );
     });
 
     it('/school-payments/pending (GET) - School Owner should see pending payment', async () => {
-        const res = await request(app.getHttpServer())
-          .get('/school-payments/pending')
-          .set('Authorization', `Bearer ${schoolOwnerToken}`)
-          .expect(200);
+      const res = await request(app.getHttpServer())
+        .get('/school-payments/pending')
+        .set('Authorization', `Bearer ${schoolOwnerToken}`)
+        .expect(200);
 
-        expect(Array.isArray(res.body)).toBe(true);
-        expect(res.body[0].amountPaid).toBe(10000);
-        expect(prismaMock.payment.findMany).toHaveBeenCalledWith(
-            expect.objectContaining({ where: { schoolId: 'school-123', isConfirmed: false } })
-        );
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body[0].amountPaid).toBe(10000);
+      expect(prismaMock.payment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { schoolId: 'school-123', isConfirmed: false },
+        }),
+      );
     });
 
     it('/school-payments/confirm (POST) - School Owner should confirm payment', async () => {
-        await request(app.getHttpServer())
-          .post('/school-payments/confirm')
-          .set('Authorization', `Bearer ${schoolOwnerToken}`)
-          .send({ paymentId: '550e8400-e29b-41d4-a716-446655441111' })
-          .expect(201);
+      await request(app.getHttpServer())
+        .post('/school-payments/confirm')
+        .set('Authorization', `Bearer ${schoolOwnerToken}`)
+        .send({ paymentId: '550e8400-e29b-41d4-a716-446655441111' })
+        .expect(201);
 
-        expect(prismaMock.payment.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: '550e8400-e29b-41d4-a716-446655441111' },
-                data: { isConfirmed: true }
-            })
-        );
-        // Balance 50000 - 10000 = 40000
-        expect(prismaMock.childEnrollment.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                data: { remainingBalance: 40000, paymentStatus: PaymentStatus.ACTIVE }
-            })
-        );
+      expect(prismaMock.payment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: '550e8400-e29b-41d4-a716-446655441111' },
+          data: { isConfirmed: true },
+        }),
+      );
+      // Balance 50000 - 10000 = 40000
+      expect(prismaMock.childEnrollment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            remainingBalance: 40000,
+            paymentStatus: PaymentStatus.ACTIVE,
+          },
+        }),
+      );
     });
   });
 });

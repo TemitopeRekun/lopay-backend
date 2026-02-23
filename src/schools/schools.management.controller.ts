@@ -1,4 +1,14 @@
-import { Controller, Post, Put, Delete, Body, Param, UseGuards, Get, Query } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  UseGuards,
+  Get,
+  Query,
+} from '@nestjs/common';
 import { SchoolPaymentsService } from './schools.service';
 import { CreateSchoolDto } from '../admin/dto/create.school.dto';
 import { UpdateSchoolDto } from './dto/update.school.dto';

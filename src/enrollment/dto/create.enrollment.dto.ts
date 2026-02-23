@@ -1,15 +1,29 @@
 import { InstallmentFrequency } from '../../generated/prisma/client';
-import { IsString, IsNotEmpty, IsNumber, IsEnum, IsDate, Min, IsOptional } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsNumber,
+  IsEnum,
+  IsDate,
+  Min,
+  IsOptional,
+} from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateEnrollmentDto {
-  @ApiPropertyOptional({ example: 'child-uuid', description: 'ID of existing child' })
+  @ApiPropertyOptional({
+    example: 'child-uuid',
+    description: 'ID of existing child',
+  })
   @IsString()
   @IsOptional()
   childId?: string;
 
-  @ApiPropertyOptional({ example: 'Little Timmy', description: 'Name of new child (if childId is not provided)' })
+  @ApiPropertyOptional({
+    example: 'Little Timmy',
+    description: 'Name of new child (if childId is not provided)',
+  })
   @IsString()
   @IsOptional()
   childName?: string;
@@ -29,7 +43,10 @@ export class CreateEnrollmentDto {
   @IsEnum(InstallmentFrequency)
   installmentFrequency: InstallmentFrequency;
 
-  @ApiProperty({ example: 5000, description: 'Amount paid for the first payment' })
+  @ApiProperty({
+    example: 5000,
+    description: 'Amount paid for the first payment',
+  })
   @Type(() => Number)
   @IsNumber()
   @Min(0)
