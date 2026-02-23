@@ -11,7 +11,7 @@ services:
     name: lopay-backend
     env: node
     plan: free
-    buildCommand: npm ci && npm run migrate:deploy && npm run build
+    buildCommand: npm ci --include=dev && npm run migrate:deploy && npm run build
     startCommand: npm run start:prod
     envVars:
       - key: NODE_ENV
