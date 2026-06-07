@@ -30,6 +30,17 @@ enum PaymentTransactionStatus {
   PENDING
   SUCCESS
   FAILED
+  REVERSED
+}
+
+enum AuditAction {
+  PAYMENT_CONFIRMED
+  PAYMENT_REJECTED
+  PAYMENT_REVERSED
+  FIRST_PAYMENT_CONFIRMED
+  FIRST_PAYMENT_SETTLED
+  FIRST_PAYMENT_REJECTED
+  ENROLLMENT_DEFAULTED
 }
 
 enum PaymentType {
@@ -50,8 +61,7 @@ enum InstallmentFrequency {
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
-  password  String
-  fullName  String?  // Added for frontend registration compatibility
+  fullName  String?
   role      UserRole
 
   school    School?  @relation
@@ -131,6 +141,8 @@ model Payment {
   enrollmentId    String
   schoolId        String
 
+  idempotencyKey  String?          @unique // Client-generated key; prevents duplicate submissions on retry
+
   amountPaid      Int              // What parent paid
   platformAmount  Int              // Fixed 2.5% platform fee
   schoolAmount    Int              // Amount going to school (parent payment minus platform fee)
@@ -141,7 +153,7 @@ model Payment {
   status          PaymentTransactionStatus @default(PENDING)
   isConfirmed     Boolean          @default(false)
   paymentDate     DateTime         @default(now())
-  receiptUrl      String?          // Added for payment verification (receipt image)
+  receiptUrl      String?
 
   enrollment      ChildEnrollment  @relation(fields: [enrollmentId], references: [id])
   school          School           @relation(fields: [schoolId], references: [id])
@@ -191,4 +203,27 @@ model Notification {
   createdAt   DateTime @default(now())
 
   user        User     @relation(fields: [userId], references: [id])
+}
+
+/// Append-only audit trail for money-state-changing actions. Rows are written
+/// inside the same transaction as the change they describe and are never
+/// updated or deleted.
+model AuditLog {
+  id          String      @id @default(uuid())
+  action      AuditAction
+  entityType  String // e.g. "Payment", "ChildEnrollment"
+  entityId    String
+  actorUserId String? // null for system/scheduler actions
+  actorRole   String?
+  schoolId    String?
+  reason      String?
+  before      Json?
+  after       Json?
+  metadata    Json?
+  createdAt   DateTime    @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorUserId])
+  @@index([schoolId])
+  @@index([createdAt])
 }

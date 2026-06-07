@@ -11,6 +11,7 @@ import {
 import { SchoolPaymentsService } from './schools.service';
 import { ConfirmPaymentDto } from './dto/confim.payment.dto';
 import { MarkDefaultedDto } from './dto/mark-defaulted.dto';
+import { ReversePaymentDto } from './dto/reverse.payment.dto';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../generated/prisma/client';
 import { CurrentUser } from '../common/decorators/user.decorator';
@@ -196,10 +197,10 @@ export class SchoolPaymentsController {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
     }
-    return this.schoolPaymentsService.confirmPayment(
-      dto.paymentId,
-      user.schoolId,
-    );
+    return this.schoolPaymentsService.confirmPayment(dto.paymentId, user.schoolId, {
+      userId: user.userId,
+      role: user.role,
+    });
   }
 
   /** ✅ Reject a single installment payment */
@@ -212,10 +213,10 @@ export class SchoolPaymentsController {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
     }
-    return this.schoolPaymentsService.rejectPayment(
-      dto.paymentId,
-      user.schoolId,
-    );
+    return this.schoolPaymentsService.rejectPayment(dto.paymentId, user.schoolId, {
+      userId: user.userId,
+      role: user.role,
+    });
   }
 
   /** ✅ Mark an enrollment as defaulted */
@@ -231,6 +232,25 @@ export class SchoolPaymentsController {
     return this.schoolPaymentsService.markEnrollmentAsDefaulted(
       dto.enrollmentId,
       user.schoolId,
+      { userId: user.userId, role: user.role },
+    );
+  }
+
+  /** ✅ Reverse a previously-confirmed installment payment (auditable undo) */
+  @Post('reverse')
+  @Roles(UserRole.SCHOOL_OWNER)
+  async reversePayment(
+    @Body() dto: ReversePaymentDto,
+    @CurrentUser() user: any,
+  ) {
+    if (!user.schoolId) {
+      throw new ForbiddenException('User is not associated with any school');
+    }
+    return this.schoolPaymentsService.reversePayment(
+      dto.paymentId,
+      user.schoolId,
+      { userId: user.userId, role: user.role },
+      dto.reason,
     );
   }
 }

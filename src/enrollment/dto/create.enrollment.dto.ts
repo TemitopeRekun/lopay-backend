@@ -70,4 +70,15 @@ export class CreateEnrollmentDto {
   @IsString()
   @IsOptional()
   receiptUrl?: string;
+
+  @ApiPropertyOptional({
+    example: 'b3f1c2a4-9d8e-4f6a-8c2b-1e2d3f4a5b6c',
+    description:
+      'Client-generated unique key that makes this submission idempotent. ' +
+      'Retries with the same key return the original result instead of ' +
+      'creating a duplicate payment.',
+  })
+  @IsString()
+  @IsOptional()
+  idempotencyKey?: string;
 }

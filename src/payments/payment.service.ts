@@ -2,7 +2,7 @@
 
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { UserRole } from '../generated/prisma/client';
+import { Prisma, UserRole } from '../generated/prisma/client';
 import { DocumentsService } from '../documents/documents.service';
 
 export type InstallmentPlan = 'WEEKLY' | 'MONTHLY';
@@ -224,29 +224,17 @@ export class PaymentService {
     includeReceiptSignedUrls = false,
     receiptType: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT' = 'ALL',
   ) {
-    let whereClause: any = {};
+    let whereClause: Prisma.PaymentWhereInput = {};
 
     if (role === UserRole.PARENT) {
       whereClause = {
-        enrollment: {
-          child: {
-            parent: {
-              userId: userId,
-            },
-          },
-        },
+        enrollment: { child: { parent: { userId } } },
       };
     } else if (role === UserRole.SCHOOL_OWNER) {
       if (!schoolId) {
         throw new Error('School ID is required for school owners');
       }
-      whereClause = {
-        schoolId: schoolId,
-      };
-    } else if (role === UserRole.SUPER_ADMIN) {
-      // Super Admin sees all? or no filter?
-      // Assuming empty filter for now
-      whereClause = {};
+      whereClause = { schoolId };
     }
 
     const payments = await this.prisma.payment.findMany({

@@ -13,6 +13,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../generated/prisma/client';
 import { CreateSchoolDto } from './dto/create.school.dto';
+import { CurrentUser } from '../common/decorators/user.decorator';
 
 @Controller('admin')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -47,20 +48,38 @@ export class AdminController {
     @Param('schoolId') schoolId: string,
     @Query('className') className?: string,
     @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.adminService.getSchoolStudents(schoolId, className, search);
+    return this.adminService.getSchoolStudents(
+      schoolId, className, search,
+      page ? parseInt(page, 10) : 1,
+      limit ? Math.min(parseInt(limit, 10), 100) : 50,
+    );
   }
 
   /** Settle school share */
   @Post('settle-first-payment/:paymentId')
-  settleFirstPayment(@Param('paymentId') paymentId: string) {
-    return this.adminService.settleFirstPayment(paymentId);
+  settleFirstPayment(
+    @Param('paymentId') paymentId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.adminService.settleFirstPayment(paymentId, {
+      userId: user.userId,
+      role: user.role,
+    });
   }
 
   /** Reject a first payment */
   @Post('reject-first-payment/:paymentId')
-  rejectFirstPayment(@Param('paymentId') paymentId: string) {
-    return this.adminService.rejectFirstPayment(paymentId);
+  rejectFirstPayment(
+    @Param('paymentId') paymentId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.adminService.rejectFirstPayment(paymentId, {
+      userId: user.userId,
+      role: user.role,
+    });
   }
 
   /** Platform revenue */

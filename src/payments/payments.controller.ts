@@ -1,6 +1,7 @@
 import { Controller, Post, Body, UseGuards } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { AuthGuard } from '@nestjs/passport';
+import { Throttle } from '@nestjs/throttler';
 import type {
   DepositCalculationResult,
   InstallmentCalculationResult,
@@ -9,6 +10,7 @@ import type {
 
 @Controller('payment')
 @UseGuards(AuthGuard('jwt'))
+@Throttle({ default: { ttl: 60000, limit: 30 } })
 export class PaymentsController {
   constructor(private readonly paymentService: PaymentService) {}
 

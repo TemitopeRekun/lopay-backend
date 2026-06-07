@@ -1,14 +1,18 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateNotificationDto } from './dto/create.notification.dto';
+import { EventsGateway } from '../events/events.gateway';
 
 @Injectable()
 export class NotificationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly events: EventsGateway,
+  ) {}
 
-  /** Create a new notification */
+  /** Create a new notification and push it to the recipient in realtime */
   async create(dto: CreateNotificationDto) {
-    return this.prisma.notification.create({
+    const notification = await this.prisma.notification.create({
       data: {
         userId: dto.userId,
         title: dto.title,
@@ -16,6 +20,10 @@ export class NotificationsService {
         link: dto.link,
       },
     });
+
+    this.events.pushNotification(notification.userId, notification);
+
+    return notification;
   }
 
   /** Get all notifications for a user, newest first */

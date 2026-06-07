@@ -1,6 +1,7 @@
 import {
   Injectable,
   BadRequestException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -9,21 +10,91 @@ import {
   PaymentReceiver,
   UserRole,
   PaymentTransactionStatus,
+  AuditAction,
+  Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateEnrollmentDto } from './dto/create.enrollment.dto';
 import { PaymentService } from '../payments/payment.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { EventsGateway } from '../events/events.gateway';
+import { AuditService, AuditActor } from '../audit/audit.service';
+
+type EnrollmentWithRelations = Prisma.ChildEnrollmentGetPayload<{
+  include: { child: true; school: true; payments: true };
+}>;
+
+type PaymentRecord = EnrollmentWithRelations['payments'][number];
+
+type PaymentWithEnrollment = Prisma.PaymentGetPayload<{
+  include: { enrollment: { include: { child: true; school: true } } };
+}>;
 
 @Injectable()
 export class EnrollmentService {
+  private readonly logger = new Logger(EnrollmentService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly paymentService: PaymentService,
     private readonly notificationsService: NotificationsService,
+    private readonly events: EventsGateway,
+    private readonly audit: AuditService,
   ) {}
 
-  private calculateEnrichment(enrollment: any, payments: any[]) {
+  /** Look up an already-recorded payment by its client idempotency key. */
+  private findPaymentByIdempotencyKey(
+    idempotencyKey: string,
+  ): Promise<PaymentWithEnrollment | null> {
+    return this.prisma.payment.findUnique({
+      where: { idempotencyKey },
+      include: { enrollment: { include: { child: true, school: true } } },
+    });
+  }
+
+  /**
+   * True when an error is the unique-constraint violation on `idempotencyKey`
+   * (i.e. a concurrent request with the same key won the race).
+   */
+  private isIdempotencyConflict(error: unknown): boolean {
+    if (
+      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+      error.code !== 'P2002'
+    ) {
+      return false;
+    }
+    const target = error.meta?.target;
+    return Array.isArray(target)
+      ? target.includes('idempotencyKey')
+      : String(target ?? '').includes('idempotencyKey');
+  }
+
+  /** Shape an existing first-payment row into the enrollment API response. */
+  private buildEnrollmentReplay(payment: PaymentWithEnrollment) {
+    return {
+      idempotent: true,
+      enrollment: payment.enrollment,
+      payment,
+      school: payment.enrollment?.school ?? null,
+      childName: payment.enrollment?.child?.fullName,
+      studentName: payment.enrollment?.child?.fullName,
+    };
+  }
+
+  /** Shape an installment payment row into the enriched API response. */
+  private buildInstallmentResponse(payment: PaymentWithEnrollment) {
+    return {
+      ...payment,
+      amount: payment.amountPaid,
+      date: payment.paymentDate,
+      type: payment.paymentType,
+      studentName: payment.enrollment?.child?.fullName,
+      childName: payment.enrollment?.child?.fullName,
+      schoolName: payment.enrollment?.school?.name,
+    };
+  }
+
+  private calculateEnrichment(enrollment: EnrollmentWithRelations, payments: PaymentRecord[]) {
     const confirmedPayments = payments.filter((p) => p.isConfirmed);
     const paidAmount = confirmedPayments.reduce(
       (sum, p) => sum + p.amountPaid,
@@ -90,9 +161,7 @@ export class EnrollmentService {
   }
 
   async getParentEnrollments(userId: string) {
-    console.log(
-      `EnrollmentService: Fetching enrollments for userId: ${userId}`,
-    );
+    this.logger.log(`Fetching enrollments for userId: ${userId}`);
 
     // Step 1: Find Parent
     const parent = await this.prisma.parent.findUnique({
@@ -101,12 +170,10 @@ export class EnrollmentService {
     });
 
     if (!parent) {
-      console.log('EnrollmentService: Parent not found for userId:', userId);
+      this.logger.log(`Parent not found for userId: ${userId}`);
       return [];
     }
-    console.log(
-      `EnrollmentService: Parent found. ID: ${parent.id}. Children count: ${parent.children.length}`,
-    );
+    this.logger.log(`Parent found. ID: ${parent.id}. Children: ${parent.children.length}`);
 
     if (parent.children.length === 0) {
       return [];
@@ -129,9 +196,7 @@ export class EnrollmentService {
       orderBy: { createdAt: 'desc' },
     });
 
-    console.log(
-      `EnrollmentService: Found ${enrollments.length} enrollments matching child IDs`,
-    );
+    this.logger.log(`Found ${enrollments.length} enrollments for userId: ${userId}`);
 
     return enrollments.map((enrollment) =>
       this.calculateEnrichment(enrollment, enrollment.payments),
@@ -162,6 +227,17 @@ export class EnrollmentService {
   }
 
   async enrollChild(dto: CreateEnrollmentDto, userId: string) {
+    // 0. Idempotency: if we've already processed this exact submission, replay
+    // the original outcome instead of creating a second enrollment/payment.
+    if (dto.idempotencyKey) {
+      const existing = await this.findPaymentByIdempotencyKey(
+        dto.idempotencyKey,
+      );
+      if (existing) {
+        return this.buildEnrollmentReplay(existing);
+      }
+    }
+
     // 1. Resolve Child
     let childId = dto.childId;
     let retryEnrollmentId: string | null = null;
@@ -213,6 +289,7 @@ export class EnrollmentService {
       });
 
       if (failedEnrollment) {
+        this.logger.log(`Retrying failed enrollment: ${failedEnrollment.id}`);
         childId = failedEnrollment.childId;
         retryEnrollmentId = failedEnrollment.id;
       } else {
@@ -276,12 +353,12 @@ export class EnrollmentService {
     );
 
     // 4. Create Enrollment & Payment
-    const result = await this.prisma.$transaction(async (tx) => {
+    let result;
+    try {
+      result = await this.prisma.$transaction(async (tx) => {
       let enrollment;
       if (retryEnrollmentId) {
-        console.log(
-          `EnrollmentService: Retrying first payment for enrollmentId: ${retryEnrollmentId}`,
-        );
+        this.logger.log(`Retrying first payment for enrollmentId: ${retryEnrollmentId}`);
         enrollment = await tx.childEnrollment.update({
           where: { id: retryEnrollmentId },
           data: {
@@ -298,9 +375,7 @@ export class EnrollmentService {
           },
         });
       } else {
-        console.log(
-          `EnrollmentService: Creating enrollment for childId: ${childId}, schoolId: ${dto.schoolId}`,
-        );
+        this.logger.log(`Creating enrollment for childId: ${childId}, schoolId: ${dto.schoolId}`);
         enrollment = await tx.childEnrollment.create({
           data: {
             childId,
@@ -331,6 +406,7 @@ export class EnrollmentService {
           status: PaymentTransactionStatus.PENDING,
           isConfirmed: false,
           receiptUrl: dto.receiptUrl,
+          idempotencyKey: dto.idempotencyKey ?? null,
           paymentDate: new Date(),
         },
       });
@@ -354,7 +430,18 @@ export class EnrollmentService {
         childName,
         studentName: childName, // Alias for consistency
       };
-    });
+      });
+    } catch (error) {
+      // A concurrent request with the same idempotency key won the race —
+      // replay its result instead of surfacing a duplicate-key error.
+      if (dto.idempotencyKey && this.isIdempotencyConflict(error)) {
+        const existing = await this.findPaymentByIdempotencyKey(
+          dto.idempotencyKey,
+        );
+        if (existing) return this.buildEnrollmentReplay(existing);
+      }
+      throw error;
+    }
 
     // 5. Notify School Owner (Post-Transaction)
     if (result.school?.ownerId) {
@@ -369,16 +456,30 @@ export class EnrollmentService {
     // 6. Notify Super Admin (Platform)
     const admins = await this.prisma.user.findMany({
       where: { role: UserRole.SUPER_ADMIN },
+      select: { id: true },
     });
 
-    for (const admin of admins) {
-      await this.notificationsService.create({
-        userId: admin.id,
-        title: 'New First Payment Received',
-        message: `Payment of ${dto.firstPaymentPaid} received for ${result.childName} at ${result.school?.name}. Please process 25% payout to school.`,
-        link: '/admin/payments',
-      });
-    }
+    await Promise.all(
+      admins.map((admin) =>
+        this.notificationsService.create({
+          userId: admin.id,
+          title: 'New First Payment Received',
+          message: `Payment of ${dto.firstPaymentPaid} received for ${result.childName} at ${result.school?.name}. Please process 25% payout to school.`,
+          link: '/admin/payments',
+        }),
+      ),
+    );
+
+    // A new pending enrollment + first payment now awaits processing — push it
+    // to the school owner and admins so their pending queues update live.
+    this.events.emitEnrollmentsChanged({
+      schoolId: dto.schoolId,
+      notifyAdmins: true,
+    });
+    this.events.emitPaymentsChanged({
+      schoolId: dto.schoolId,
+      notifyAdmins: true,
+    });
 
     return result;
   }
@@ -387,7 +488,14 @@ export class EnrollmentService {
     enrollmentId: string,
     amountPaid: number,
     receiptUrl?: string,
+    idempotencyKey?: string,
   ) {
+    // Idempotency: replay the original payment if this submission already ran.
+    if (idempotencyKey) {
+      const existing = await this.findPaymentByIdempotencyKey(idempotencyKey);
+      if (existing) return this.buildInstallmentResponse(existing);
+    }
+
     const enrollment = await this.prisma.childEnrollment.findUnique({
       where: { id: enrollmentId },
       include: { school: true, child: true },
@@ -396,21 +504,32 @@ export class EnrollmentService {
     if (!enrollment) throw new NotFoundException('Enrollment not found');
 
     // Create Payment
-    const payment = await this.prisma.payment.create({
-      data: {
-        enrollmentId,
-        schoolId: enrollment.schoolId,
-        amountPaid,
-        platformAmount: 0, // Installments usually 100% to school?
-        schoolAmount: amountPaid,
-        receiver: PaymentReceiver.SCHOOL, // Installments go to school
-        paymentType: PaymentType.INSTALLMENT,
-        status: PaymentTransactionStatus.PENDING,
-        isConfirmed: false,
-        receiptUrl,
-        paymentDate: new Date(),
-      },
-    });
+    let payment;
+    try {
+      payment = await this.prisma.payment.create({
+        data: {
+          enrollmentId,
+          schoolId: enrollment.schoolId,
+          amountPaid,
+          platformAmount: 0, // Installments usually 100% to school?
+          schoolAmount: amountPaid,
+          receiver: PaymentReceiver.SCHOOL, // Installments go to school
+          paymentType: PaymentType.INSTALLMENT,
+          status: PaymentTransactionStatus.PENDING,
+          isConfirmed: false,
+          receiptUrl,
+          idempotencyKey: idempotencyKey ?? null,
+          paymentDate: new Date(),
+        },
+      });
+    } catch (error) {
+      // Lost the race to a concurrent request with the same key — replay it.
+      if (idempotencyKey && this.isIdempotencyConflict(error)) {
+        const existing = await this.findPaymentByIdempotencyKey(idempotencyKey);
+        if (existing) return this.buildInstallmentResponse(existing);
+      }
+      throw error;
+    }
 
     // Notify School Owner
     if (enrollment.school.ownerId) {
@@ -420,6 +539,12 @@ export class EnrollmentService {
         message: `New payment of ${amountPaid} for ${enrollment.child.fullName} (${enrollment.className}) at ${enrollment.school.name}.`,
       });
     }
+
+    // Push the new pending installment to the school dashboard + admins.
+    this.events.emitPaymentsChanged({
+      schoolId: enrollment.schoolId,
+      notifyAdmins: true,
+    });
 
     return {
       ...payment,
@@ -432,8 +557,12 @@ export class EnrollmentService {
     };
   }
 
-  async confirmFirstPayment(enrollmentId: string, schoolId: string) {
-    return this.prisma.$transaction(async (tx) => {
+  async confirmFirstPayment(
+    enrollmentId: string,
+    schoolId: string,
+    actor: AuditActor,
+  ) {
+    const { parentUserId } = await this.prisma.$transaction(async (tx) => {
       // 1. Verify Enrollment
       const enrollment = await tx.childEnrollment.findUnique({
         where: { id: enrollmentId },
@@ -486,6 +615,27 @@ export class EnrollmentService {
         data: { paymentStatus: PaymentStatus.ACTIVE },
       });
 
+      // 4b. Audit (atomic with the confirmation/activation)
+      await this.audit.record(
+        {
+          action: AuditAction.FIRST_PAYMENT_CONFIRMED,
+          entityType: 'Payment',
+          entityId: payment.id,
+          actor,
+          schoolId,
+          before: {
+            paymentStatus: PaymentStatus.PENDING,
+            isConfirmed: payment.isConfirmed,
+          },
+          after: {
+            paymentStatus: PaymentStatus.ACTIVE,
+            isConfirmed: true,
+          },
+          metadata: { enrollmentId, amount: payment.amountPaid },
+        },
+        tx,
+      );
+
       // 5. Notify Parent
       await this.notificationsService.create({
         userId: enrollment.child.parent.userId,
@@ -493,7 +643,25 @@ export class EnrollmentService {
         message: `Your enrollment for ${enrollment.child.fullName} (${enrollment.className}) at ${enrollment.school.name} has been confirmed.`,
       });
 
-      return { message: 'First payment confirmed and enrollment activated' };
+      return {
+        message: 'First payment confirmed and enrollment activated',
+        parentUserId: enrollment.child.parent.userId,
+      };
     });
+
+    // Enrollment just went ACTIVE — push to the parent (their dashboard),
+    // school dashboard, and admins.
+    this.events.emitEnrollmentsChanged({
+      parentUserId,
+      schoolId,
+      notifyAdmins: true,
+    });
+    this.events.emitPaymentsChanged({
+      parentUserId,
+      schoolId,
+      notifyAdmins: true,
+    });
+
+    return { message: 'First payment confirmed and enrollment activated' };
   }
 }

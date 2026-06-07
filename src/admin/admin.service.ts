@@ -2,6 +2,7 @@ import {
   Inject,
   Injectable,
   BadRequestException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -10,19 +11,25 @@ import {
   PaymentStatus,
   PaymentTransactionStatus,
   UserRole,
+  AuditAction,
+  Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import * as admin from 'firebase-admin';
 import { CreateSchoolDto } from './dto/create.school.dto';
 import { DocumentsService } from '../documents/documents.service';
+import { AuditService, AuditActor } from '../audit/audit.service';
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
     private readonly documentsService: DocumentsService,
+    private readonly audit: AuditService,
     @Inject('FIREBASE_ADMIN') private readonly firebaseAdmin: admin.app.App,
   ) {}
 
@@ -31,30 +38,29 @@ export class AdminService {
     // 1. Create Firebase User
     let firebaseUser;
     try {
-      console.log(`Attempting to create Firebase user: ${dto.ownerEmail}`);
+      this.logger.log(`Creating Firebase user: ${dto.ownerEmail}`);
       firebaseUser = await this.firebaseAdmin.auth().createUser({
         email: dto.ownerEmail,
         password: dto.ownerPassword,
         displayName: dto.ownerName,
       });
-      console.log(`Firebase user created: ${firebaseUser.uid}`);
-    } catch (error) {
-      console.error('Firebase creation error:', error);
-      if (error.code === 'auth/email-already-exists') {
-        // If user exists in Firebase, check if they exist in our DB
+      this.logger.log(`Firebase user created: ${firebaseUser.uid}`);
+    } catch (error: unknown) {
+      const err = error as { code?: string; message?: string };
+      this.logger.error(`Firebase user creation failed: ${err.message}`);
+      if (err.code === 'auth/email-already-exists') {
         try {
-          console.log('User exists in Firebase, retrieving...');
-          firebaseUser = await this.firebaseAdmin
-            .auth()
-            .getUserByEmail(dto.ownerEmail);
-          console.log(`Retrieved existing Firebase user: ${firebaseUser.uid}`);
-        } catch (retrieveError: any) {
+          this.logger.log(`User exists in Firebase, retrieving: ${dto.ownerEmail}`);
+          firebaseUser = await this.firebaseAdmin.auth().getUserByEmail(dto.ownerEmail);
+          this.logger.log(`Retrieved existing Firebase user: ${firebaseUser.uid}`);
+        } catch (retrieveError: unknown) {
+          const re = retrieveError as { message?: string };
           throw new BadRequestException(
-            `User exists in Firebase but could not be retrieved: ${retrieveError.message}`,
+            `User exists in Firebase but could not be retrieved: ${re.message}`,
           );
         }
       } else {
-        throw new BadRequestException(`Firebase Error: ${error.message}`);
+        throw new BadRequestException(`Firebase Error: ${err.message}`);
       }
     }
 
@@ -73,12 +79,11 @@ export class AdminService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      // 2. Create User record
+      // 2. Create User record — ID intentionally synced to Firebase UID
       const user = await tx.user.create({
         data: {
           id: firebaseUser.uid,
           email: dto.ownerEmail,
-          password: 'HASHED_PASSWORD_PLACEHOLDER', // In production, we don't store passwords if using Firebase, but DB schema might require it.
           role: UserRole.SCHOOL_OWNER,
           fullName: dto.ownerName,
         },
@@ -163,7 +168,7 @@ export class AdminService {
   }
 
   /** Settle school share and activate enrollment */
-  async settleFirstPayment(paymentId: string) {
+  async settleFirstPayment(paymentId: string, actor: AuditActor) {
     const payment = await this.prisma.payment.findFirst({
       where: {
         id: paymentId,
@@ -189,21 +194,39 @@ export class AdminService {
 
     const { enrollment } = payment;
 
-    await this.prisma.$transaction([
+    await this.prisma.$transaction(async (tx) => {
       // 1️⃣ Mark payment as confirmed
-      this.prisma.payment.update({
+      await tx.payment.update({
         where: { id: payment.id },
         data: { isConfirmed: true, status: PaymentTransactionStatus.SUCCESS },
-      }),
+      });
 
       // 2️⃣ Activate enrollment
-      this.prisma.childEnrollment.update({
+      await tx.childEnrollment.update({
         where: { id: payment.enrollmentId },
         data: { paymentStatus: PaymentStatus.ACTIVE },
-      }),
+      });
+
+      // 2b. Audit (atomic with the settlement)
+      await this.audit.record(
+        {
+          action: AuditAction.FIRST_PAYMENT_SETTLED,
+          entityType: 'Payment',
+          entityId: payment.id,
+          actor,
+          schoolId: enrollment.schoolId,
+          before: {
+            isConfirmed: false,
+            paymentStatus: enrollment.paymentStatus,
+          },
+          after: { isConfirmed: true, paymentStatus: PaymentStatus.ACTIVE },
+          metadata: { enrollmentId: enrollment.id, amount: payment.amountPaid },
+        },
+        tx,
+      );
 
       // 3️⃣ Notify School Owner
-      this.prisma.notification.create({
+      await tx.notification.create({
         data: {
           userId: enrollment.school.ownerId,
           title: 'First Payment Settled',
@@ -211,18 +234,18 @@ export class AdminService {
             'The platform has settled the first payment. Enrollment is now active.',
           link: `/school/enrollments/${enrollment.id}`,
         },
-      }),
+      });
 
       // 4️⃣ Notify Parent
-      this.prisma.notification.create({
+      await tx.notification.create({
         data: {
           userId: enrollment.child.parent.userId,
           title: 'Enrollment Confirmed',
           message: `Your first payment of ₦${payment.amountPaid} has been confirmed. Enrollment is active.`,
           link: `/parent/enrollments/${enrollment.id}`,
         },
-      }),
-    ]);
+      });
+    });
 
     return {
       message: 'Payment settled and enrollment activated successfully',
@@ -260,7 +283,7 @@ export class AdminService {
   }
 
   /** Reject a pending first payment and mark enrollment as failed */
-  async rejectFirstPayment(paymentId: string) {
+  async rejectFirstPayment(paymentId: string, actor: AuditActor) {
     const payment = await this.prisma.payment.findFirst({
       where: {
         id: paymentId,
@@ -288,23 +311,44 @@ export class AdminService {
 
     const { enrollment } = payment;
 
-    await this.prisma.$transaction([
+    await this.prisma.$transaction(async (tx) => {
       // 1️⃣ Mark payment as failed (not confirmed)
-      this.prisma.payment.update({
+      await tx.payment.update({
         where: { id: payment.id },
         data: {
           status: PaymentTransactionStatus.FAILED,
         },
-      }),
+      });
 
       // 2️⃣ Mark enrollment as FAILED (no balance changes)
-      this.prisma.childEnrollment.update({
+      await tx.childEnrollment.update({
         where: { id: payment.enrollmentId },
         data: { paymentStatus: PaymentStatus.FAILED },
-      }),
+      });
+
+      // 2b. Audit (atomic with the rejection)
+      await this.audit.record(
+        {
+          action: AuditAction.FIRST_PAYMENT_REJECTED,
+          entityType: 'Payment',
+          entityId: payment.id,
+          actor,
+          schoolId: enrollment.schoolId,
+          before: {
+            isConfirmed: false,
+            paymentStatus: enrollment.paymentStatus,
+          },
+          after: {
+            status: PaymentTransactionStatus.FAILED,
+            paymentStatus: PaymentStatus.FAILED,
+          },
+          metadata: { enrollmentId: enrollment.id, amount: payment.amountPaid },
+        },
+        tx,
+      );
 
       // 3️⃣ Notify School Owner (optional visibility)
-      this.prisma.notification.create({
+      await tx.notification.create({
         data: {
           userId: enrollment.school.ownerId,
           title: 'First Payment Rejected',
@@ -312,10 +356,10 @@ export class AdminService {
             'The platform has rejected the first payment for this enrollment. Please review the receipt or contact the parent.',
           link: `/school/enrollments/${enrollment.id}`,
         },
-      }),
+      });
 
       // 4️⃣ Notify Parent
-      this.prisma.notification.create({
+      await tx.notification.create({
         data: {
           userId: enrollment.child.parent.userId,
           title: 'First Payment Rejected',
@@ -323,8 +367,8 @@ export class AdminService {
             'Your first payment could not be verified. Please pay again and upload a clearer receipt.',
           link: `/parent/enrollments/${enrollment.id}`,
         },
-      }),
-    ]);
+      });
+    });
 
     return {
       message: 'First payment rejected and enrollment marked as failed',
@@ -337,12 +381,13 @@ export class AdminService {
     schoolId: string,
     className?: string,
     search?: string,
+    page = 1,
+    limit = 50,
   ) {
-    const whereClause: any = { schoolId };
+    const whereClause: Prisma.ChildEnrollmentWhereInput = { schoolId };
     if (className) {
       whereClause.className = className;
     }
-
     if (search) {
       whereClause.OR = [
         { child: { fullName: { contains: search, mode: 'insensitive' } } },
@@ -356,15 +401,21 @@ export class AdminService {
       ];
     }
 
-    const enrollments = await this.prisma.childEnrollment.findMany({
-      where: whereClause,
-      include: {
-        child: { include: { parent: { include: { user: true } } } },
-        payments: { orderBy: { paymentDate: 'desc' } },
-      },
-    });
+    const [enrollments, total] = await Promise.all([
+      this.prisma.childEnrollment.findMany({
+        where: whereClause,
+        include: {
+          child: { include: { parent: { include: { user: true } } } },
+          payments: { orderBy: { paymentDate: 'desc' } },
+        },
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.childEnrollment.count({ where: whereClause }),
+    ]);
 
-    return enrollments.map((enrollment) => {
+    const items = enrollments.map((enrollment) => {
       const confirmedPayments = enrollment.payments.filter(
         (p) => p.isConfirmed,
       );
@@ -402,6 +453,8 @@ export class AdminService {
         avatarUrl: null,
       };
     });
+
+    return { items, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   /** Platform revenue summary */
@@ -426,9 +479,9 @@ export class AdminService {
     includeReceiptSignedUrls = false,
     receiptType: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT' = 'ALL',
   ) {
-    const whereClause: any = {};
+    const whereClause: Prisma.PaymentWhereInput = {};
     if (receiptType !== 'ALL') {
-      whereClause.paymentType = receiptType;
+      whereClause.paymentType = receiptType as Prisma.EnumPaymentTypeFilter;
     }
 
     const payments = await this.prisma.payment.findMany({

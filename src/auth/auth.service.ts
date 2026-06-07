@@ -1,6 +1,7 @@
 import {
   Inject,
   Injectable,
+  Logger,
   UnauthorizedException,
   BadRequestException,
 } from '@nestjs/common';
@@ -11,6 +12,8 @@ import { RegisterDto } from './dto/register.dto';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @Inject('FIREBASE_ADMIN')
     private readonly firebase: typeof import('firebase-admin'),
@@ -42,15 +45,13 @@ export class AuthService {
         password: dto.password,
       });
 
-      // 2. Create User in Database
+      // 2. Create User in Database — ID intentionally synced to Firebase UID
       const user = await this.prisma.user.create({
         data: {
-          id: firebaseUser.uid, // Sync UID with Firebase
+          id: firebaseUser.uid,
           email: dto.email,
-          fullName: dto.fullName, // Save full name
-          password: 'firebase-auth-user', // Placeholder
-          role: UserRole.PARENT, // Default role
-          // Automatically create Parent profile with phone number
+          fullName: dto.fullName,
+          role: UserRole.PARENT,
           parent: {
             create: {
               phoneNumber: dto.phoneNumber,
@@ -77,19 +78,15 @@ export class AuthService {
         },
       };
     } catch (error) {
-      console.error('Registration failed:', error);
+      this.logger.error('Registration failed', error instanceof Error ? error.stack : String(error));
 
-      // Rollback: If DB creation failed but Firebase succeeded, delete from Firebase
       if (firebaseUser) {
-        console.warn(
-          'Rolling back Firebase user creation for:',
-          firebaseUser.uid,
-        );
+        this.logger.warn(`Rolling back Firebase user creation for: ${firebaseUser.uid}`);
         await this.firebase
           .auth()
           .deleteUser(firebaseUser.uid)
-          .catch((rollbackError) => {
-            console.error('Rollback failed:', rollbackError);
+          .catch((rollbackError: Error) => {
+            this.logger.error('Firebase rollback failed', rollbackError.stack);
           });
       }
 
@@ -108,8 +105,8 @@ export class AuthService {
     const decodedToken = await this.firebase
       .auth()
       .verifyIdToken(idToken)
-      .catch((error) => {
-        console.error('Token verification failed:', error);
+      .catch((error: Error) => {
+        this.logger.warn(`Token verification failed: ${error.message}`);
         throw new UnauthorizedException('Invalid Firebase token');
       });
     const { email } = decodedToken;
@@ -125,24 +122,15 @@ export class AuthService {
       include: { school: true },
     });
 
-    // If user does not exist, create a new one.
-    const user =
-      existingUser ||
-      (await this.prisma.user.create({
-        data: {
-          email, // This is now guaranteed to be a string.
-          password: 'firebase-auth-user', // Placeholder, we rely on Firebase
-          role: UserRole.PARENT,
-          // Ensure Parent profile is created if user is new
-          parent: {
-            create: {
-              phoneNumber: '', // Placeholder, user should update profile later
-            },
-          },
-        },
-        // 2. Ensure `include` is here so the created user object also has the `school` relation.
-        include: { school: true },
-      }));
+    // If the user does not exist in the DB they have not completed registration.
+    // Reject rather than silently creating a bare-bones record with a mismatched ID.
+    if (!existingUser) {
+      throw new UnauthorizedException(
+        'Account not found. Please register before logging in.',
+      );
+    }
+
+    const user = existingUser;
 
     // Create backend JWT
     const payload = {

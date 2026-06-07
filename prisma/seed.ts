@@ -70,9 +70,8 @@ async function main() {
       role: UserRole.SUPER_ADMIN, // Ensure role is always SUPER_ADMIN
     },
     create: {
-      id: firebaseUser.uid, // Sync UID
+      id: firebaseUser.uid,
       email: adminEmail,
-      password: 'firebase-auth-user', // Placeholder
       role: UserRole.SUPER_ADMIN,
     },
   });

@@ -6,9 +6,18 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { FirebaseModule } from '../firebase/firebase.module';
 import { DocumentsModule } from '../documents/documents.module';
+import { EventsModule } from '../events/events.module';
+import { AuditModule } from '../audit/audit.module';
 
 @Module({
-  imports: [PrismaModule, NotificationsModule, FirebaseModule, DocumentsModule],
+  imports: [
+    PrismaModule,
+    NotificationsModule,
+    FirebaseModule,
+    DocumentsModule,
+    EventsModule,
+    AuditModule,
+  ],
   controllers: [SchoolPaymentsController, SchoolsManagementController],
   providers: [SchoolPaymentsService],
 })

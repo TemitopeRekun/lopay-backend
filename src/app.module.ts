@@ -1,5 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
+import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
+import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware';
+import { SchedulerModule } from './scheduler/scheduler.module';
 import { AuthModule } from './auth/auth.module';
 import { ConfigModule } from '@nestjs/config';
 import * as Joi from 'joi';
@@ -21,6 +25,7 @@ import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
       validationSchema: Joi.object({
@@ -68,6 +73,7 @@ import { HealthModule } from './health/health.module';
     EnrollmentModule,
     AdminModule,
     HealthModule,
+    SchedulerModule,
   ],
 
   providers: [
@@ -85,4 +91,10 @@ import { HealthModule } from './health/health.module';
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(RequestIdMiddleware, RequestLoggerMiddleware)
+      .forRoutes('*');
+  }
+}

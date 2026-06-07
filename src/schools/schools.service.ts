@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   Inject,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,18 +12,26 @@ import {
   UserRole,
   PaymentTransactionStatus,
   PaymentType,
+  AuditAction,
+  Prisma,
 } from '../generated/prisma/client';
 import * as admin from 'firebase-admin';
 import { CreateSchoolDto } from '../admin/dto/create.school.dto';
 import { UpdateSchoolDto } from './dto/update.school.dto';
 import { DocumentsService } from '../documents/documents.service';
+import { EventsGateway } from '../events/events.gateway';
+import { AuditService, AuditActor } from '../audit/audit.service';
 
 @Injectable()
 export class SchoolPaymentsService {
+  private readonly logger = new Logger(SchoolPaymentsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
     private readonly documentsService: DocumentsService,
+    private readonly events: EventsGateway,
+    private readonly audit: AuditService,
     @Inject('FIREBASE_ADMIN') private readonly firebaseAdmin: admin.app.App,
   ) {}
 
@@ -66,7 +75,6 @@ export class SchoolPaymentsService {
         data: {
           id: firebaseUser.uid,
           email: dto.ownerEmail,
-          password: 'HASHED_PASSWORD_PLACEHOLDER',
           role: UserRole.SCHOOL_OWNER,
           fullName: dto.ownerName,
         },
@@ -164,8 +172,8 @@ export class SchoolPaymentsService {
   }
 
   async getAllSchools(search?: string) {
-    console.log(`getAllSchools called with search: "${search}"`);
-    const where: any = {};
+    this.logger.log(`getAllSchools called with search: "${search ?? ''}"`);
+    const where: Prisma.SchoolWhereInput = {};
     if (search) {
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
@@ -184,7 +192,7 @@ export class SchoolPaymentsService {
       },
       orderBy: { name: 'asc' },
     });
-    console.log(`getAllSchools found ${schools.length} schools`);
+    this.logger.log(`getAllSchools found ${schools.length} schools`);
     return schools;
   }
 
@@ -265,11 +273,10 @@ export class SchoolPaymentsService {
   }
 
   async getStudents(schoolId: string, className?: string, search?: string) {
-    const whereClause: any = { schoolId };
+    const whereClause: Prisma.ChildEnrollmentWhereInput = { schoolId };
     if (className) {
       whereClause.className = className;
     }
-
     if (search) {
       whereClause.OR = [
         { child: { fullName: { contains: search, mode: 'insensitive' } } },
@@ -481,7 +488,7 @@ export class SchoolPaymentsService {
     return enriched;
   }
 
-  async confirmPayment(paymentId: string, schoolId: string) {
+  async confirmPayment(paymentId: string, schoolId: string, actor: AuditActor) {
     const payment = await this.prisma.payment.findFirst({
       where: {
         id: paymentId,
@@ -499,7 +506,7 @@ export class SchoolPaymentsService {
       throw new BadRequestException('Payment not found or already confirmed');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // 1. Confirm Payment
       const updatedPayment = await tx.payment.update({
         where: { id: paymentId },
@@ -527,6 +534,32 @@ export class SchoolPaymentsService {
         },
       });
 
+      // 2b. Audit (atomic with the confirmation)
+      await this.audit.record(
+        {
+          action: AuditAction.PAYMENT_CONFIRMED,
+          entityType: 'Payment',
+          entityId: paymentId,
+          actor,
+          schoolId,
+          before: {
+            status: payment.status,
+            isConfirmed: payment.isConfirmed,
+            remainingBalance: currentBalance,
+          },
+          after: {
+            status: PaymentTransactionStatus.SUCCESS,
+            isConfirmed: true,
+            remainingBalance: Math.max(0, newBalance),
+            enrollmentStatus: isCompleted
+              ? PaymentStatus.COMPLETED
+              : payment.enrollment.paymentStatus,
+          },
+          metadata: { amount: payment.amountPaid, isCompleted },
+        },
+        tx,
+      );
+
       // 3. Notify Parent
       let message = `Your payment of ${payment.amountPaid} for ${payment.enrollment.child.fullName} (${payment.enrollment.className}) at ${payment.enrollment.school.name} has been confirmed.`;
       if (isCompleted) {
@@ -550,9 +583,19 @@ export class SchoolPaymentsService {
         schoolName: payment.enrollment.school.name,
       };
     });
+
+    // Push the change so the parent, school dashboard, and admins refresh
+    // their payment/balance views without waiting for a poll.
+    this.events.emitPaymentsChanged({
+      parentUserId: payment.enrollment.child.parent.userId,
+      schoolId,
+      notifyAdmins: true,
+    });
+
+    return result;
   }
 
-  async rejectPayment(paymentId: string, schoolId: string) {
+  async rejectPayment(paymentId: string, schoolId: string, actor: AuditActor) {
     const payment = await this.prisma.payment.findFirst({
       where: {
         id: paymentId,
@@ -570,7 +613,7 @@ export class SchoolPaymentsService {
       throw new BadRequestException('Payment not found or already processed');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // 1. Update Payment Status
       const updatedPayment = await tx.payment.update({
         where: { id: paymentId },
@@ -581,7 +624,9 @@ export class SchoolPaymentsService {
       });
 
       // 2. If First Payment, Fail Enrollment
-      if (payment.paymentType === PaymentType.FIRST_PAYMENT) {
+      const failedEnrollment =
+        payment.paymentType === PaymentType.FIRST_PAYMENT;
+      if (failedEnrollment) {
         await tx.childEnrollment.update({
           where: { id: payment.enrollmentId },
           data: {
@@ -589,6 +634,28 @@ export class SchoolPaymentsService {
           },
         });
       }
+
+      // 2b. Audit (atomic with the rejection)
+      await this.audit.record(
+        {
+          action: AuditAction.PAYMENT_REJECTED,
+          entityType: 'Payment',
+          entityId: paymentId,
+          actor,
+          schoolId,
+          before: { status: payment.status, isConfirmed: payment.isConfirmed },
+          after: {
+            status: PaymentTransactionStatus.FAILED,
+            isConfirmed: false,
+            enrollmentFailed: failedEnrollment,
+          },
+          metadata: {
+            amount: payment.amountPaid,
+            paymentType: payment.paymentType,
+          },
+        },
+        tx,
+      );
 
       // 3. Notify Parent
       await this.notificationsService.create({
@@ -608,9 +675,21 @@ export class SchoolPaymentsService {
         schoolName: payment.enrollment.school.name,
       };
     });
+
+    this.events.emitPaymentsChanged({
+      parentUserId: payment.enrollment.child.parent.userId,
+      schoolId,
+      notifyAdmins: true,
+    });
+
+    return result;
   }
 
-  async markEnrollmentAsDefaulted(enrollmentId: string, schoolId: string) {
+  async markEnrollmentAsDefaulted(
+    enrollmentId: string,
+    schoolId: string,
+    actor: AuditActor,
+  ) {
     const enrollment = await this.prisma.childEnrollment.findFirst({
       where: {
         id: enrollmentId,
@@ -623,12 +702,27 @@ export class SchoolPaymentsService {
       throw new BadRequestException('Enrollment not found');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // 1. Mark as Defaulted
       const updatedEnrollment = await tx.childEnrollment.update({
         where: { id: enrollmentId },
         data: { paymentStatus: PaymentStatus.DEFAULTED },
       });
+
+      // 1b. Audit (atomic with the status change)
+      await this.audit.record(
+        {
+          action: AuditAction.ENROLLMENT_DEFAULTED,
+          entityType: 'ChildEnrollment',
+          entityId: enrollmentId,
+          actor,
+          schoolId,
+          before: { paymentStatus: enrollment.paymentStatus },
+          after: { paymentStatus: PaymentStatus.DEFAULTED },
+          metadata: { remainingBalance: enrollment.remainingBalance },
+        },
+        tx,
+      );
 
       // 2. Notify Parent
       await this.notificationsService.create({
@@ -639,5 +733,130 @@ export class SchoolPaymentsService {
 
       return updatedEnrollment;
     });
+
+    this.events.emitEnrollmentsChanged({
+      parentUserId: enrollment.child.parent.userId,
+      schoolId,
+      notifyAdmins: true,
+    });
+
+    return result;
+  }
+
+  /**
+   * Reverse a previously-confirmed installment payment (auditable undo).
+   * Restores the enrollment balance, marks the payment REVERSED, and records
+   * the reason in the audit log. First-payment reversals are intentionally not
+   * supported here — they change the enrollment lifecycle and need their own
+   * flow.
+   */
+  async reversePayment(
+    paymentId: string,
+    schoolId: string,
+    actor: AuditActor,
+    reason?: string,
+  ) {
+    const payment = await this.prisma.payment.findFirst({
+      where: {
+        id: paymentId,
+        schoolId,
+        isConfirmed: true,
+        status: PaymentTransactionStatus.SUCCESS,
+        paymentType: PaymentType.INSTALLMENT,
+      },
+      include: {
+        enrollment: {
+          include: { school: true, child: { include: { parent: true } } },
+        },
+      },
+    });
+
+    if (!payment) {
+      throw new BadRequestException(
+        'No confirmed installment payment found to reverse',
+      );
+    }
+
+    const currentBalance = payment.enrollment.remainingBalance;
+    const restoredBalance = currentBalance + payment.amountPaid;
+    // A reversal re-opens a completed enrollment.
+    const reopened =
+      payment.enrollment.paymentStatus === PaymentStatus.COMPLETED;
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 1. Mark payment as reversed
+      const updatedPayment = await tx.payment.update({
+        where: { id: paymentId },
+        data: {
+          status: PaymentTransactionStatus.REVERSED,
+          isConfirmed: false,
+        },
+      });
+
+      // 2. Restore the enrollment balance
+      await tx.childEnrollment.update({
+        where: { id: payment.enrollmentId },
+        data: {
+          remainingBalance: restoredBalance,
+          paymentStatus: reopened
+            ? PaymentStatus.ACTIVE
+            : payment.enrollment.paymentStatus,
+        },
+      });
+
+      // 3. Audit (atomic with the reversal)
+      await this.audit.record(
+        {
+          action: AuditAction.PAYMENT_REVERSED,
+          entityType: 'Payment',
+          entityId: paymentId,
+          actor,
+          schoolId,
+          reason,
+          before: {
+            status: payment.status,
+            isConfirmed: true,
+            remainingBalance: currentBalance,
+            enrollmentStatus: payment.enrollment.paymentStatus,
+          },
+          after: {
+            status: PaymentTransactionStatus.REVERSED,
+            isConfirmed: false,
+            remainingBalance: restoredBalance,
+            enrollmentStatus: reopened
+              ? PaymentStatus.ACTIVE
+              : payment.enrollment.paymentStatus,
+          },
+          metadata: { amount: payment.amountPaid, reopened },
+        },
+        tx,
+      );
+
+      // 4. Notify Parent
+      await this.notificationsService.create({
+        userId: payment.enrollment.child.parent.userId,
+        title: 'Payment Reversed',
+        message: `A confirmed payment of ${payment.amountPaid} for ${payment.enrollment.child.fullName} (${payment.enrollment.className}) at ${payment.enrollment.school.name} has been reversed.${reason ? ` Reason: ${reason}` : ''} Please contact the school.`,
+      });
+
+      return {
+        ...updatedPayment,
+        amount: updatedPayment.amountPaid,
+        date: updatedPayment.paymentDate,
+        type: updatedPayment.paymentType,
+        studentName: payment.enrollment.child.fullName,
+        childName: payment.enrollment.child.fullName,
+        className: payment.enrollment.className,
+        schoolName: payment.enrollment.school.name,
+      };
+    });
+
+    this.events.emitPaymentsChanged({
+      parentUserId: payment.enrollment.child.parent.userId,
+      schoolId,
+      notifyAdmins: true,
+    });
+
+    return result;
   }
 }
