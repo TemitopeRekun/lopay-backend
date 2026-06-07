@@ -105,6 +105,7 @@ export class SchoolPaymentsController {
     @CurrentUser() user: any,
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
     @Query('receiptType') receiptType?: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT',
+    @Query('take') take?: string,
   ) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
@@ -114,10 +115,11 @@ export class SchoolPaymentsController {
       user.schoolId,
       include,
       receiptType ?? 'ALL',
+      take ? Math.min(parseInt(take, 10), 200) : 100,
     );
   }
 
-  /** âœ… Get School Payment History (All statuses) */
+  /** ✅ Get School Payment History (All statuses) */
   @SkipThrottle()
   @Get('history/all')
   @Roles(UserRole.SCHOOL_OWNER)
@@ -125,6 +127,7 @@ export class SchoolPaymentsController {
     @CurrentUser() user: any,
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
     @Query('receiptType') receiptType?: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT',
+    @Query('take') take?: string,
   ) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
@@ -134,6 +137,7 @@ export class SchoolPaymentsController {
       user.schoolId,
       include,
       receiptType ?? 'ALL',
+      take ? Math.min(parseInt(take, 10), 200) : 100,
     );
   }
 
@@ -148,7 +152,7 @@ export class SchoolPaymentsController {
     return this.schoolPaymentsService.getDashboardStats(user.schoolId);
   }
 
-  /** ✅ Get All Students (Optional Class Filter & Search) */
+  /** ✅ Get All Students (Optional Class Filter, Search & Pagination) */
   @SkipThrottle()
   @Get('students')
   @Roles(UserRole.SCHOOL_OWNER)
@@ -156,6 +160,8 @@ export class SchoolPaymentsController {
     @CurrentUser() user: any,
     @Query('className') className?: string,
     @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
@@ -164,6 +170,8 @@ export class SchoolPaymentsController {
       user.schoolId,
       className,
       search,
+      page ? parseInt(page, 10) : 1,
+      limit ? Math.min(parseInt(limit, 10), 200) : 50,
     );
   }
 

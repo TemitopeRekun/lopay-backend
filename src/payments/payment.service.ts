@@ -4,6 +4,7 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, UserRole } from '../generated/prisma/client';
 import { DocumentsService } from '../documents/documents.service';
+import { Money } from '../common/money';
 
 export type InstallmentPlan = 'WEEKLY' | 'MONTHLY';
 export type ChildPaymentStatus =
@@ -55,10 +56,12 @@ export class PaymentService {
     private readonly documentsService: DocumentsService,
   ) {}
 
-  /** Calculate comprehensive payment structure */
+  /**
+   * Calculate comprehensive payment structure for the public calculator endpoint.
+   * Accepts and returns Naira — no DB storage; pure display calculation.
+   * Uses Money internally so intermediate values are exact integer kobo.
+   */
   calculatePaymentStructure(totalAmount: number): PaymentStructureResult {
-    // Strict validation to prevent NaN/undefined bypassing the check
-    // src/services/payment.service.ts
     if (!totalAmount || Number.isNaN(totalAmount) || totalAmount <= 0) {
       throw new BadRequestException(
         'Invalid total amount. Please provide a valid positive number.',
@@ -66,43 +69,39 @@ export class PaymentService {
     }
 
     const DEPOSIT_PERCENTAGE = 0.25;
-    const PLATFORM_FEE_PERCENTAGE = 0.025; // 2.5%
+    const PLATFORM_FEE_PERCENTAGE = 0.025;
 
-    const depositAmount = totalAmount * DEPOSIT_PERCENTAGE;
+    const total = Money.fromNaira(totalAmount);
+    const platformFee = total.percent(PLATFORM_FEE_PERCENTAGE);
+    const deposit = total.percent(DEPOSIT_PERCENTAGE);
+    const totalPayable = total.add(platformFee);
+    const totalInitialPayment = deposit.add(platformFee);
+    const remainingBalance = totalPayable.subtract(totalInitialPayment);
 
-    // Calculate fees and totals exactly as requested
-    const platformFeeAmount = totalAmount * PLATFORM_FEE_PERCENTAGE;
-    const totalPayable = totalAmount + platformFeeAmount;
-    const totalInitialPayment = depositAmount + platformFeeAmount;
-
-    // Remaining balance = Total Payable - Total Initial Payment
-    const remainingBalance = totalPayable - totalInitialPayment;
-
-    // Helper to create plan
     const createPlan = (
       type: 'Weekly' | 'Monthly',
       label: string,
       count: number,
     ): PaymentPlan => {
-      const baseAmount = remainingBalance / count;
-      // Service fee is 0 for installments (already paid upfront)
+      const installmentKobo = Math.round(remainingBalance.toKobo() / count);
+      const installmentNaira = installmentKobo / 100;
       return {
         type,
         frequencyLabel: label,
         numberOfPayments: count,
-        baseAmount: Number(baseAmount.toFixed(2)),
-        totalAmount: Number(baseAmount.toFixed(2)),
+        baseAmount: installmentNaira,
+        totalAmount: installmentNaira,
       };
     };
 
     return {
       originalAmount: totalAmount,
-      platformFeeAmount: Number(platformFeeAmount.toFixed(2)),
-      totalPayable: Number(totalPayable.toFixed(2)),
-      depositAmount: Number(depositAmount.toFixed(2)),
-      totalInitialPayment: Number(totalInitialPayment.toFixed(2)),
+      platformFeeAmount: platformFee.toNaira(),
+      totalPayable: totalPayable.toNaira(),
+      depositAmount: deposit.toNaira(),
+      totalInitialPayment: totalInitialPayment.toNaira(),
       depositPercentage: DEPOSIT_PERCENTAGE,
-      remainingBalance: Number(remainingBalance.toFixed(2)),
+      remainingBalance: remainingBalance.toNaira(),
       platformFeePercentage: PLATFORM_FEE_PERCENTAGE,
       plans: [
         createPlan('Weekly', '/ week', 12),
@@ -111,44 +110,42 @@ export class PaymentService {
     };
   }
 
-  /** Calculate initial deposit and platform fee */
+  /**
+   * Calculate the initial deposit split for enrollment.
+   * Accepts and returns integer **kobo** — call sites convert Naira↔kobo at the
+   * DTO/DB boundary; this method never sees floating-point Naira values.
+   */
   calculateInitialPayment(
-    schoolFees: number,
-    depositPaid: number,
+    schoolFeesKobo: number,
+    depositPaidKobo: number,
   ): DepositCalculationResult {
-    if (schoolFees <= 0) throw new BadRequestException('Invalid school fees');
+    if (schoolFeesKobo <= 0) throw new BadRequestException('Invalid school fees');
 
     const PLATFORM_FEE_PERCENT = 0.025;
     const SCHOOL_FIRST_PAYMENT_PERCENT = 0.25;
 
-    const platformFee = schoolFees * PLATFORM_FEE_PERCENT; // 2.5%
-    const schoolShare = schoolFees * SCHOOL_FIRST_PAYMENT_PERCENT; // 25%
+    const schoolFees = Money.fromKobo(schoolFeesKobo);
+    const depositPaid = Money.fromKobo(depositPaidKobo);
+    const platformFee = schoolFees.percent(PLATFORM_FEE_PERCENT);
+    const schoolShare = schoolFees.percent(SCHOOL_FIRST_PAYMENT_PERCENT);
+    const minimumDeposit = schoolShare.add(platformFee);
 
-    // Minimum payment includes both school first payment + platform fee
-    const minimumDeposit = schoolShare + platformFee;
-
-    if (depositPaid < minimumDeposit) {
-      // Allow for small floating point differences (e.g. 0.01)
-      if (Math.abs(depositPaid - minimumDeposit) > 0.1) {
-        throw new BadRequestException(
-          `Deposit is below minimum required. Minimum first payment: ₦${minimumDeposit.toFixed(2)}`,
-        );
-      }
+    if (depositPaid.isLessThan(minimumDeposit)) {
+      throw new BadRequestException(
+        `Deposit is below minimum required. Minimum first payment: ${minimumDeposit.formatNaira()}`,
+      );
     }
 
-    // IMPORTANT: The platform fee is deducted first. The rest goes to the school.
-    const amountToSchool = depositPaid - platformFee;
-
-    // Remaining Balance is School Fees - Amount paid TO SCHOOL (excluding platform fee)
-    const remainingBalance = schoolFees - amountToSchool;
+    const amountToSchool = depositPaid.subtract(platformFee);
+    const remainingBalance = schoolFees.subtract(amountToSchool);
 
     return {
-      schoolFees,
-      platformFee,
-      minimumDeposit,
-      depositPaid,
-      amountToSchool,
-      remainingBalance,
+      schoolFees: schoolFees.toKobo(),
+      platformFee: platformFee.toKobo(),
+      minimumDeposit: minimumDeposit.toKobo(),
+      depositPaid: depositPaid.toKobo(),
+      amountToSchool: amountToSchool.toKobo(),
+      remainingBalance: remainingBalance.toKobo(),
     };
   }
 

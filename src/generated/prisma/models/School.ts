@@ -34,6 +34,7 @@ export type SchoolMinAggregateOutputType = {
   bankName: string | null
   accountName: string | null
   accountNumber: string | null
+  deletedAt: Date | null
   createdAt: Date | null
 }
 
@@ -47,6 +48,7 @@ export type SchoolMaxAggregateOutputType = {
   bankName: string | null
   accountName: string | null
   accountNumber: string | null
+  deletedAt: Date | null
   createdAt: Date | null
 }
 
@@ -60,6 +62,7 @@ export type SchoolCountAggregateOutputType = {
   bankName: number
   accountName: number
   accountNumber: number
+  deletedAt: number
   createdAt: number
   _all: number
 }
@@ -75,6 +78,7 @@ export type SchoolMinAggregateInputType = {
   bankName?: true
   accountName?: true
   accountNumber?: true
+  deletedAt?: true
   createdAt?: true
 }
 
@@ -88,6 +92,7 @@ export type SchoolMaxAggregateInputType = {
   bankName?: true
   accountName?: true
   accountNumber?: true
+  deletedAt?: true
   createdAt?: true
 }
 
@@ -101,6 +106,7 @@ export type SchoolCountAggregateInputType = {
   bankName?: true
   accountName?: true
   accountNumber?: true
+  deletedAt?: true
   createdAt?: true
   _all?: true
 }
@@ -187,6 +193,7 @@ export type SchoolGroupByOutputType = {
   bankName: string
   accountName: string
   accountNumber: string
+  deletedAt: Date | null
   createdAt: Date
   _count: SchoolCountAggregateOutputType | null
   _min: SchoolMinAggregateOutputType | null
@@ -221,6 +228,7 @@ export type SchoolWhereInput = {
   bankName?: Prisma.StringFilter<"School"> | string
   accountName?: Prisma.StringFilter<"School"> | string
   accountNumber?: Prisma.StringFilter<"School"> | string
+  deletedAt?: Prisma.DateTimeNullableFilter<"School"> | Date | string | null
   createdAt?: Prisma.DateTimeFilter<"School"> | Date | string
   owner?: Prisma.XOR<Prisma.UserScalarRelationFilter, Prisma.UserWhereInput>
   classes?: Prisma.ClassFeeListRelationFilter
@@ -238,6 +246,7 @@ export type SchoolOrderByWithRelationInput = {
   bankName?: Prisma.SortOrder
   accountName?: Prisma.SortOrder
   accountNumber?: Prisma.SortOrder
+  deletedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   owner?: Prisma.UserOrderByWithRelationInput
   classes?: Prisma.ClassFeeOrderByRelationAggregateInput
@@ -258,6 +267,7 @@ export type SchoolWhereUniqueInput = Prisma.AtLeast<{
   bankName?: Prisma.StringFilter<"School"> | string
   accountName?: Prisma.StringFilter<"School"> | string
   accountNumber?: Prisma.StringFilter<"School"> | string
+  deletedAt?: Prisma.DateTimeNullableFilter<"School"> | Date | string | null
   createdAt?: Prisma.DateTimeFilter<"School"> | Date | string
   owner?: Prisma.XOR<Prisma.UserScalarRelationFilter, Prisma.UserWhereInput>
   classes?: Prisma.ClassFeeListRelationFilter
@@ -275,6 +285,7 @@ export type SchoolOrderByWithAggregationInput = {
   bankName?: Prisma.SortOrder
   accountName?: Prisma.SortOrder
   accountNumber?: Prisma.SortOrder
+  deletedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   _count?: Prisma.SchoolCountOrderByAggregateInput
   _max?: Prisma.SchoolMaxOrderByAggregateInput
@@ -294,6 +305,7 @@ export type SchoolScalarWhereWithAggregatesInput = {
   bankName?: Prisma.StringWithAggregatesFilter<"School"> | string
   accountName?: Prisma.StringWithAggregatesFilter<"School"> | string
   accountNumber?: Prisma.StringWithAggregatesFilter<"School"> | string
+  deletedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"School"> | Date | string | null
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"School"> | Date | string
 }
 
@@ -306,6 +318,7 @@ export type SchoolCreateInput = {
   bankName: string
   accountName: string
   accountNumber: string
+  deletedAt?: Date | string | null
   createdAt?: Date | string
   owner: Prisma.UserCreateNestedOneWithoutSchoolInput
   classes?: Prisma.ClassFeeCreateNestedManyWithoutSchoolInput
@@ -323,6 +336,7 @@ export type SchoolUncheckedCreateInput = {
   bankName: string
   accountName: string
   accountNumber: string
+  deletedAt?: Date | string | null
   createdAt?: Date | string
   classes?: Prisma.ClassFeeUncheckedCreateNestedManyWithoutSchoolInput
   students?: Prisma.ChildEnrollmentUncheckedCreateNestedManyWithoutSchoolInput
@@ -338,6 +352,7 @@ export type SchoolUpdateInput = {
   bankName?: Prisma.StringFieldUpdateOperationsInput | string
   accountName?: Prisma.StringFieldUpdateOperationsInput | string
   accountNumber?: Prisma.StringFieldUpdateOperationsInput | string
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   owner?: Prisma.UserUpdateOneRequiredWithoutSchoolNestedInput
   classes?: Prisma.ClassFeeUpdateManyWithoutSchoolNestedInput
@@ -355,6 +370,7 @@ export type SchoolUncheckedUpdateInput = {
   bankName?: Prisma.StringFieldUpdateOperationsInput | string
   accountName?: Prisma.StringFieldUpdateOperationsInput | string
   accountNumber?: Prisma.StringFieldUpdateOperationsInput | string
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   classes?: Prisma.ClassFeeUncheckedUpdateManyWithoutSchoolNestedInput
   students?: Prisma.ChildEnrollmentUncheckedUpdateManyWithoutSchoolNestedInput
@@ -371,6 +387,7 @@ export type SchoolCreateManyInput = {
   bankName: string
   accountName: string
   accountNumber: string
+  deletedAt?: Date | string | null
   createdAt?: Date | string
 }
 
@@ -383,6 +400,7 @@ export type SchoolUpdateManyMutationInput = {
   bankName?: Prisma.StringFieldUpdateOperationsInput | string
   accountName?: Prisma.StringFieldUpdateOperationsInput | string
   accountNumber?: Prisma.StringFieldUpdateOperationsInput | string
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
@@ -396,6 +414,7 @@ export type SchoolUncheckedUpdateManyInput = {
   bankName?: Prisma.StringFieldUpdateOperationsInput | string
   accountName?: Prisma.StringFieldUpdateOperationsInput | string
   accountNumber?: Prisma.StringFieldUpdateOperationsInput | string
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
@@ -414,6 +433,7 @@ export type SchoolCountOrderByAggregateInput = {
   bankName?: Prisma.SortOrder
   accountName?: Prisma.SortOrder
   accountNumber?: Prisma.SortOrder
+  deletedAt?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
 }
 
@@ -427,6 +447,7 @@ export type SchoolMaxOrderByAggregateInput = {
   bankName?: Prisma.SortOrder
   accountName?: Prisma.SortOrder
   accountNumber?: Prisma.SortOrder
+  deletedAt?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
 }
 
@@ -440,6 +461,7 @@ export type SchoolMinOrderByAggregateInput = {
   bankName?: Prisma.SortOrder
   accountName?: Prisma.SortOrder
   accountNumber?: Prisma.SortOrder
+  deletedAt?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
 }
 
@@ -531,6 +553,7 @@ export type SchoolCreateWithoutOwnerInput = {
   bankName: string
   accountName: string
   accountNumber: string
+  deletedAt?: Date | string | null
   createdAt?: Date | string
   classes?: Prisma.ClassFeeCreateNestedManyWithoutSchoolInput
   students?: Prisma.ChildEnrollmentCreateNestedManyWithoutSchoolInput
@@ -546,6 +569,7 @@ export type SchoolUncheckedCreateWithoutOwnerInput = {
   bankName: string
   accountName: string
   accountNumber: string
+  deletedAt?: Date | string | null
   createdAt?: Date | string
   classes?: Prisma.ClassFeeUncheckedCreateNestedManyWithoutSchoolInput
   students?: Prisma.ChildEnrollmentUncheckedCreateNestedManyWithoutSchoolInput
@@ -577,6 +601,7 @@ export type SchoolUpdateWithoutOwnerInput = {
   bankName?: Prisma.StringFieldUpdateOperationsInput | string
   accountName?: Prisma.StringFieldUpdateOperationsInput | string
   accountNumber?: Prisma.StringFieldUpdateOperationsInput | string
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   classes?: Prisma.ClassFeeUpdateManyWithoutSchoolNestedInput
   students?: Prisma.ChildEnrollmentUpdateManyWithoutSchoolNestedInput
@@ -592,6 +617,7 @@ export type SchoolUncheckedUpdateWithoutOwnerInput = {
   bankName?: Prisma.StringFieldUpdateOperationsInput | string
   accountName?: Prisma.StringFieldUpdateOperationsInput | string
   accountNumber?: Prisma.StringFieldUpdateOperationsInput | string
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   classes?: Prisma.ClassFeeUncheckedUpdateManyWithoutSchoolNestedInput
   students?: Prisma.ChildEnrollmentUncheckedUpdateManyWithoutSchoolNestedInput
@@ -607,6 +633,7 @@ export type SchoolCreateWithoutClassesInput = {
   bankName: string
   accountName: string
   accountNumber: string
+  deletedAt?: Date | string | null
   createdAt?: Date | string
   owner: Prisma.UserCreateNestedOneWithoutSchoolInput
   students?: Prisma.ChildEnrollmentCreateNestedManyWithoutSchoolInput
@@ -623,6 +650,7 @@ export type SchoolUncheckedCreateWithoutClassesInput = {
   bankName: string
   accountName: string
   accountNumber: string
+  deletedAt?: Date | string | null
   createdAt?: Date | string
   students?: Prisma.ChildEnrollmentUncheckedCreateNestedManyWithoutSchoolInput
   payments?: Prisma.PaymentUncheckedCreateNestedManyWithoutSchoolInput
@@ -653,6 +681,7 @@ export type SchoolUpdateWithoutClassesInput = {
   bankName?: Prisma.StringFieldUpdateOperationsInput | string
   accountName?: Prisma.StringFieldUpdateOperationsInput | string
   accountNumber?: Prisma.StringFieldUpdateOperationsInput | string
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   owner?: Prisma.UserUpdateOneRequiredWithoutSchoolNestedInput
   students?: Prisma.ChildEnrollmentUpdateManyWithoutSchoolNestedInput
@@ -669,6 +698,7 @@ export type SchoolUncheckedUpdateWithoutClassesInput = {
   bankName?: Prisma.StringFieldUpdateOperationsInput | string
   accountName?: Prisma.StringFieldUpdateOperationsInput | string
   accountNumber?: Prisma.StringFieldUpdateOperationsInput | string
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   students?: Prisma.ChildEnrollmentUncheckedUpdateManyWithoutSchoolNestedInput
   payments?: Prisma.PaymentUncheckedUpdateManyWithoutSchoolNestedInput
@@ -683,6 +713,7 @@ export type SchoolCreateWithoutPaymentsInput = {
   bankName: string
   accountName: string
   accountNumber: string
+  deletedAt?: Date | string | null
   createdAt?: Date | string
   owner: Prisma.UserCreateNestedOneWithoutSchoolInput
   classes?: Prisma.ClassFeeCreateNestedManyWithoutSchoolInput
@@ -699,6 +730,7 @@ export type SchoolUncheckedCreateWithoutPaymentsInput = {
   bankName: string
   accountName: string
   accountNumber: string
+  deletedAt?: Date | string | null
   createdAt?: Date | string
   classes?: Prisma.ClassFeeUncheckedCreateNestedManyWithoutSchoolInput
   students?: Prisma.ChildEnrollmentUncheckedCreateNestedManyWithoutSchoolInput
@@ -729,6 +761,7 @@ export type SchoolUpdateWithoutPaymentsInput = {
   bankName?: Prisma.StringFieldUpdateOperationsInput | string
   accountName?: Prisma.StringFieldUpdateOperationsInput | string
   accountNumber?: Prisma.StringFieldUpdateOperationsInput | string
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   owner?: Prisma.UserUpdateOneRequiredWithoutSchoolNestedInput
   classes?: Prisma.ClassFeeUpdateManyWithoutSchoolNestedInput
@@ -745,6 +778,7 @@ export type SchoolUncheckedUpdateWithoutPaymentsInput = {
   bankName?: Prisma.StringFieldUpdateOperationsInput | string
   accountName?: Prisma.StringFieldUpdateOperationsInput | string
   accountNumber?: Prisma.StringFieldUpdateOperationsInput | string
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   classes?: Prisma.ClassFeeUncheckedUpdateManyWithoutSchoolNestedInput
   students?: Prisma.ChildEnrollmentUncheckedUpdateManyWithoutSchoolNestedInput
@@ -759,6 +793,7 @@ export type SchoolCreateWithoutStudentsInput = {
   bankName: string
   accountName: string
   accountNumber: string
+  deletedAt?: Date | string | null
   createdAt?: Date | string
   owner: Prisma.UserCreateNestedOneWithoutSchoolInput
   classes?: Prisma.ClassFeeCreateNestedManyWithoutSchoolInput
@@ -775,6 +810,7 @@ export type SchoolUncheckedCreateWithoutStudentsInput = {
   bankName: string
   accountName: string
   accountNumber: string
+  deletedAt?: Date | string | null
   createdAt?: Date | string
   classes?: Prisma.ClassFeeUncheckedCreateNestedManyWithoutSchoolInput
   payments?: Prisma.PaymentUncheckedCreateNestedManyWithoutSchoolInput
@@ -805,6 +841,7 @@ export type SchoolUpdateWithoutStudentsInput = {
   bankName?: Prisma.StringFieldUpdateOperationsInput | string
   accountName?: Prisma.StringFieldUpdateOperationsInput | string
   accountNumber?: Prisma.StringFieldUpdateOperationsInput | string
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   owner?: Prisma.UserUpdateOneRequiredWithoutSchoolNestedInput
   classes?: Prisma.ClassFeeUpdateManyWithoutSchoolNestedInput
@@ -821,6 +858,7 @@ export type SchoolUncheckedUpdateWithoutStudentsInput = {
   bankName?: Prisma.StringFieldUpdateOperationsInput | string
   accountName?: Prisma.StringFieldUpdateOperationsInput | string
   accountNumber?: Prisma.StringFieldUpdateOperationsInput | string
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   classes?: Prisma.ClassFeeUncheckedUpdateManyWithoutSchoolNestedInput
   payments?: Prisma.PaymentUncheckedUpdateManyWithoutSchoolNestedInput
@@ -885,6 +923,7 @@ export type SchoolSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   bankName?: boolean
   accountName?: boolean
   accountNumber?: boolean
+  deletedAt?: boolean
   createdAt?: boolean
   owner?: boolean | Prisma.UserDefaultArgs<ExtArgs>
   classes?: boolean | Prisma.School$classesArgs<ExtArgs>
@@ -903,6 +942,7 @@ export type SchoolSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extens
   bankName?: boolean
   accountName?: boolean
   accountNumber?: boolean
+  deletedAt?: boolean
   createdAt?: boolean
   owner?: boolean | Prisma.UserDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["school"]>
@@ -917,6 +957,7 @@ export type SchoolSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extens
   bankName?: boolean
   accountName?: boolean
   accountNumber?: boolean
+  deletedAt?: boolean
   createdAt?: boolean
   owner?: boolean | Prisma.UserDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["school"]>
@@ -931,10 +972,11 @@ export type SchoolSelectScalar = {
   bankName?: boolean
   accountName?: boolean
   accountNumber?: boolean
+  deletedAt?: boolean
   createdAt?: boolean
 }
 
-export type SchoolOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "name" | "email" | "phone" | "address" | "ownerId" | "bankName" | "accountName" | "accountNumber" | "createdAt", ExtArgs["result"]["school"]>
+export type SchoolOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "name" | "email" | "phone" | "address" | "ownerId" | "bankName" | "accountName" | "accountNumber" | "deletedAt" | "createdAt", ExtArgs["result"]["school"]>
 export type SchoolInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   owner?: boolean | Prisma.UserDefaultArgs<ExtArgs>
   classes?: boolean | Prisma.School$classesArgs<ExtArgs>
@@ -967,6 +1009,7 @@ export type $SchoolPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs
     bankName: string
     accountName: string
     accountNumber: string
+    deletedAt: Date | null
     createdAt: Date
   }, ExtArgs["result"]["school"]>
   composites: {}
@@ -1404,6 +1447,7 @@ export interface SchoolFieldRefs {
   readonly bankName: Prisma.FieldRef<"School", 'String'>
   readonly accountName: Prisma.FieldRef<"School", 'String'>
   readonly accountNumber: Prisma.FieldRef<"School", 'String'>
+  readonly deletedAt: Prisma.FieldRef<"School", 'DateTime'>
   readonly createdAt: Prisma.FieldRef<"School", 'DateTime'>
 }
     

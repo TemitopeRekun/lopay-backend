@@ -59,10 +59,11 @@ enum InstallmentFrequency {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
+  id        String    @id @default(uuid())
+  email     String    @unique
   fullName  String?
   role      UserRole
+  deletedAt DateTime?
 
   school    School?  @relation
   parent    Parent?
@@ -70,6 +71,8 @@ model User {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([deletedAt])
 }
 
 model School {
@@ -90,12 +93,16 @@ model School {
   accountName   String
   accountNumber String
 
+  deletedAt     DateTime?
+
   // Relations
   classes       ClassFee[]
   students      ChildEnrollment[]
   payments      Payment[]
 
   createdAt     DateTime @default(now())
+
+  @@index([deletedAt])
 }
 
 model ClassFee {
@@ -157,6 +164,10 @@ model Payment {
 
   enrollment      ChildEnrollment  @relation(fields: [enrollmentId], references: [id])
   school          School           @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, isConfirmed, status])
+  @@index([enrollmentId])
 }
 
 model ChildEnrollment {
@@ -185,6 +196,9 @@ model ChildEnrollment {
 
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, paymentStatus])
 }
 
 model PlatformSetting {
@@ -203,6 +217,9 @@ model Notification {
   createdAt   DateTime @default(now())
 
   user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([userId, isRead])
 }
 
 /// Append-only audit trail for money-state-changing actions. Rows are written

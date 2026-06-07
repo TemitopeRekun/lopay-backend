@@ -21,6 +21,7 @@ import { UpdateSchoolDto } from './dto/update.school.dto';
 import { DocumentsService } from '../documents/documents.service';
 import { EventsGateway } from '../events/events.gateway';
 import { AuditService, AuditActor } from '../audit/audit.service';
+import { Money } from '../common/money';
 
 @Injectable()
 export class SchoolPaymentsService {
@@ -109,7 +110,7 @@ export class SchoolPaymentsService {
   }
 
   async updateSchool(id: string, dto: UpdateSchoolDto) {
-    const school = await this.prisma.school.findUnique({ where: { id } });
+    const school = await this.prisma.school.findFirst({ where: { id, deletedAt: null } });
     if (!school) throw new NotFoundException('School not found');
 
     return this.prisma.school.update({
@@ -161,19 +162,20 @@ export class SchoolPaymentsService {
   }
 
   async deleteSchool(id: string) {
-    const school = await this.prisma.school.findUnique({ where: { id } });
+    const school = await this.prisma.school.findFirst({
+      where: { id, deletedAt: null },
+    });
     if (!school) throw new NotFoundException('School not found');
 
-    // Might need to delete associated data or handle constraints
-    // For MVP, just delete school (and cascading deletes if configured in Prisma)
-    return this.prisma.school.delete({
+    return this.prisma.school.update({
       where: { id },
+      data: { deletedAt: new Date() },
     });
   }
 
   async getAllSchools(search?: string) {
     this.logger.log(`getAllSchools called with search: "${search ?? ''}"`);
-    const where: Prisma.SchoolWhereInput = {};
+    const where: Prisma.SchoolWhereInput = { deletedAt: null };
     if (search) {
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
@@ -197,46 +199,36 @@ export class SchoolPaymentsService {
   }
 
   async createClassFee(schoolId: string, className: string, feeAmount: number) {
-    // Check if fee already exists for this class
-    const existingFee = await this.prisma.classFee.findFirst({
-      where: {
-        schoolId,
-        className,
-      },
-    });
+    const feeKobo = Money.fromNaira(feeAmount).toKobo();
+    const db = this.prisma.withTenant(schoolId);
+    const existingFee = await db.classFee.findFirst({ where: { className } });
 
     if (existingFee) {
-      // Update existing fee
       return this.prisma.classFee.update({
         where: { id: existingFee.id },
-        data: { feeAmount, isActive: true },
+        data: { feeAmount: feeKobo, isActive: true },
       });
     }
 
-    // Create new fee
     return this.prisma.classFee.create({
-      data: {
-        schoolId,
-        className,
-        feeAmount,
-      },
+      data: { schoolId, className, feeAmount: feeKobo },
     });
   }
 
   async getClassFees(schoolId: string) {
-    return this.prisma.classFee.findMany({
-      where: { schoolId, isActive: true },
+    const fees = await this.prisma.withTenant(schoolId).classFee.findMany({
+      where: { isActive: true },
       orderBy: { className: 'asc' },
     });
+    return fees.map((f) => ({ ...f, feeAmount: Money.fromKobo(f.feeAmount).toNaira() }));
   }
 
   async getDashboardStats(schoolId: string) {
+    const db = this.prisma.withTenant(schoolId);
     const [totalStudents, confirmedPayments, pendingPayments, enrollments] =
       await Promise.all([
         // 1. Total Enrolled Students
-        this.prisma.childEnrollment.count({
-          where: { schoolId },
-        }),
+        db.childEnrollment.count({}),
 
         // 2. Confirmed Payments (School Revenue)
         this.prisma.payment.aggregate({
@@ -251,18 +243,18 @@ export class SchoolPaymentsService {
         }),
 
         // 4. Defaulted Amount (from defaulted enrollments)
-        this.prisma.childEnrollment.findMany({
-          where: { schoolId, paymentStatus: PaymentStatus.DEFAULTED },
+        db.childEnrollment.findMany({
+          where: { paymentStatus: PaymentStatus.DEFAULTED },
           select: { remainingBalance: true },
         }),
       ]);
 
-    const totalRevenue = confirmedPayments._sum.schoolAmount || 0;
-    const pendingRevenue = pendingPayments._sum.amountPaid || 0;
-    const defaultedAmount = enrollments.reduce(
-      (sum, e) => sum + e.remainingBalance,
-      0,
-    );
+    // DB stores kobo; return Naira for API consumers.
+    const totalRevenue = Money.fromKobo(confirmedPayments._sum.schoolAmount || 0).toNaira();
+    const pendingRevenue = Money.fromKobo(pendingPayments._sum.amountPaid || 0).toNaira();
+    const defaultedAmount = Money.fromKobo(
+      enrollments.reduce((sum, e) => sum + e.remainingBalance, 0),
+    ).toNaira();
 
     return {
       totalStudents,
@@ -272,8 +264,17 @@ export class SchoolPaymentsService {
     };
   }
 
-  async getStudents(schoolId: string, className?: string, search?: string) {
-    const whereClause: Prisma.ChildEnrollmentWhereInput = { schoolId };
+  async getStudents(
+    schoolId: string,
+    className?: string,
+    search?: string,
+    page = 1,
+    limit = 50,
+  ) {
+    const take = Math.min(limit, 200);
+    const skip = (page - 1) * take;
+    const db = this.prisma.withTenant(schoolId);
+    const whereClause: Prisma.ChildEnrollmentWhereInput = {};
     if (className) {
       whereClause.className = className;
     }
@@ -290,15 +291,21 @@ export class SchoolPaymentsService {
       ];
     }
 
-    const enrollments = await this.prisma.childEnrollment.findMany({
-      where: whereClause,
-      include: {
-        child: { include: { parent: { include: { user: true } } } },
-        payments: { orderBy: { paymentDate: 'desc' } }, // Fetch all payments to calculate paid amount
-      },
-    });
+    const [enrollments, total] = await Promise.all([
+      db.childEnrollment.findMany({
+        where: whereClause,
+        include: {
+          child: { include: { parent: { include: { user: true } } } },
+          payments: { orderBy: { paymentDate: 'desc' } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take,
+        skip,
+      }),
+      db.childEnrollment.count({ where: whereClause }),
+    ]);
 
-    return enrollments.map((enrollment) => {
+    const items = enrollments.map((enrollment) => {
       const confirmedPayments = enrollment.payments.filter(
         (p) => p.isConfirmed,
       );
@@ -324,31 +331,36 @@ export class SchoolPaymentsService {
       }
 
       return {
-        id: enrollment.childId, // Use childId as student ID
+        id: enrollment.childId,
         studentName: enrollment.child.fullName,
-        childName: enrollment.child.fullName, // Alias for consistency
+        childName: enrollment.child.fullName,
         className: enrollment.className,
         parentName: enrollment.child.parent.user.fullName || 'Unknown',
-        totalFee: enrollment.totalSchoolFee,
-        paidAmount: paidAmount,
+        totalFee: Money.fromKobo(enrollment.totalSchoolFee).toNaira(),
+        paidAmount: Money.fromKobo(paidAmount).toNaira(),
         paymentStatus: enrollment.paymentStatus,
         nextDueDate: nextDueDate
           ? nextDueDate.toISOString().split('T')[0]
           : null,
-        avatarUrl: null, // Placeholder
+        avatarUrl: null,
       };
     });
+
+    return { items, total, page, limit: take, totalPages: Math.ceil(total / take) };
   }
 
   async getHistory(
     schoolId: string,
     includeReceiptSignedUrls = false,
     receiptType: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT' = 'ALL',
+    take = 100,
   ) {
-    const payments = await this.prisma.payment.findMany({
-      where: {
-        schoolId,
-      },
+    const cappedTake = Math.min(take, 200);
+    const baseWhere: Prisma.PaymentWhereInput =
+      receiptType !== 'ALL' ? { paymentType: receiptType as any } : {};
+
+    const payments = await this.prisma.withTenant(schoolId).payment.findMany({
+      where: baseWhere,
       include: {
         enrollment: {
           include: {
@@ -358,25 +370,29 @@ export class SchoolPaymentsService {
         },
       },
       orderBy: { paymentDate: 'desc' },
+      take: cappedTake,
+    });
+
+    const toPaymentDto = (payment: (typeof payments)[0], receiptSignedUrl?: string | null) => ({
+      id: payment.id,
+      schoolId: payment.schoolId,
+      date: payment.paymentDate,
+      paymentDate: payment.paymentDate,
+      amount: Money.fromKobo(payment.amountPaid).toNaira(),
+      amountPaid: Money.fromKobo(payment.amountPaid).toNaira(),
+      studentName: payment.enrollment.child.fullName,
+      childName: payment.enrollment.child.fullName,
+      className: payment.enrollment.className,
+      schoolName: payment.enrollment.school.name,
+      type: payment.paymentType,
+      paymentType: payment.paymentType,
+      status: payment.status,
+      receiptUrl: payment.receiptUrl,
+      ...(receiptSignedUrl !== undefined ? { receiptSignedUrl } : {}),
     });
 
     if (!includeReceiptSignedUrls) {
-      return payments.map((payment) => ({
-        id: payment.id,
-        schoolId: payment.schoolId,
-        date: payment.paymentDate,
-        paymentDate: payment.paymentDate,
-        amount: payment.amountPaid,
-        amountPaid: payment.amountPaid,
-        studentName: payment.enrollment.child.fullName,
-        childName: payment.enrollment.child.fullName,
-        className: payment.enrollment.className,
-        schoolName: payment.enrollment.school.name,
-        type: payment.paymentType,
-        paymentType: payment.paymentType,
-        status: payment.status,
-        receiptUrl: payment.receiptUrl,
-      }));
+      return payments.map((payment) => toPaymentDto(payment));
     }
 
     const shouldSign = (paymentType: string) =>
@@ -393,28 +409,11 @@ export class SchoolPaymentsService {
               )
             ).signedUrl;
           } catch {
-            // If the object no longer exists in storage, don't fail the whole list.
             receiptSignedUrl = null;
           }
         }
 
-        return {
-          id: payment.id,
-          schoolId: payment.schoolId,
-          date: payment.paymentDate,
-          paymentDate: payment.paymentDate,
-          amount: payment.amountPaid,
-          amountPaid: payment.amountPaid,
-          studentName: payment.enrollment.child.fullName,
-          childName: payment.enrollment.child.fullName,
-          className: payment.enrollment.className,
-          schoolName: payment.enrollment.school.name,
-          type: payment.paymentType,
-          paymentType: payment.paymentType,
-          status: payment.status,
-          receiptUrl: payment.receiptUrl,
-          receiptSignedUrl,
-        };
+        return toPaymentDto(payment, receiptSignedUrl);
       }),
     );
 
@@ -425,14 +424,16 @@ export class SchoolPaymentsService {
     schoolId: string,
     includeReceiptSignedUrls = false,
     receiptType: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT' = 'ALL',
+    take = 100,
   ) {
-    const payments = await this.prisma.payment.findMany({
+    const cappedTake = Math.min(take, 200);
+    const payments = await this.prisma.withTenant(schoolId).payment.findMany({
       where: {
-        schoolId: schoolId,
         isConfirmed: false,
         paymentType: 'INSTALLMENT',
         status: PaymentTransactionStatus.PENDING,
       },
+      take: cappedTake,
       include: {
         enrollment: {
           include: {
@@ -443,16 +444,22 @@ export class SchoolPaymentsService {
       },
     });
 
+    const toPendingDto = (p: (typeof payments)[0], receiptSignedUrl?: string | null) => ({
+      ...p,
+      date: p.paymentDate,
+      amount: Money.fromKobo(p.amountPaid).toNaira(),
+      amountPaid: Money.fromKobo(p.amountPaid).toNaira(),
+      platformAmount: Money.fromKobo(p.platformAmount).toNaira(),
+      schoolAmount: Money.fromKobo(p.schoolAmount).toNaira(),
+      studentName: p.enrollment?.child?.fullName,
+      childName: p.enrollment?.child?.fullName,
+      className: p.enrollment?.className,
+      schoolName: p.enrollment?.school?.name,
+      ...(receiptSignedUrl !== undefined ? { receiptSignedUrl } : {}),
+    });
+
     if (!includeReceiptSignedUrls) {
-      return payments.map((p) => ({
-        ...p,
-        date: p.paymentDate,
-        amount: p.amountPaid,
-        studentName: p.enrollment?.child?.fullName,
-        childName: p.enrollment?.child?.fullName,
-        className: p.enrollment?.className,
-        schoolName: p.enrollment?.school?.name,
-      }));
+      return payments.map((p) => toPendingDto(p));
     }
 
     const shouldSign = (paymentType: string) =>
@@ -467,21 +474,11 @@ export class SchoolPaymentsService {
               await this.documentsService.createSignedUrlForPath(p.receiptUrl)
             ).signedUrl;
           } catch {
-            // If the object no longer exists in storage, don't fail the whole list.
             receiptSignedUrl = null;
           }
         }
 
-        return {
-          ...p,
-          date: p.paymentDate,
-          amount: p.amountPaid,
-          studentName: p.enrollment?.child?.fullName,
-          childName: p.enrollment?.child?.fullName,
-          className: p.enrollment?.className,
-          schoolName: p.enrollment?.school?.name,
-          receiptSignedUrl,
-        };
+        return toPendingDto(p, receiptSignedUrl);
       }),
     );
 
@@ -489,12 +486,8 @@ export class SchoolPaymentsService {
   }
 
   async confirmPayment(paymentId: string, schoolId: string, actor: AuditActor) {
-    const payment = await this.prisma.payment.findFirst({
-      where: {
-        id: paymentId,
-        schoolId,
-        isConfirmed: false,
-      },
+    const payment = await this.prisma.withTenant(schoolId).payment.findFirst({
+      where: { id: paymentId, isConfirmed: false },
       include: {
         enrollment: {
           include: { school: true, child: { include: { parent: true } } },
@@ -561,7 +554,8 @@ export class SchoolPaymentsService {
       );
 
       // 3. Notify Parent
-      let message = `Your payment of ${payment.amountPaid} for ${payment.enrollment.child.fullName} (${payment.enrollment.className}) at ${payment.enrollment.school.name} has been confirmed.`;
+      const confirmedAmountStr = Money.fromKobo(payment.amountPaid).formatNaira();
+      let message = `Your payment of ${confirmedAmountStr} for ${payment.enrollment.child.fullName} (${payment.enrollment.className}) at ${payment.enrollment.school.name} has been confirmed.`;
       if (isCompleted) {
         message += ' All payments for this semester are now completed.';
       }
@@ -596,12 +590,8 @@ export class SchoolPaymentsService {
   }
 
   async rejectPayment(paymentId: string, schoolId: string, actor: AuditActor) {
-    const payment = await this.prisma.payment.findFirst({
-      where: {
-        id: paymentId,
-        schoolId,
-        isConfirmed: false,
-      },
+    const payment = await this.prisma.withTenant(schoolId).payment.findFirst({
+      where: { id: paymentId, isConfirmed: false },
       include: {
         enrollment: {
           include: { school: true, child: { include: { parent: true } } },
@@ -661,7 +651,7 @@ export class SchoolPaymentsService {
       await this.notificationsService.create({
         userId: payment.enrollment.child.parent.userId,
         title: 'Payment Rejected',
-        message: `Your payment of ${payment.amountPaid} for ${payment.enrollment.child.fullName} at ${payment.enrollment.school.name} has been rejected. Please contact the school.`,
+        message: `Your payment of ${Money.fromKobo(payment.amountPaid).formatNaira()} for ${payment.enrollment.child.fullName} at ${payment.enrollment.school.name} has been rejected. Please contact the school.`,
       });
 
       return {
@@ -690,11 +680,8 @@ export class SchoolPaymentsService {
     schoolId: string,
     actor: AuditActor,
   ) {
-    const enrollment = await this.prisma.childEnrollment.findFirst({
-      where: {
-        id: enrollmentId,
-        schoolId,
-      },
+    const enrollment = await this.prisma.withTenant(schoolId).childEnrollment.findFirst({
+      where: { id: enrollmentId },
       include: { school: true, child: { include: { parent: true } } },
     });
 
@@ -756,10 +743,9 @@ export class SchoolPaymentsService {
     actor: AuditActor,
     reason?: string,
   ) {
-    const payment = await this.prisma.payment.findFirst({
+    const payment = await this.prisma.withTenant(schoolId).payment.findFirst({
       where: {
         id: paymentId,
-        schoolId,
         isConfirmed: true,
         status: PaymentTransactionStatus.SUCCESS,
         paymentType: PaymentType.INSTALLMENT,
@@ -836,7 +822,7 @@ export class SchoolPaymentsService {
       await this.notificationsService.create({
         userId: payment.enrollment.child.parent.userId,
         title: 'Payment Reversed',
-        message: `A confirmed payment of ${payment.amountPaid} for ${payment.enrollment.child.fullName} (${payment.enrollment.className}) at ${payment.enrollment.school.name} has been reversed.${reason ? ` Reason: ${reason}` : ''} Please contact the school.`,
+        message: `A confirmed payment of ${Money.fromKobo(payment.amountPaid).formatNaira()} for ${payment.enrollment.child.fullName} (${payment.enrollment.className}) at ${payment.enrollment.school.name} has been reversed.${reason ? ` Reason: ${reason}` : ''} Please contact the school.`,
       });
 
       return {

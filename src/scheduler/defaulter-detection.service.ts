@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PaymentStatus, AuditAction } from '../generated/prisma/client';
 import { EventsGateway } from '../events/events.gateway';
 import { AuditService } from '../audit/audit.service';
+import { Money } from '../common/money';
 
 @Injectable()
 export class DefaulterDetectionService {
@@ -74,7 +75,7 @@ export class DefaulterDetectionService {
             data: {
               userId: enrollment.child.parent.userId,
               title: 'Payment Defaulted',
-              message: `Your enrollment for ${enrollment.child.fullName} at ${enrollment.school.name} has been marked as defaulted due to outstanding balance of ₦${enrollment.remainingBalance.toLocaleString()}.`,
+              message: `Your enrollment for ${enrollment.child.fullName} at ${enrollment.school.name} has been marked as defaulted due to outstanding balance of ${Money.fromKobo(enrollment.remainingBalance).formatNaira()}.`,
               link: '/history',
             },
           });
@@ -87,7 +88,7 @@ export class DefaulterDetectionService {
         });
 
         this.logger.warn(
-          `Defaulted enrollment ${enrollment.id} for ${enrollment.child.fullName} (balance: ₦${enrollment.remainingBalance})`,
+          `Defaulted enrollment ${enrollment.id} for ${enrollment.child.fullName} (balance: ${Money.fromKobo(enrollment.remainingBalance).formatNaira()})`,
         );
       }),
     );

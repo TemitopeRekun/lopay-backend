@@ -20,6 +20,7 @@ import * as admin from 'firebase-admin';
 import { CreateSchoolDto } from './dto/create.school.dto';
 import { DocumentsService } from '../documents/documents.service';
 import { AuditService, AuditActor } from '../audit/audit.service';
+import { Money } from '../common/money';
 
 @Injectable()
 export class AdminService {
@@ -153,12 +154,13 @@ export class AdminService {
         return {
           ...p,
           studentName: p.enrollment?.child?.fullName,
-          childName: p.enrollment?.child?.fullName, // Alias
+          childName: p.enrollment?.child?.fullName,
           schoolName: p.enrollment?.school?.name,
           className: p.enrollment?.className,
-          amount: p.amountPaid, // Alias
-          date: p.paymentDate, // Alias
-          type: p.paymentType, // Alias
+          amount: Money.fromKobo(p.amountPaid).toNaira(),
+          amountPaid: Money.fromKobo(p.amountPaid).toNaira(),
+          date: p.paymentDate,
+          type: p.paymentType,
           receiptSignedUrl,
         };
       }),
@@ -241,7 +243,7 @@ export class AdminService {
         data: {
           userId: enrollment.child.parent.userId,
           title: 'Enrollment Confirmed',
-          message: `Your first payment of ₦${payment.amountPaid} has been confirmed. Enrollment is active.`,
+          message: `Your first payment of ${Money.fromKobo(payment.amountPaid).formatNaira()} has been confirmed. Enrollment is active.`,
           link: `/parent/enrollments/${enrollment.id}`,
         },
       });
@@ -444,8 +446,8 @@ export class AdminService {
         childName: enrollment.child.fullName,
         className: enrollment.className,
         parentName: enrollment.child.parent.user.fullName || 'Unknown',
-        totalFee: enrollment.totalSchoolFee,
-        paidAmount: paidAmount,
+        totalFee: Money.fromKobo(enrollment.totalSchoolFee).toNaira(),
+        paidAmount: Money.fromKobo(paidAmount).toNaira(),
         paymentStatus: enrollment.paymentStatus,
         nextDueDate: nextDueDate
           ? nextDueDate.toISOString().split('T')[0]
@@ -470,7 +472,7 @@ export class AdminService {
     });
 
     return {
-      totalRevenue: result._sum.platformAmount ?? 0,
+      totalRevenue: Money.fromKobo(result._sum.platformAmount ?? 0).toNaira(),
     };
   }
 
@@ -513,14 +515,15 @@ export class AdminService {
 
         return {
           ...p,
-          amount: p.amountPaid,
+          amount: Money.fromKobo(p.amountPaid).toNaira(),
+          amountPaid: Money.fromKobo(p.amountPaid).toNaira(),
           date: p.paymentDate,
           type: p.paymentType,
           studentName: p.enrollment?.child?.fullName,
           childName: p.enrollment?.child?.fullName,
           schoolName: p.enrollment?.school?.name,
           className: p.enrollment?.className,
-          platformFeeAmount: p.platformAmount,
+          platformFeeAmount: Money.fromKobo(p.platformAmount).toNaira(),
           platformFeePercentage: 0.025,
           receiptSignedUrl,
         };
@@ -573,7 +576,7 @@ export class AdminService {
       activeStudents,
       pendingFirstPayments,
       defaultedStudents,
-      totalOutstandingBalance: outstandingBalance._sum.remainingBalance ?? 0,
+      totalOutstandingBalance: Money.fromKobo(outstandingBalance._sum.remainingBalance ?? 0).toNaira(),
     };
   }
 
@@ -615,8 +618,8 @@ export class AdminService {
       schoolId: s.id,
       schoolName: s.name,
       totalStudents: enrollmentMap.get(s.id) ?? 0,
-      pendingAmount: pendingMap.get(s.id) ?? 0,
-      collectedAmount: collectedMap.get(s.id) ?? 0,
+      pendingAmount: Money.fromKobo(pendingMap.get(s.id) ?? 0).toNaira(),
+      collectedAmount: Money.fromKobo(collectedMap.get(s.id) ?? 0).toNaira(),
     }));
   }
 
@@ -654,7 +657,7 @@ export class AdminService {
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       const bucket = monthMap.get(key);
       if (bucket) {
-        bucket.value += p.platformAmount ?? 0;
+        bucket.value += Money.fromKobo(p.platformAmount ?? 0).toNaira();
       }
     }
 

@@ -1197,6 +1197,7 @@ export const UserScalarFieldEnum = {
   email: 'email',
   fullName: 'fullName',
   role: 'role',
+  deletedAt: 'deletedAt',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
@@ -1214,6 +1215,7 @@ export const SchoolScalarFieldEnum = {
   bankName: 'bankName',
   accountName: 'accountName',
   accountNumber: 'accountNumber',
+  deletedAt: 'deletedAt',
   createdAt: 'createdAt'
 } as const
 

@@ -19,6 +19,7 @@ import { PaymentService } from '../payments/payment.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EventsGateway } from '../events/events.gateway';
 import { AuditService, AuditActor } from '../audit/audit.service';
+import { Money } from '../common/money';
 
 type EnrollmentWithRelations = Prisma.ChildEnrollmentGetPayload<{
   include: { child: true; school: true; payments: true };
@@ -81,11 +82,12 @@ export class EnrollmentService {
     };
   }
 
-  /** Shape an installment payment row into the enriched API response. */
+  /** Shape an installment payment row into the enriched API response (naira). */
   private buildInstallmentResponse(payment: PaymentWithEnrollment) {
     return {
       ...payment,
-      amount: payment.amountPaid,
+      amount: Money.fromKobo(payment.amountPaid).toNaira(),
+      amountPaid: Money.fromKobo(payment.amountPaid).toNaira(),
       date: payment.paymentDate,
       type: payment.paymentType,
       studentName: payment.enrollment?.child?.fullName,
@@ -96,19 +98,17 @@ export class EnrollmentService {
 
   private calculateEnrichment(enrollment: EnrollmentWithRelations, payments: PaymentRecord[]) {
     const confirmedPayments = payments.filter((p) => p.isConfirmed);
-    const paidAmount = confirmedPayments.reduce(
+    // Arithmetic in kobo; convert to naira only for the returned object.
+    const paidAmountKobo = confirmedPayments.reduce(
       (sum, p) => sum + p.amountPaid,
       0,
     );
 
-    const totalSchoolFee = enrollment.totalSchoolFee;
-
     let nextDueDate: Date | null = null;
-    let nextInstallmentAmount = 0;
+    let nextInstallmentAmountKobo = 0;
 
     if (enrollment.remainingBalance > 0) {
-      // Find last confirmed payment
-      const lastPayment = confirmedPayments[0]; // Assuming desc order
+      const lastPayment = confirmedPayments[0];
 
       if (lastPayment) {
         const lastDate = new Date(lastPayment.paymentDate);
@@ -119,12 +119,9 @@ export class EnrollmentService {
         }
         nextDueDate = lastDate;
       } else {
-        // If first payment pending, next due is now or creation date.
-        // If first payment paid (and no installments yet), use term start date?
         nextDueDate = enrollment.termStartDate || enrollment.createdAt;
       }
 
-      // Next installment amount
       const plan = enrollment.installmentFrequency;
       const totalInstallments = plan === 'WEEKLY' ? 12 : 3;
       const paidInstallments = confirmedPayments.filter(
@@ -132,31 +129,30 @@ export class EnrollmentService {
       ).length;
       const remainingInstallments = totalInstallments - paidInstallments;
 
-      if (remainingInstallments > 0) {
-        nextInstallmentAmount =
-          enrollment.remainingBalance / remainingInstallments;
-      } else {
-        nextInstallmentAmount = enrollment.remainingBalance;
-      }
+      nextInstallmentAmountKobo = remainingInstallments > 0
+        ? Math.round(enrollment.remainingBalance / remainingInstallments)
+        : enrollment.remainingBalance;
     }
 
-    // Enrich payments with aliases
+    // Enrich payments — convert kobo amounts to naira.
     const enrichedPayments = payments.map((p) => ({
       ...p,
-      amount: p.amountPaid,
+      amount: Money.fromKobo(p.amountPaid).toNaira(),
+      amountPaid: Money.fromKobo(p.amountPaid).toNaira(),
       date: p.paymentDate,
       type: p.paymentType,
     }));
 
     return {
       ...enrollment,
-      payments: enrichedPayments, // Return enriched payments
-      studentName: enrollment.child?.fullName, // Standardize with School Service
-      childName: enrollment.child?.fullName, // Handle "childName" case mentioned by frontend
-      totalFee: totalSchoolFee,
-      paidAmount,
-      nextDueDate: nextDueDate ? nextDueDate.toISOString().split('T')[0] : null, // Standardize date format
-      nextInstallmentAmount,
+      payments: enrichedPayments,
+      studentName: enrollment.child?.fullName,
+      childName: enrollment.child?.fullName,
+      totalFee: Money.fromKobo(enrollment.totalSchoolFee).toNaira(),
+      remainingBalance: Money.fromKobo(enrollment.remainingBalance).toNaira(),
+      paidAmount: Money.fromKobo(paidAmountKobo).toNaira(),
+      nextDueDate: nextDueDate ? nextDueDate.toISOString().split('T')[0] : null,
+      nextInstallmentAmount: Money.fromKobo(nextInstallmentAmountKobo).toNaira(),
     };
   }
 
@@ -346,10 +342,11 @@ export class EnrollmentService {
       );
     }
 
-    // 3. Calculate Deposit
+    // 3. Calculate Deposit — convert both to kobo; DB stores kobo.
+    const depositKobo = Money.fromNaira(dto.firstPaymentPaid).toKobo();
     const calculation = this.paymentService.calculateInitialPayment(
-      classFee.feeAmount,
-      dto.firstPaymentPaid,
+      classFee.feeAmount,    // already kobo (stored by createClassFee)
+      depositKobo,
     );
 
     // 4. Create Enrollment & Payment
@@ -363,11 +360,11 @@ export class EnrollmentService {
           where: { id: retryEnrollmentId },
           data: {
             className: dto.className,
-            totalSchoolFee: calculation.schoolFees,
-            platformFee: calculation.platformFee,
-            schoolMinimumFee: calculation.minimumDeposit,
-            firstPaymentPaid: dto.firstPaymentPaid,
-            remainingBalance: calculation.remainingBalance,
+            totalSchoolFee: calculation.schoolFees,       // kobo
+            platformFee: calculation.platformFee,          // kobo
+            schoolMinimumFee: calculation.minimumDeposit,  // kobo
+            firstPaymentPaid: depositKobo,                 // kobo
+            remainingBalance: calculation.remainingBalance, // kobo
             paymentStatus: PaymentStatus.PENDING,
             installmentFrequency: dto.installmentFrequency,
             termStartDate: dto.termStartDate,
@@ -381,11 +378,11 @@ export class EnrollmentService {
             childId,
             schoolId: dto.schoolId,
             className: dto.className,
-            totalSchoolFee: calculation.schoolFees,
-            platformFee: calculation.platformFee,
-            schoolMinimumFee: calculation.minimumDeposit,
-            firstPaymentPaid: dto.firstPaymentPaid,
-            remainingBalance: calculation.remainingBalance,
+            totalSchoolFee: calculation.schoolFees,       // kobo
+            platformFee: calculation.platformFee,          // kobo
+            schoolMinimumFee: calculation.minimumDeposit,  // kobo
+            firstPaymentPaid: depositKobo,                 // kobo
+            remainingBalance: calculation.remainingBalance, // kobo
             paymentStatus: PaymentStatus.PENDING,
             installmentFrequency: dto.installmentFrequency,
             termStartDate: dto.termStartDate,
@@ -398,9 +395,9 @@ export class EnrollmentService {
         data: {
           enrollmentId: enrollment.id,
           schoolId: dto.schoolId,
-          amountPaid: dto.firstPaymentPaid,
-          platformAmount: calculation.platformFee,
-          schoolAmount: calculation.amountToSchool,
+          amountPaid: depositKobo,                  // kobo
+          platformAmount: calculation.platformFee,   // kobo
+          schoolAmount: calculation.amountToSchool,  // kobo
           receiver: PaymentReceiver.PLATFORM,
           paymentType: PaymentType.FIRST_PAYMENT,
           status: PaymentTransactionStatus.PENDING,
@@ -448,7 +445,7 @@ export class EnrollmentService {
       await this.notificationsService.create({
         userId: result.school.ownerId,
         title: 'New Enrollment Initiated',
-        message: `New Student: ${result.childName} | Class: ${dto.className} | Amount Paid: ${dto.firstPaymentPaid} | Status: Pending Admin Transfer.`,
+        message: `New Student: ${result.childName} | Class: ${dto.className} | Amount Paid: ${Money.fromNaira(dto.firstPaymentPaid).formatNaira()} | Status: Pending Admin Transfer.`,
         link: '/school/pending-payments',
       });
     }
@@ -464,7 +461,7 @@ export class EnrollmentService {
         this.notificationsService.create({
           userId: admin.id,
           title: 'New First Payment Received',
-          message: `Payment of ${dto.firstPaymentPaid} received for ${result.childName} at ${result.school?.name}. Please process 25% payout to school.`,
+          message: `Payment of ${Money.fromNaira(dto.firstPaymentPaid).formatNaira()} received for ${result.childName} at ${result.school?.name}. Please process 25% payout to school.`,
           link: '/admin/payments',
         }),
       ),
@@ -503,6 +500,9 @@ export class EnrollmentService {
 
     if (!enrollment) throw new NotFoundException('Enrollment not found');
 
+    // Convert Naira (from DTO/frontend) to kobo for DB storage.
+    const amountPaidKobo = Money.fromNaira(amountPaid).toKobo();
+
     // Create Payment
     let payment;
     try {
@@ -510,10 +510,10 @@ export class EnrollmentService {
         data: {
           enrollmentId,
           schoolId: enrollment.schoolId,
-          amountPaid,
-          platformAmount: 0, // Installments usually 100% to school?
-          schoolAmount: amountPaid,
-          receiver: PaymentReceiver.SCHOOL, // Installments go to school
+          amountPaid: amountPaidKobo,    // kobo
+          platformAmount: 0,
+          schoolAmount: amountPaidKobo,   // kobo
+          receiver: PaymentReceiver.SCHOOL,
           paymentType: PaymentType.INSTALLMENT,
           status: PaymentTransactionStatus.PENDING,
           isConfirmed: false,
@@ -536,7 +536,7 @@ export class EnrollmentService {
       await this.notificationsService.create({
         userId: enrollment.school.ownerId,
         title: 'New Installment Payment',
-        message: `New payment of ${amountPaid} for ${enrollment.child.fullName} (${enrollment.className}) at ${enrollment.school.name}.`,
+        message: `New payment of ${Money.fromNaira(amountPaid).formatNaira()} for ${enrollment.child.fullName} (${enrollment.className}) at ${enrollment.school.name}.`,
       });
     }
 
