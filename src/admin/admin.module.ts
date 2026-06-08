@@ -5,9 +5,10 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { AuthModule } from '../auth/auth.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { AuditModule } from '../audit/audit.module';
+import { PaystackModule } from '../paystack/paystack.module';
 
 @Module({
-  imports: [NotificationsModule, AuthModule, DocumentsModule, AuditModule],
+  imports: [NotificationsModule, AuthModule, DocumentsModule, AuditModule, PaystackModule],
   controllers: [AdminController],
   providers: [AdminService],
 })

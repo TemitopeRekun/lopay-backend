@@ -49,6 +49,10 @@ import { HealthModule } from './health/health.module';
         ADMIN_EMAIL: Joi.string().email().optional(),
         ADMIN_PASSWORD: Joi.string().min(8).optional(),
         CORS_ORIGINS: Joi.string().allow('').optional(),
+        // Paystack split payments (first-payment collection + settlement)
+        PAYSTACK_SECRET_KEY: Joi.string().required(),
+        PAYSTACK_WEBHOOK_ALLOWED_IPS: Joi.string().allow('').optional(),
+        PAYSTACK_CALLBACK_URL: Joi.string().uri().optional(),
       }),
       validationOptions: {
         abortEarly: true,

@@ -21,6 +21,7 @@ import { CreateSchoolDto } from './dto/create.school.dto';
 import { DocumentsService } from '../documents/documents.service';
 import { AuditService, AuditActor } from '../audit/audit.service';
 import { Money } from '../common/money';
+import { PaystackService } from '../paystack/paystack.service';
 
 @Injectable()
 export class AdminService {
@@ -31,8 +32,72 @@ export class AdminService {
     private readonly notificationsService: NotificationsService,
     private readonly documentsService: DocumentsService,
     private readonly audit: AuditService,
+    private readonly paystack: PaystackService,
     @Inject('FIREBASE_ADMIN') private readonly firebaseAdmin: admin.app.App,
   ) {}
+
+  /**
+   * Create (or recreate) a Paystack subaccount for a school and persist the code.
+   * Best-effort: returns active=false if Paystack is unreachable so onboarding
+   * still succeeds and can be retried via the admin endpoint.
+   */
+  private async provisionSubaccount(school: {
+    id: string;
+    name: string;
+    bankCode: string | null;
+    accountNumber: string;
+  }): Promise<{ active: boolean; subaccountCode?: string; warning?: string }> {
+    if (!school.bankCode) {
+      return { active: false, warning: 'No bank code on file; cannot create Paystack subaccount.' };
+    }
+    try {
+      const subaccountCode = await this.paystack.createSubaccount({
+        businessName: school.name,
+        settlementBank: school.bankCode,
+        accountNumber: school.accountNumber,
+        percentageCharge: 0, // overridden per-transaction via transaction_charge
+      });
+      await this.prisma.school.update({
+        where: { id: school.id },
+        data: { paystackSubaccountCode: subaccountCode, paystackSubaccountActive: true },
+      });
+      return { active: true, subaccountCode };
+    } catch (error) {
+      this.logger.error(
+        `Paystack subaccount creation failed for school ${school.id}`,
+        error as any,
+      );
+      return {
+        active: false,
+        warning:
+          'School created, but Paystack subaccount setup failed. Retry from the school settings before accepting online payments.',
+      };
+    }
+  }
+
+  /** Passthrough: Nigerian bank list for the onboarding dropdown. */
+  async listBanks() {
+    return this.paystack.listBanks();
+  }
+
+  /** Passthrough: resolve an account number → registered account name. */
+  async resolveAccount(accountNumber: string, bankCode: string) {
+    if (!accountNumber || !bankCode) {
+      throw new BadRequestException('accountNumber and bankCode are required');
+    }
+    return this.paystack.resolveAccount(accountNumber, bankCode);
+  }
+
+  /** Admin action: (re)create a Paystack subaccount for an existing school. */
+  async createSubaccountForSchool(schoolId: string) {
+    const school = await this.prisma.school.findUnique({ where: { id: schoolId } });
+    if (!school) throw new NotFoundException('School not found');
+    const result = await this.provisionSubaccount(school);
+    if (!result.active) {
+      throw new BadRequestException(result.warning ?? 'Subaccount creation failed');
+    }
+    return { subaccountCode: result.subaccountCode, active: true };
+  }
 
   /** Onboard a new school and create the school owner account */
   async onboardSchool(dto: CreateSchoolDto) {
@@ -79,7 +144,7 @@ export class AdminService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       // 2. Create User record — ID intentionally synced to Firebase UID
       const user = await tx.user.create({
         data: {
@@ -99,23 +164,33 @@ export class AdminService {
           phone: dto.phone,
           // Bank details provided during onboarding
           bankName: dto.bankName,
+          bankCode: dto.bankCode,
           accountName: dto.accountName,
           accountNumber: dto.accountNumber,
           ownerId: user.id,
         },
       });
 
-      return {
-        school,
-        user: {
-          id: user.id,
-          email: user.email,
-          role: user.role,
-          fullName: user.fullName,
-        },
-        message: 'School and School Owner created successfully',
-      };
+      return { school, user };
     });
+
+    // 4. Provision the Paystack subaccount (external call, post-transaction).
+    // Best-effort: onboarding succeeds even if this fails; retry via admin endpoint.
+    const subaccount = await this.provisionSubaccount(created.school);
+
+    return {
+      school: { ...created.school, paystackSubaccountActive: subaccount.active },
+      user: {
+        id: created.user.id,
+        email: created.user.email,
+        role: created.user.role,
+        fullName: created.user.fullName,
+      },
+      paystack: subaccount,
+      message: subaccount.active
+        ? 'School and School Owner created successfully'
+        : `School created. ${subaccount.warning}`,
+    };
   }
 
   /** Get all first payments waiting to be settled */

@@ -36,6 +36,20 @@ export class EnrollmentController {
     return this.enrollmentService.enrollChild(dto, user.userId);
   }
 
+  /**
+   * Initiate a first payment via Paystack split. Returns the inline-popup
+   * access code + reference; activation happens on the webhook/verify.
+   */
+  @Post('initiate-first-payment')
+  @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
+  initiateFirstPayment(
+    @Body() dto: CreateEnrollmentDto,
+    @CurrentUser() user: any,
+  ) {
+    return this.enrollmentService.initiateFirstPayment(dto, user.userId);
+  }
+
   @Post('pay-installment')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
   @Throttle({ default: { ttl: 60000, limit: 10 } })

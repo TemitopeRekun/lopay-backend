@@ -27,6 +27,24 @@ export class AdminController {
     return this.adminService.onboardSchool(dto);
   }
 
+  /** List Nigerian banks for the onboarding settlement-bank dropdown */
+  @Get('paystack/banks')
+  getBanks() {
+    return this.adminService.listBanks();
+  }
+
+  /** Verify an account number against a bank code → registered account name */
+  @Post('paystack/resolve-account')
+  resolveAccount(@Body() body: { accountNumber: string; bankCode: string }) {
+    return this.adminService.resolveAccount(body.accountNumber, body.bankCode);
+  }
+
+  /** (Re)create a Paystack subaccount for a school missing one */
+  @Post('schools/:schoolId/paystack-subaccount')
+  createSubaccount(@Param('schoolId') schoolId: string) {
+    return this.adminService.createSubaccountForSchool(schoolId);
+  }
+
   /** View pending first payments */
   @Get('pending-first-payments')
   getPendingFirstPayments(

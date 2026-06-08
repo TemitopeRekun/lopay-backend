@@ -5,10 +5,12 @@ import { PaymentsModule } from '../payments/payments.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { EventsModule } from '../events/events.module';
 import { AuditModule } from '../audit/audit.module';
+import { PaystackModule } from '../paystack/paystack.module';
+import { PaystackWebhookController } from './paystack-webhook.controller';
 
 @Module({
-  imports: [PaymentsModule, NotificationsModule, EventsModule, AuditModule],
+  imports: [PaymentsModule, NotificationsModule, EventsModule, AuditModule, PaystackModule],
   providers: [EnrollmentService],
-  controllers: [EnrollmentController],
+  controllers: [EnrollmentController, PaystackWebhookController],
 })
 export class EnrollmentModule {}

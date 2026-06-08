@@ -91,6 +91,20 @@ describe('PaymentService', () => {
     it('throws on zero school fees', () => {
       expect(() => service.calculateInitialPayment(0, 0)).toThrow(BadRequestException);
     });
+
+    it('accepts the full fee upfront (remaining balance reaches zero)', () => {
+      // depositPaid = schoolFees + platformFee → amountToSchool = schoolFees, balance = 0
+      const result = service.calculateInitialPayment(100_000, 102_500);
+      expect(result.amountToSchool).toBe(100_000);
+      expect(result.remainingBalance).toBe(0);
+    });
+
+    it('rejects a deposit above the total payable (upper bound)', () => {
+      // max = schoolFees + platformFee = 102_500; anything above must be rejected
+      expect(() => service.calculateInitialPayment(100_000, 102_501)).toThrow(
+        BadRequestException,
+      );
+    });
   });
 
   // ─── calculateInstallments ────────────────────────────────────────────────
@@ -110,6 +124,17 @@ describe('PaymentService', () => {
 
     it('throws on zero remaining balance', () => {
       expect(() => service.calculateInstallments(0, 'WEEKLY')).toThrow(BadRequestException);
+    });
+
+    it('absorbs rounding in the final installment so the schedule sums exactly', () => {
+      // 100 kobo / 3 → 33,33,34 (final absorbs remainder)
+      const result = service.calculateInstallments(100, 'MONTHLY');
+      expect(result.installmentAmount).toBe(33);
+      expect(result.finalInstallmentAmount).toBe(34);
+      const total =
+        result.installmentAmount * (result.numberOfInstallments - 1) +
+        result.finalInstallmentAmount;
+      expect(total).toBe(100);
     });
   });
 

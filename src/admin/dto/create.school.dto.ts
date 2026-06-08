@@ -35,6 +35,11 @@ export class CreateSchoolDto {
   @IsNotEmpty()
   bankName: string;
 
+  // Paystack settlement bank code (e.g. "058"); required to create the subaccount.
+  @IsString()
+  @IsNotEmpty()
+  bankCode: string;
+
   @IsString()
   @IsNotEmpty()
   accountName: string;

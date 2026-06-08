@@ -22,6 +22,13 @@ async function bootstrap() {
     next();
   });
 
+  // Paystack webhook needs the RAW body for HMAC-SHA512 signature verification.
+  // Mount the raw parser on the exact path BEFORE the JSON parser; body-parser
+  // marks the request as parsed so the JSON parser below skips it.
+  app.use(
+    '/api/v1/payments/paystack/webhook',
+    bodyParser.raw({ type: '*/*', limit: '1mb' }),
+  );
   app.use(bodyParser.json({ limit: '10mb' }));
   app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
   app.setGlobalPrefix('api/v1', { exclude: ['health'] });

@@ -25,7 +25,8 @@ export type DepositCalculationResult = {
 export type InstallmentCalculationResult = {
   totalBalance: number;
   numberOfInstallments: number;
-  installmentAmount: number;
+  installmentAmount: number; // integer kobo; the recurring amount
+  finalInstallmentAmount: number; // integer kobo; absorbs rounding so the schedule sums exactly
   plan: InstallmentPlan;
 };
 
@@ -136,6 +137,15 @@ export class PaymentService {
       );
     }
 
+    // Upper bound: the parent cannot pay more than the full fee + platform fee.
+    // amountToSchool would otherwise exceed the school fee and drive remainingBalance negative.
+    const maxDeposit = schoolFees.add(platformFee);
+    if (maxDeposit.isLessThan(depositPaid)) {
+      throw new BadRequestException(
+        `Deposit exceeds the total payable. Maximum first payment: ${maxDeposit.formatNaira()}`,
+      );
+    }
+
     const amountToSchool = depositPaid.subtract(platformFee);
     const remainingBalance = schoolFees.subtract(amountToSchool);
 
@@ -170,27 +180,30 @@ export class PaymentService {
         throw new BadRequestException('Invalid installment plan');
     }
 
-    const installmentAmount = remainingBalance / numberOfInstallments;
+    // Kobo-safe: each recurring installment is rounded down to whole kobo and the
+    // FINAL installment absorbs the remainder, so the schedule sums to the balance exactly.
+    const installmentAmount = Math.floor(remainingBalance / numberOfInstallments);
+    const finalInstallmentAmount =
+      remainingBalance - installmentAmount * (numberOfInstallments - 1);
 
     return {
       totalBalance: remainingBalance,
       numberOfInstallments,
       installmentAmount,
+      finalInstallmentAmount,
       plan,
     };
   }
 
-  /** Update remaining balance after each installment */
+  /** Update remaining balance after each installment (kobo-safe). */
   updateRemainingBalance(
     schoolFees: number,
     depositPaid: number,
     installmentsPaid: number,
   ): number {
-    // We assume depositPaid INCLUDES the platform fee.
-    // We must deduct the platform fee to find what was actually paid towards the school fees.
-    const platformFee = schoolFees * 0.025;
-
-    // Check if deposit was enough to cover platform fee (it should be, based on validation)
+    // depositPaid INCLUDES the platform fee; deduct it via Money (no float drift)
+    // to find what was actually credited toward the school fees.
+    const platformFee = Money.fromKobo(schoolFees).percent(0.025).toKobo();
     const effectiveDepositToSchool = Math.max(0, depositPaid - platformFee);
 
     const totalPaidToSchool = effectiveDepositToSchool + installmentsPaid;

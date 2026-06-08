@@ -1213,8 +1213,11 @@ export const SchoolScalarFieldEnum = {
   address: 'address',
   ownerId: 'ownerId',
   bankName: 'bankName',
+  bankCode: 'bankCode',
   accountName: 'accountName',
   accountNumber: 'accountNumber',
+  paystackSubaccountCode: 'paystackSubaccountCode',
+  paystackSubaccountActive: 'paystackSubaccountActive',
   deletedAt: 'deletedAt',
   createdAt: 'createdAt'
 } as const
@@ -1268,7 +1271,12 @@ export const PaymentScalarFieldEnum = {
   status: 'status',
   isConfirmed: 'isConfirmed',
   paymentDate: 'paymentDate',
-  receiptUrl: 'receiptUrl'
+  receiptUrl: 'receiptUrl',
+  paystackReference: 'paystackReference',
+  paystackAccessCode: 'paystackAccessCode',
+  amountCharged: 'amountCharged',
+  paystackFee: 'paystackFee',
+  transactionCharge: 'transactionCharge'
 } as const
 
 export type PaymentScalarFieldEnum = (typeof PaymentScalarFieldEnum)[keyof typeof PaymentScalarFieldEnum]
@@ -1425,6 +1433,13 @@ export type ListDateTimeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaM
 
 
 /**
+ * Reference to a field of type 'Boolean'
+ */
+export type BooleanFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Boolean'>
+    
+
+
+/**
  * Reference to a field of type 'Int'
  */
 export type IntFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Int'>
@@ -1435,13 +1450,6 @@ export type IntFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'In
  * Reference to a field of type 'Int[]'
  */
 export type ListIntFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Int[]'>
-    
-
-
-/**
- * Reference to a field of type 'Boolean'
- */
-export type BooleanFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Boolean'>
     
 
 

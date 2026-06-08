@@ -20,6 +20,9 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { EventsGateway } from '../events/events.gateway';
 import { AuditService, AuditActor } from '../audit/audit.service';
 import { Money } from '../common/money';
+import { PaystackService } from '../paystack/paystack.service';
+import { grossUp } from '../common/paystack-fee';
+import { randomUUID } from 'crypto';
 
 type EnrollmentWithRelations = Prisma.ChildEnrollmentGetPayload<{
   include: { child: true; school: true; payments: true };
@@ -41,7 +44,87 @@ export class EnrollmentService {
     private readonly notificationsService: NotificationsService,
     private readonly events: EventsGateway,
     private readonly audit: AuditService,
+    private readonly paystack: PaystackService,
   ) {}
+
+  /**
+   * Resolve the parent, child, and any retryable (FAILED) enrollment for an
+   * enrollment request. Shared by the manual `enrollChild` flow and the Paystack
+   * `initiateFirstPayment` flow. Creates a Parent/Child record when needed.
+   */
+  private async resolveEnrollmentTarget(
+    dto: CreateEnrollmentDto,
+    userId: string,
+  ): Promise<{ parent: { id: string }; childId: string; retryEnrollmentId: string | null }> {
+    let childId = dto.childId;
+    let retryEnrollmentId: string | null = null;
+
+    let parent = await this.prisma.parent.findUnique({ where: { userId } });
+    if (!parent) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        include: { school: true },
+      });
+      if (user && user.role === UserRole.SCHOOL_OWNER && user.school) {
+        parent = await this.prisma.parent.create({
+          data: { userId: user.id, phoneNumber: user.school.phone },
+        });
+      } else {
+        throw new BadRequestException('Parent profile not found');
+      }
+    }
+
+    if (childId) {
+      const child = await this.prisma.child.findUnique({ where: { id: childId } });
+      if (!child || child.parentId !== parent.id) {
+        throw new BadRequestException('Child not found or does not belong to user');
+      }
+    } else if (dto.childName) {
+      const failedEnrollment = await this.prisma.childEnrollment.findFirst({
+        where: {
+          paymentStatus: PaymentStatus.FAILED,
+          schoolId: dto.schoolId,
+          child: {
+            parentId: parent.id,
+            fullName: dto.childName,
+            className: dto.className,
+          },
+        },
+      });
+      if (failedEnrollment) {
+        this.logger.log(`Retrying failed enrollment: ${failedEnrollment.id}`);
+        childId = failedEnrollment.childId;
+        retryEnrollmentId = failedEnrollment.id;
+      } else {
+        const newChild = await this.prisma.child.create({
+          data: {
+            fullName: dto.childName,
+            parentId: parent.id,
+            className: dto.className,
+          },
+        });
+        childId = newChild.id;
+      }
+    } else {
+      throw new BadRequestException('Either childId or childName must be provided');
+    }
+
+    // Only FAILED enrollments may be retried; everything else is a conflict.
+    const existingEnrollment = await this.prisma.childEnrollment.findUnique({
+      where: { childId },
+    });
+    if (existingEnrollment) {
+      if (existingEnrollment.paymentStatus !== PaymentStatus.FAILED) {
+        throw new BadRequestException('Enrollment already exists for this child');
+      }
+      if (existingEnrollment.schoolId !== dto.schoolId) {
+        throw new BadRequestException('Failed enrollment belongs to a different school');
+      }
+      retryEnrollmentId = existingEnrollment.id;
+    }
+
+    return { parent, childId, retryEnrollmentId };
+  }
 
   /** Look up an already-recorded payment by its client idempotency key. */
   private findPaymentByIdempotencyKey(
@@ -234,98 +317,11 @@ export class EnrollmentService {
       }
     }
 
-    // 1. Resolve Child
-    let childId = dto.childId;
-    let retryEnrollmentId: string | null = null;
-
-    // Check Parent exists
-    let parent = await this.prisma.parent.findUnique({ where: { userId } });
-
-    if (!parent) {
-      // If parent profile doesn't exist, check if user is a School Owner
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-        include: { school: true },
-      });
-
-      if (user && user.role === UserRole.SCHOOL_OWNER && user.school) {
-        // Create Parent profile for School Owner
-        parent = await this.prisma.parent.create({
-          data: {
-            userId: user.id,
-            phoneNumber: user.school.phone, // Use school phone
-          },
-        });
-      } else {
-        throw new BadRequestException('Parent profile not found');
-      }
-    }
-
-    if (childId) {
-      const child = await this.prisma.child.findUnique({
-        where: { id: childId },
-      });
-      if (!child || child.parentId !== parent.id) {
-        throw new BadRequestException(
-          'Child not found or does not belong to user',
-        );
-      }
-    } else if (dto.childName) {
-      // If a failed enrollment exists for this parent/child/school, reuse it.
-      const failedEnrollment = await this.prisma.childEnrollment.findFirst({
-        where: {
-          paymentStatus: PaymentStatus.FAILED,
-          schoolId: dto.schoolId,
-          child: {
-            parentId: parent.id,
-            fullName: dto.childName,
-            className: dto.className,
-          },
-        },
-      });
-
-      if (failedEnrollment) {
-        this.logger.log(`Retrying failed enrollment: ${failedEnrollment.id}`);
-        childId = failedEnrollment.childId;
-        retryEnrollmentId = failedEnrollment.id;
-      } else {
-        const newChild = await this.prisma.child.create({
-          data: {
-            fullName: dto.childName,
-            parentId: parent.id,
-            className: dto.className,
-          },
-        });
-        childId = newChild.id;
-      }
-    } else {
-      throw new BadRequestException(
-        'Either childId or childName must be provided',
-      );
-    }
-
-    // If this child already has an enrollment, ensure we only allow retries for FAILED
-    if (childId) {
-      const existingEnrollment = await this.prisma.childEnrollment.findUnique({
-        where: { childId },
-      });
-
-      if (existingEnrollment) {
-        if (existingEnrollment.paymentStatus !== PaymentStatus.FAILED) {
-          throw new BadRequestException(
-            'Enrollment already exists for this child',
-          );
-        }
-
-        if (existingEnrollment.schoolId !== dto.schoolId) {
-          throw new BadRequestException(
-            'Failed enrollment belongs to a different school',
-          );
-        }
-
-        retryEnrollmentId = existingEnrollment.id;
-      }
-    }
+    // 1. Resolve Child + any retryable enrollment
+    const { childId, retryEnrollmentId } = await this.resolveEnrollmentTarget(
+      dto,
+      userId,
+    );
 
     // 2. Get Fees
     const classFee = await this.prisma.classFee.findFirst({
@@ -481,6 +477,311 @@ export class EnrollmentService {
     return result;
   }
 
+  /**
+   * Initiate a first payment via Paystack split. Creates (or reuses) a PENDING
+   * enrollment + PENDING payment, computes the platform/school split and the
+   * grossed-up amount the parent pays, then initializes a Paystack transaction
+   * whose split routes `platformFee` to the platform main account and the
+   * deposit to the school subaccount. Activation happens on the webhook/verify.
+   *
+   * Returns the inline-popup `accessCode` + `reference` for the frontend.
+   */
+  async initiateFirstPayment(dto: CreateEnrollmentDto, userId: string) {
+    // Idempotency: replay an in-flight/completed intent rather than double-charging.
+    if (dto.idempotencyKey) {
+      const existing = await this.findPaymentByIdempotencyKey(dto.idempotencyKey);
+      if (existing) {
+        return {
+          idempotent: true,
+          reference: existing.paystackReference,
+          accessCode: existing.paystackAccessCode,
+          amountCharged: existing.amountCharged
+            ? Money.fromKobo(existing.amountCharged).toNaira()
+            : null,
+          status: existing.status,
+        };
+      }
+    }
+
+    const { childId, retryEnrollmentId } = await this.resolveEnrollmentTarget(
+      dto,
+      userId,
+    );
+
+    // Fee snapshot (kobo) + parent's chosen deposit (kobo).
+    const classFee = await this.prisma.classFee.findFirst({
+      where: { schoolId: dto.schoolId, className: dto.className, isActive: true },
+    });
+    if (!classFee) {
+      throw new BadRequestException(
+        `No fee configuration found for class ${dto.className} in this school`,
+      );
+    }
+
+    const school = await this.prisma.school.findUnique({
+      where: { id: dto.schoolId },
+    });
+    if (!school) throw new NotFoundException('School not found');
+    if (!school.paystackSubaccountActive || !school.paystackSubaccountCode) {
+      throw new BadRequestException(
+        'This school is not set up to accept online payments yet.',
+      );
+    }
+
+    // Validates min/max bounds and computes the platform/school split.
+    const depositKobo = Money.fromNaira(dto.firstPaymentPaid).toKobo();
+    const calc = this.paymentService.calculateInitialPayment(
+      classFee.feeAmount,
+      depositKobo,
+    );
+
+    // Gross up so Paystack's fee is added on top (school + platform nets preserved).
+    // base = amountToSchool + platformFee = depositPaid.
+    const base = calc.amountToSchool + calc.platformFee;
+    const { amountCharged, paystackFee } = grossUp(base);
+    const transactionCharge = calc.platformFee + paystackFee;
+
+    // Parent's email for the Paystack customer record.
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user?.email) throw new BadRequestException('Payer email not found');
+
+    const reference = `lopay_${randomUUID()}`;
+
+    // Create enrollment (PENDING) + payment (PENDING) atomically.
+    let payment;
+    try {
+      payment = await this.prisma.$transaction(async (tx) => {
+        const enrollmentData = {
+          className: dto.className,
+          totalSchoolFee: calc.schoolFees,
+          platformFee: calc.platformFee,
+          schoolMinimumFee: calc.minimumDeposit,
+          firstPaymentPaid: depositKobo,
+          remainingBalance: calc.remainingBalance,
+          paymentStatus: PaymentStatus.PENDING,
+          installmentFrequency: dto.installmentFrequency,
+          termStartDate: dto.termStartDate,
+          termEndDate: dto.termEndDate,
+        };
+
+        const enrollment = retryEnrollmentId
+          ? await tx.childEnrollment.update({
+              where: { id: retryEnrollmentId },
+              data: enrollmentData,
+            })
+          : await tx.childEnrollment.create({
+              data: { childId, schoolId: dto.schoolId, ...enrollmentData },
+            });
+
+        return tx.payment.create({
+          data: {
+            enrollmentId: enrollment.id,
+            schoolId: dto.schoolId,
+            amountPaid: depositKobo, // net credited toward fees
+            platformAmount: calc.platformFee,
+            schoolAmount: calc.amountToSchool,
+            amountCharged, // gross paid by parent (incl. paystack fee)
+            transactionCharge,
+            paystackFee, // estimate; reconciled from webhook
+            paystackReference: reference,
+            receiver: PaymentReceiver.PLATFORM,
+            paymentType: PaymentType.FIRST_PAYMENT,
+            status: PaymentTransactionStatus.PENDING,
+            isConfirmed: false,
+            idempotencyKey: dto.idempotencyKey ?? null,
+            paymentDate: new Date(),
+          },
+        });
+      });
+    } catch (error) {
+      if (dto.idempotencyKey && this.isIdempotencyConflict(error)) {
+        const existing = await this.findPaymentByIdempotencyKey(dto.idempotencyKey);
+        if (existing) {
+          return {
+            idempotent: true,
+            reference: existing.paystackReference,
+            accessCode: existing.paystackAccessCode,
+            amountCharged: existing.amountCharged
+              ? Money.fromKobo(existing.amountCharged).toNaira()
+              : null,
+            status: existing.status,
+          };
+        }
+      }
+      throw error;
+    }
+
+    // Initialize the Paystack split transaction.
+    const init = await this.paystack.initializeTransaction({
+      email: user.email,
+      amountKobo: amountCharged,
+      reference,
+      subaccount: school.paystackSubaccountCode,
+      transactionChargeKobo: transactionCharge,
+      callbackUrl: process.env.PAYSTACK_CALLBACK_URL,
+      metadata: {
+        paymentId: payment.id,
+        enrollmentId: payment.enrollmentId,
+        schoolId: dto.schoolId,
+        childId,
+      },
+    });
+
+    await this.prisma.payment.update({
+      where: { id: payment.id },
+      data: { paystackAccessCode: init.accessCode },
+    });
+
+    return {
+      reference: init.reference,
+      accessCode: init.accessCode,
+      authorizationUrl: init.authorizationUrl,
+      amountCharged: Money.fromKobo(amountCharged).toNaira(),
+      depositToSchool: Money.fromKobo(calc.amountToSchool).toNaira(),
+      platformFee: Money.fromKobo(calc.platformFee).toNaira(),
+      paystackFee: Money.fromKobo(paystackFee).toNaira(),
+    };
+  }
+
+  /**
+   * Reconcile a Paystack first payment to SUCCESS. Shared by the webhook and the
+   * verify-on-return endpoint, and idempotent: a payment already SUCCESS is a no-op.
+   * Activates the enrollment (or marks it COMPLETED if paid in full).
+   */
+  async reconcilePaystackPayment(
+    reference: string,
+    actualFeeKobo: number | null,
+    actor: AuditActor | null,
+  ) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { paystackReference: reference },
+      include: {
+        enrollment: {
+          include: { school: true, child: { include: { parent: true } } },
+        },
+      },
+    });
+    if (!payment) {
+      this.logger.warn(`Paystack reconcile: no payment for reference ${reference}`);
+      return { reconciled: false, reason: 'unknown_reference' };
+    }
+    if (payment.status === PaymentTransactionStatus.SUCCESS) {
+      return { reconciled: true, alreadyProcessed: true };
+    }
+
+    const { enrollment } = payment;
+    const newBalance = enrollment.remainingBalance; // already net of this deposit at initiation
+    const isCompleted = newBalance <= 0;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: PaymentTransactionStatus.SUCCESS,
+          isConfirmed: true,
+          paystackFee: actualFeeKobo ?? payment.paystackFee,
+          paymentDate: new Date(),
+        },
+      });
+
+      await tx.childEnrollment.update({
+        where: { id: enrollment.id },
+        data: {
+          paymentStatus: isCompleted
+            ? PaymentStatus.COMPLETED
+            : PaymentStatus.ACTIVE,
+        },
+      });
+
+      await this.audit.record(
+        {
+          action: AuditAction.FIRST_PAYMENT_PAID,
+          entityType: 'Payment',
+          entityId: payment.id,
+          actor,
+          schoolId: payment.schoolId,
+          before: { status: payment.status, isConfirmed: payment.isConfirmed },
+          after: {
+            status: PaymentTransactionStatus.SUCCESS,
+            isConfirmed: true,
+            enrollmentStatus: isCompleted
+              ? PaymentStatus.COMPLETED
+              : PaymentStatus.ACTIVE,
+          },
+          metadata: {
+            reference,
+            amountCharged: payment.amountCharged,
+            platformAmount: payment.platformAmount,
+            schoolAmount: payment.schoolAmount,
+            paystackFee: actualFeeKobo ?? payment.paystackFee,
+          },
+        },
+        tx,
+      );
+    });
+
+    // Notify parent + school owner (post-transaction).
+    await this.notificationsService.create({
+      userId: enrollment.child.parent.userId,
+      title: isCompleted ? 'Payment Completed' : 'First Payment Confirmed',
+      message: `Your payment of ${Money.fromKobo(payment.amountPaid).formatNaira()} for ${enrollment.child.fullName} at ${enrollment.school.name} has been confirmed.${isCompleted ? ' All fees are now fully paid.' : ' Enrollment is now active.'}`,
+      link: '/history',
+    });
+    if (enrollment.school.ownerId) {
+      await this.notificationsService.create({
+        userId: enrollment.school.ownerId,
+        title: 'First Payment Received',
+        message: `${Money.fromKobo(payment.schoolAmount).formatNaira()} settled to your account for ${enrollment.child.fullName} (${enrollment.className}).`,
+        link: '/school/enrollments',
+      });
+    }
+
+    this.events.emitEnrollmentsChanged({
+      parentUserId: enrollment.child.parent.userId,
+      schoolId: payment.schoolId,
+      notifyAdmins: true,
+    });
+    this.events.emitPaymentsChanged({
+      parentUserId: enrollment.child.parent.userId,
+      schoolId: payment.schoolId,
+      notifyAdmins: true,
+    });
+
+    return { reconciled: true, completed: isCompleted };
+  }
+
+  /** Mark a Paystack first payment FAILED (charge.failed). Allows retry. */
+  async failPaystackPayment(reference: string) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { paystackReference: reference },
+      include: { enrollment: { include: { child: { include: { parent: true } } } } },
+    });
+    if (!payment || payment.status !== PaymentTransactionStatus.PENDING) {
+      return { updated: false };
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: { status: PaymentTransactionStatus.FAILED },
+      });
+      await tx.childEnrollment.update({
+        where: { id: payment.enrollmentId },
+        data: { paymentStatus: PaymentStatus.FAILED },
+      });
+    });
+
+    if (payment.enrollment?.child?.parent?.userId) {
+      await this.notificationsService.create({
+        userId: payment.enrollment.child.parent.userId,
+        title: 'Payment Failed',
+        message: 'Your first payment did not go through. Please try again.',
+        link: '/history',
+      });
+    }
+    return { updated: true };
+  }
+
   async submitInstallmentPayment(
     enrollmentId: string,
     amountPaid: number,
@@ -502,6 +803,20 @@ export class EnrollmentService {
 
     // Convert Naira (from DTO/frontend) to kobo for DB storage.
     const amountPaidKobo = Money.fromNaira(amountPaid).toKobo();
+
+    // Feature 2 — flexible amounts: the parent may pay any amount up to the
+    // outstanding balance (a larger payment clears the balance faster and shrinks
+    // the next recomputed installment). Reject non-positive and over-payment.
+    if (amountPaidKobo <= 0) {
+      throw new BadRequestException('Payment amount must be greater than zero');
+    }
+    if (amountPaidKobo > enrollment.remainingBalance) {
+      throw new BadRequestException(
+        `Payment exceeds the outstanding balance of ${Money.fromKobo(
+          enrollment.remainingBalance,
+        ).formatNaira()}`,
+      );
+    }
 
     // Create Payment
     let payment;

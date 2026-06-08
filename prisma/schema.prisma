@@ -40,6 +40,7 @@ enum AuditAction {
   FIRST_PAYMENT_CONFIRMED
   FIRST_PAYMENT_SETTLED
   FIRST_PAYMENT_REJECTED
+  FIRST_PAYMENT_PAID
   ENROLLMENT_DEFAULTED
 }
 
@@ -90,8 +91,13 @@ model School {
 
   // Bank / Settlement Info
   bankName      String
+  bankCode      String?  // Paystack settlement bank code (e.g. "058"); required for subaccount
   accountName   String
   accountNumber String
+
+  // Paystack split settlement
+  paystackSubaccountCode    String?  @unique // e.g. "ACCT_xxxxxxxxxx"
+  paystackSubaccountActive  Boolean  @default(false)
 
   deletedAt     DateTime?
 
@@ -161,6 +167,13 @@ model Payment {
   isConfirmed     Boolean          @default(false)
   paymentDate     DateTime         @default(now())
   receiptUrl      String?
+
+  // Paystack (first-payment split). Null for manual installment payments.
+  paystackReference  String?       @unique // Our generated transaction reference
+  paystackAccessCode String?       // Returned by initialize; used by the inline popup
+  amountCharged      Int?          // Gross amount parent paid (deposit + platform fee + paystack fee)
+  paystackFee        Int?          // Actual Paystack fee (from charge.success webhook)
+  transactionCharge  Int?          // Flat amount routed to platform main account (platformFee + paystackFee)
 
   enrollment      ChildEnrollment  @relation(fields: [enrollmentId], references: [id])
   school          School           @relation(fields: [schoolId], references: [id])

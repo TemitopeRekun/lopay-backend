@@ -30,12 +30,18 @@ export type PaymentAvgAggregateOutputType = {
   amountPaid: number | null
   platformAmount: number | null
   schoolAmount: number | null
+  amountCharged: number | null
+  paystackFee: number | null
+  transactionCharge: number | null
 }
 
 export type PaymentSumAggregateOutputType = {
   amountPaid: number | null
   platformAmount: number | null
   schoolAmount: number | null
+  amountCharged: number | null
+  paystackFee: number | null
+  transactionCharge: number | null
 }
 
 export type PaymentMinAggregateOutputType = {
@@ -52,6 +58,11 @@ export type PaymentMinAggregateOutputType = {
   isConfirmed: boolean | null
   paymentDate: Date | null
   receiptUrl: string | null
+  paystackReference: string | null
+  paystackAccessCode: string | null
+  amountCharged: number | null
+  paystackFee: number | null
+  transactionCharge: number | null
 }
 
 export type PaymentMaxAggregateOutputType = {
@@ -68,6 +79,11 @@ export type PaymentMaxAggregateOutputType = {
   isConfirmed: boolean | null
   paymentDate: Date | null
   receiptUrl: string | null
+  paystackReference: string | null
+  paystackAccessCode: string | null
+  amountCharged: number | null
+  paystackFee: number | null
+  transactionCharge: number | null
 }
 
 export type PaymentCountAggregateOutputType = {
@@ -84,6 +100,11 @@ export type PaymentCountAggregateOutputType = {
   isConfirmed: number
   paymentDate: number
   receiptUrl: number
+  paystackReference: number
+  paystackAccessCode: number
+  amountCharged: number
+  paystackFee: number
+  transactionCharge: number
   _all: number
 }
 
@@ -92,12 +113,18 @@ export type PaymentAvgAggregateInputType = {
   amountPaid?: true
   platformAmount?: true
   schoolAmount?: true
+  amountCharged?: true
+  paystackFee?: true
+  transactionCharge?: true
 }
 
 export type PaymentSumAggregateInputType = {
   amountPaid?: true
   platformAmount?: true
   schoolAmount?: true
+  amountCharged?: true
+  paystackFee?: true
+  transactionCharge?: true
 }
 
 export type PaymentMinAggregateInputType = {
@@ -114,6 +141,11 @@ export type PaymentMinAggregateInputType = {
   isConfirmed?: true
   paymentDate?: true
   receiptUrl?: true
+  paystackReference?: true
+  paystackAccessCode?: true
+  amountCharged?: true
+  paystackFee?: true
+  transactionCharge?: true
 }
 
 export type PaymentMaxAggregateInputType = {
@@ -130,6 +162,11 @@ export type PaymentMaxAggregateInputType = {
   isConfirmed?: true
   paymentDate?: true
   receiptUrl?: true
+  paystackReference?: true
+  paystackAccessCode?: true
+  amountCharged?: true
+  paystackFee?: true
+  transactionCharge?: true
 }
 
 export type PaymentCountAggregateInputType = {
@@ -146,6 +183,11 @@ export type PaymentCountAggregateInputType = {
   isConfirmed?: true
   paymentDate?: true
   receiptUrl?: true
+  paystackReference?: true
+  paystackAccessCode?: true
+  amountCharged?: true
+  paystackFee?: true
+  transactionCharge?: true
   _all?: true
 }
 
@@ -249,6 +291,11 @@ export type PaymentGroupByOutputType = {
   isConfirmed: boolean
   paymentDate: Date
   receiptUrl: string | null
+  paystackReference: string | null
+  paystackAccessCode: string | null
+  amountCharged: number | null
+  paystackFee: number | null
+  transactionCharge: number | null
   _count: PaymentCountAggregateOutputType | null
   _avg: PaymentAvgAggregateOutputType | null
   _sum: PaymentSumAggregateOutputType | null
@@ -288,6 +335,11 @@ export type PaymentWhereInput = {
   isConfirmed?: Prisma.BoolFilter<"Payment"> | boolean
   paymentDate?: Prisma.DateTimeFilter<"Payment"> | Date | string
   receiptUrl?: Prisma.StringNullableFilter<"Payment"> | string | null
+  paystackReference?: Prisma.StringNullableFilter<"Payment"> | string | null
+  paystackAccessCode?: Prisma.StringNullableFilter<"Payment"> | string | null
+  amountCharged?: Prisma.IntNullableFilter<"Payment"> | number | null
+  paystackFee?: Prisma.IntNullableFilter<"Payment"> | number | null
+  transactionCharge?: Prisma.IntNullableFilter<"Payment"> | number | null
   enrollment?: Prisma.XOR<Prisma.ChildEnrollmentScalarRelationFilter, Prisma.ChildEnrollmentWhereInput>
   school?: Prisma.XOR<Prisma.SchoolScalarRelationFilter, Prisma.SchoolWhereInput>
 }
@@ -306,6 +358,11 @@ export type PaymentOrderByWithRelationInput = {
   isConfirmed?: Prisma.SortOrder
   paymentDate?: Prisma.SortOrder
   receiptUrl?: Prisma.SortOrderInput | Prisma.SortOrder
+  paystackReference?: Prisma.SortOrderInput | Prisma.SortOrder
+  paystackAccessCode?: Prisma.SortOrderInput | Prisma.SortOrder
+  amountCharged?: Prisma.SortOrderInput | Prisma.SortOrder
+  paystackFee?: Prisma.SortOrderInput | Prisma.SortOrder
+  transactionCharge?: Prisma.SortOrderInput | Prisma.SortOrder
   enrollment?: Prisma.ChildEnrollmentOrderByWithRelationInput
   school?: Prisma.SchoolOrderByWithRelationInput
 }
@@ -313,6 +370,7 @@ export type PaymentOrderByWithRelationInput = {
 export type PaymentWhereUniqueInput = Prisma.AtLeast<{
   id?: string
   idempotencyKey?: string
+  paystackReference?: string
   AND?: Prisma.PaymentWhereInput | Prisma.PaymentWhereInput[]
   OR?: Prisma.PaymentWhereInput[]
   NOT?: Prisma.PaymentWhereInput | Prisma.PaymentWhereInput[]
@@ -327,9 +385,13 @@ export type PaymentWhereUniqueInput = Prisma.AtLeast<{
   isConfirmed?: Prisma.BoolFilter<"Payment"> | boolean
   paymentDate?: Prisma.DateTimeFilter<"Payment"> | Date | string
   receiptUrl?: Prisma.StringNullableFilter<"Payment"> | string | null
+  paystackAccessCode?: Prisma.StringNullableFilter<"Payment"> | string | null
+  amountCharged?: Prisma.IntNullableFilter<"Payment"> | number | null
+  paystackFee?: Prisma.IntNullableFilter<"Payment"> | number | null
+  transactionCharge?: Prisma.IntNullableFilter<"Payment"> | number | null
   enrollment?: Prisma.XOR<Prisma.ChildEnrollmentScalarRelationFilter, Prisma.ChildEnrollmentWhereInput>
   school?: Prisma.XOR<Prisma.SchoolScalarRelationFilter, Prisma.SchoolWhereInput>
-}, "id" | "idempotencyKey">
+}, "id" | "idempotencyKey" | "paystackReference">
 
 export type PaymentOrderByWithAggregationInput = {
   id?: Prisma.SortOrder
@@ -345,6 +407,11 @@ export type PaymentOrderByWithAggregationInput = {
   isConfirmed?: Prisma.SortOrder
   paymentDate?: Prisma.SortOrder
   receiptUrl?: Prisma.SortOrderInput | Prisma.SortOrder
+  paystackReference?: Prisma.SortOrderInput | Prisma.SortOrder
+  paystackAccessCode?: Prisma.SortOrderInput | Prisma.SortOrder
+  amountCharged?: Prisma.SortOrderInput | Prisma.SortOrder
+  paystackFee?: Prisma.SortOrderInput | Prisma.SortOrder
+  transactionCharge?: Prisma.SortOrderInput | Prisma.SortOrder
   _count?: Prisma.PaymentCountOrderByAggregateInput
   _avg?: Prisma.PaymentAvgOrderByAggregateInput
   _max?: Prisma.PaymentMaxOrderByAggregateInput
@@ -369,6 +436,11 @@ export type PaymentScalarWhereWithAggregatesInput = {
   isConfirmed?: Prisma.BoolWithAggregatesFilter<"Payment"> | boolean
   paymentDate?: Prisma.DateTimeWithAggregatesFilter<"Payment"> | Date | string
   receiptUrl?: Prisma.StringNullableWithAggregatesFilter<"Payment"> | string | null
+  paystackReference?: Prisma.StringNullableWithAggregatesFilter<"Payment"> | string | null
+  paystackAccessCode?: Prisma.StringNullableWithAggregatesFilter<"Payment"> | string | null
+  amountCharged?: Prisma.IntNullableWithAggregatesFilter<"Payment"> | number | null
+  paystackFee?: Prisma.IntNullableWithAggregatesFilter<"Payment"> | number | null
+  transactionCharge?: Prisma.IntNullableWithAggregatesFilter<"Payment"> | number | null
 }
 
 export type PaymentCreateInput = {
@@ -383,6 +455,11 @@ export type PaymentCreateInput = {
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
+  paystackReference?: string | null
+  paystackAccessCode?: string | null
+  amountCharged?: number | null
+  paystackFee?: number | null
+  transactionCharge?: number | null
   enrollment: Prisma.ChildEnrollmentCreateNestedOneWithoutPaymentsInput
   school: Prisma.SchoolCreateNestedOneWithoutPaymentsInput
 }
@@ -401,6 +478,11 @@ export type PaymentUncheckedCreateInput = {
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
+  paystackReference?: string | null
+  paystackAccessCode?: string | null
+  amountCharged?: number | null
+  paystackFee?: number | null
+  transactionCharge?: number | null
 }
 
 export type PaymentUpdateInput = {
@@ -415,6 +497,11 @@ export type PaymentUpdateInput = {
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackReference?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackAccessCode?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  amountCharged?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  paystackFee?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  transactionCharge?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   enrollment?: Prisma.ChildEnrollmentUpdateOneRequiredWithoutPaymentsNestedInput
   school?: Prisma.SchoolUpdateOneRequiredWithoutPaymentsNestedInput
 }
@@ -433,6 +520,11 @@ export type PaymentUncheckedUpdateInput = {
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackReference?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackAccessCode?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  amountCharged?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  paystackFee?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  transactionCharge?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
 }
 
 export type PaymentCreateManyInput = {
@@ -449,6 +541,11 @@ export type PaymentCreateManyInput = {
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
+  paystackReference?: string | null
+  paystackAccessCode?: string | null
+  amountCharged?: number | null
+  paystackFee?: number | null
+  transactionCharge?: number | null
 }
 
 export type PaymentUpdateManyMutationInput = {
@@ -463,6 +560,11 @@ export type PaymentUpdateManyMutationInput = {
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackReference?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackAccessCode?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  amountCharged?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  paystackFee?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  transactionCharge?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
 }
 
 export type PaymentUncheckedUpdateManyInput = {
@@ -479,6 +581,11 @@ export type PaymentUncheckedUpdateManyInput = {
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackReference?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackAccessCode?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  amountCharged?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  paystackFee?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  transactionCharge?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
 }
 
 export type PaymentListRelationFilter = {
@@ -505,12 +612,20 @@ export type PaymentCountOrderByAggregateInput = {
   isConfirmed?: Prisma.SortOrder
   paymentDate?: Prisma.SortOrder
   receiptUrl?: Prisma.SortOrder
+  paystackReference?: Prisma.SortOrder
+  paystackAccessCode?: Prisma.SortOrder
+  amountCharged?: Prisma.SortOrder
+  paystackFee?: Prisma.SortOrder
+  transactionCharge?: Prisma.SortOrder
 }
 
 export type PaymentAvgOrderByAggregateInput = {
   amountPaid?: Prisma.SortOrder
   platformAmount?: Prisma.SortOrder
   schoolAmount?: Prisma.SortOrder
+  amountCharged?: Prisma.SortOrder
+  paystackFee?: Prisma.SortOrder
+  transactionCharge?: Prisma.SortOrder
 }
 
 export type PaymentMaxOrderByAggregateInput = {
@@ -527,6 +642,11 @@ export type PaymentMaxOrderByAggregateInput = {
   isConfirmed?: Prisma.SortOrder
   paymentDate?: Prisma.SortOrder
   receiptUrl?: Prisma.SortOrder
+  paystackReference?: Prisma.SortOrder
+  paystackAccessCode?: Prisma.SortOrder
+  amountCharged?: Prisma.SortOrder
+  paystackFee?: Prisma.SortOrder
+  transactionCharge?: Prisma.SortOrder
 }
 
 export type PaymentMinOrderByAggregateInput = {
@@ -543,12 +663,20 @@ export type PaymentMinOrderByAggregateInput = {
   isConfirmed?: Prisma.SortOrder
   paymentDate?: Prisma.SortOrder
   receiptUrl?: Prisma.SortOrder
+  paystackReference?: Prisma.SortOrder
+  paystackAccessCode?: Prisma.SortOrder
+  amountCharged?: Prisma.SortOrder
+  paystackFee?: Prisma.SortOrder
+  transactionCharge?: Prisma.SortOrder
 }
 
 export type PaymentSumOrderByAggregateInput = {
   amountPaid?: Prisma.SortOrder
   platformAmount?: Prisma.SortOrder
   schoolAmount?: Prisma.SortOrder
+  amountCharged?: Prisma.SortOrder
+  paystackFee?: Prisma.SortOrder
+  transactionCharge?: Prisma.SortOrder
 }
 
 export type PaymentCreateNestedManyWithoutSchoolInput = {
@@ -605,6 +733,14 @@ export type EnumPaymentTransactionStatusFieldUpdateOperationsInput = {
   set?: $Enums.PaymentTransactionStatus
 }
 
+export type NullableIntFieldUpdateOperationsInput = {
+  set?: number | null
+  increment?: number
+  decrement?: number
+  multiply?: number
+  divide?: number
+}
+
 export type PaymentCreateNestedManyWithoutEnrollmentInput = {
   create?: Prisma.XOR<Prisma.PaymentCreateWithoutEnrollmentInput, Prisma.PaymentUncheckedCreateWithoutEnrollmentInput> | Prisma.PaymentCreateWithoutEnrollmentInput[] | Prisma.PaymentUncheckedCreateWithoutEnrollmentInput[]
   connectOrCreate?: Prisma.PaymentCreateOrConnectWithoutEnrollmentInput | Prisma.PaymentCreateOrConnectWithoutEnrollmentInput[]
@@ -659,6 +795,11 @@ export type PaymentCreateWithoutSchoolInput = {
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
+  paystackReference?: string | null
+  paystackAccessCode?: string | null
+  amountCharged?: number | null
+  paystackFee?: number | null
+  transactionCharge?: number | null
   enrollment: Prisma.ChildEnrollmentCreateNestedOneWithoutPaymentsInput
 }
 
@@ -675,6 +816,11 @@ export type PaymentUncheckedCreateWithoutSchoolInput = {
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
+  paystackReference?: string | null
+  paystackAccessCode?: string | null
+  amountCharged?: number | null
+  paystackFee?: number | null
+  transactionCharge?: number | null
 }
 
 export type PaymentCreateOrConnectWithoutSchoolInput = {
@@ -720,6 +866,11 @@ export type PaymentScalarWhereInput = {
   isConfirmed?: Prisma.BoolFilter<"Payment"> | boolean
   paymentDate?: Prisma.DateTimeFilter<"Payment"> | Date | string
   receiptUrl?: Prisma.StringNullableFilter<"Payment"> | string | null
+  paystackReference?: Prisma.StringNullableFilter<"Payment"> | string | null
+  paystackAccessCode?: Prisma.StringNullableFilter<"Payment"> | string | null
+  amountCharged?: Prisma.IntNullableFilter<"Payment"> | number | null
+  paystackFee?: Prisma.IntNullableFilter<"Payment"> | number | null
+  transactionCharge?: Prisma.IntNullableFilter<"Payment"> | number | null
 }
 
 export type PaymentCreateWithoutEnrollmentInput = {
@@ -734,6 +885,11 @@ export type PaymentCreateWithoutEnrollmentInput = {
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
+  paystackReference?: string | null
+  paystackAccessCode?: string | null
+  amountCharged?: number | null
+  paystackFee?: number | null
+  transactionCharge?: number | null
   school: Prisma.SchoolCreateNestedOneWithoutPaymentsInput
 }
 
@@ -750,6 +906,11 @@ export type PaymentUncheckedCreateWithoutEnrollmentInput = {
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
+  paystackReference?: string | null
+  paystackAccessCode?: string | null
+  amountCharged?: number | null
+  paystackFee?: number | null
+  transactionCharge?: number | null
 }
 
 export type PaymentCreateOrConnectWithoutEnrollmentInput = {
@@ -791,6 +952,11 @@ export type PaymentCreateManySchoolInput = {
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
+  paystackReference?: string | null
+  paystackAccessCode?: string | null
+  amountCharged?: number | null
+  paystackFee?: number | null
+  transactionCharge?: number | null
 }
 
 export type PaymentUpdateWithoutSchoolInput = {
@@ -805,6 +971,11 @@ export type PaymentUpdateWithoutSchoolInput = {
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackReference?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackAccessCode?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  amountCharged?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  paystackFee?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  transactionCharge?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   enrollment?: Prisma.ChildEnrollmentUpdateOneRequiredWithoutPaymentsNestedInput
 }
 
@@ -821,6 +992,11 @@ export type PaymentUncheckedUpdateWithoutSchoolInput = {
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackReference?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackAccessCode?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  amountCharged?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  paystackFee?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  transactionCharge?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
 }
 
 export type PaymentUncheckedUpdateManyWithoutSchoolInput = {
@@ -836,6 +1012,11 @@ export type PaymentUncheckedUpdateManyWithoutSchoolInput = {
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackReference?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackAccessCode?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  amountCharged?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  paystackFee?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  transactionCharge?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
 }
 
 export type PaymentCreateManyEnrollmentInput = {
@@ -851,6 +1032,11 @@ export type PaymentCreateManyEnrollmentInput = {
   isConfirmed?: boolean
   paymentDate?: Date | string
   receiptUrl?: string | null
+  paystackReference?: string | null
+  paystackAccessCode?: string | null
+  amountCharged?: number | null
+  paystackFee?: number | null
+  transactionCharge?: number | null
 }
 
 export type PaymentUpdateWithoutEnrollmentInput = {
@@ -865,6 +1051,11 @@ export type PaymentUpdateWithoutEnrollmentInput = {
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackReference?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackAccessCode?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  amountCharged?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  paystackFee?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  transactionCharge?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   school?: Prisma.SchoolUpdateOneRequiredWithoutPaymentsNestedInput
 }
 
@@ -881,6 +1072,11 @@ export type PaymentUncheckedUpdateWithoutEnrollmentInput = {
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackReference?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackAccessCode?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  amountCharged?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  paystackFee?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  transactionCharge?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
 }
 
 export type PaymentUncheckedUpdateManyWithoutEnrollmentInput = {
@@ -896,6 +1092,11 @@ export type PaymentUncheckedUpdateManyWithoutEnrollmentInput = {
   isConfirmed?: Prisma.BoolFieldUpdateOperationsInput | boolean
   paymentDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   receiptUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackReference?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackAccessCode?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  amountCharged?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  paystackFee?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  transactionCharge?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
 }
 
 
@@ -914,6 +1115,11 @@ export type PaymentSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs 
   isConfirmed?: boolean
   paymentDate?: boolean
   receiptUrl?: boolean
+  paystackReference?: boolean
+  paystackAccessCode?: boolean
+  amountCharged?: boolean
+  paystackFee?: boolean
+  transactionCharge?: boolean
   enrollment?: boolean | Prisma.ChildEnrollmentDefaultArgs<ExtArgs>
   school?: boolean | Prisma.SchoolDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["payment"]>
@@ -932,6 +1138,11 @@ export type PaymentSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Exten
   isConfirmed?: boolean
   paymentDate?: boolean
   receiptUrl?: boolean
+  paystackReference?: boolean
+  paystackAccessCode?: boolean
+  amountCharged?: boolean
+  paystackFee?: boolean
+  transactionCharge?: boolean
   enrollment?: boolean | Prisma.ChildEnrollmentDefaultArgs<ExtArgs>
   school?: boolean | Prisma.SchoolDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["payment"]>
@@ -950,6 +1161,11 @@ export type PaymentSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Exten
   isConfirmed?: boolean
   paymentDate?: boolean
   receiptUrl?: boolean
+  paystackReference?: boolean
+  paystackAccessCode?: boolean
+  amountCharged?: boolean
+  paystackFee?: boolean
+  transactionCharge?: boolean
   enrollment?: boolean | Prisma.ChildEnrollmentDefaultArgs<ExtArgs>
   school?: boolean | Prisma.SchoolDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["payment"]>
@@ -968,9 +1184,14 @@ export type PaymentSelectScalar = {
   isConfirmed?: boolean
   paymentDate?: boolean
   receiptUrl?: boolean
+  paystackReference?: boolean
+  paystackAccessCode?: boolean
+  amountCharged?: boolean
+  paystackFee?: boolean
+  transactionCharge?: boolean
 }
 
-export type PaymentOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "enrollmentId" | "schoolId" | "idempotencyKey" | "amountPaid" | "platformAmount" | "schoolAmount" | "receiver" | "paymentType" | "status" | "isConfirmed" | "paymentDate" | "receiptUrl", ExtArgs["result"]["payment"]>
+export type PaymentOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "enrollmentId" | "schoolId" | "idempotencyKey" | "amountPaid" | "platformAmount" | "schoolAmount" | "receiver" | "paymentType" | "status" | "isConfirmed" | "paymentDate" | "receiptUrl" | "paystackReference" | "paystackAccessCode" | "amountCharged" | "paystackFee" | "transactionCharge", ExtArgs["result"]["payment"]>
 export type PaymentInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   enrollment?: boolean | Prisma.ChildEnrollmentDefaultArgs<ExtArgs>
   school?: boolean | Prisma.SchoolDefaultArgs<ExtArgs>
@@ -1004,6 +1225,11 @@ export type $PaymentPayload<ExtArgs extends runtime.Types.Extensions.InternalArg
     isConfirmed: boolean
     paymentDate: Date
     receiptUrl: string | null
+    paystackReference: string | null
+    paystackAccessCode: string | null
+    amountCharged: number | null
+    paystackFee: number | null
+    transactionCharge: number | null
   }, ExtArgs["result"]["payment"]>
   composites: {}
 }
@@ -1442,6 +1668,11 @@ export interface PaymentFieldRefs {
   readonly isConfirmed: Prisma.FieldRef<"Payment", 'Boolean'>
   readonly paymentDate: Prisma.FieldRef<"Payment", 'DateTime'>
   readonly receiptUrl: Prisma.FieldRef<"Payment", 'String'>
+  readonly paystackReference: Prisma.FieldRef<"Payment", 'String'>
+  readonly paystackAccessCode: Prisma.FieldRef<"Payment", 'String'>
+  readonly amountCharged: Prisma.FieldRef<"Payment", 'Int'>
+  readonly paystackFee: Prisma.FieldRef<"Payment", 'Int'>
+  readonly transactionCharge: Prisma.FieldRef<"Payment", 'Int'>
 }
     
 
