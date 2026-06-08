@@ -4,7 +4,10 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware';
 import { SchedulerModule } from './scheduler/scheduler.module';
-import { AuthModule } from './auth/auth.module';
+import { AuthModule as BetterAuthModule } from '@thallesp/nestjs-better-auth';
+import rateLimit from 'express-rate-limit';
+import { createAuth } from './auth/auth.config';
+import { PrismaService } from './prisma/prisma.service';
 import { ConfigModule } from '@nestjs/config';
 import * as Joi from 'joi';
 import { UsersModule } from './users/users.module';
@@ -19,7 +22,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { EnrollmentModule } from './enrollment/enrollment.module';
 import { AdminModule } from './admin/admin.module';
 import { APP_GUARD } from '@nestjs/core';
-import { JwtAuthGuard } from './auth/jwt-auth.guard';
+import { BetterAuthGuard } from './auth/better-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { HealthModule } from './health/health.module';
 
@@ -34,10 +37,12 @@ import { HealthModule } from './health/health.module';
           .default('development'),
         PORT: Joi.number().default(3001),
         DATABASE_URL: Joi.string().uri().required(),
-        JWT_SECRET: Joi.string().min(32).required(),
-        FIREBASE_PROJECT_ID: Joi.string().required(),
-        FIREBASE_CLIENT_EMAIL: Joi.string().email().required(),
-        FIREBASE_PRIVATE_KEY: Joi.string().required(),
+        // Better Auth (replaces Firebase + the old backend JWT)
+        BETTER_AUTH_SECRET: Joi.string().min(32).required(),
+        BETTER_AUTH_URL: Joi.string().uri().required(),
+        GOOGLE_WEB_CLIENT_ID: Joi.string().optional(),
+        GOOGLE_WEB_CLIENT_SECRET: Joi.string().optional(),
+        GOOGLE_ANDROID_CLIENT_ID: Joi.string().optional(),
         SUPABASE_URL: Joi.string().uri().required(),
         SUPABASE_SERVICE_ROLE_KEY: Joi.string().required(),
         SUPABASE_STORAGE_BUCKET: Joi.string().required(),
@@ -64,7 +69,31 @@ import { HealthModule } from './health/health.module';
         limit: 500, // More generous global limit for dashboard/general traffic
       },
     ]),
-    AuthModule,
+    // Better Auth: auto-mounts the handler at /api/auth/* (outside the api/v1
+    // prefix), manages body parsing (rawBody for the Paystack webhook), and
+    // exposes AuthService globally. We disable its global guard and use our own
+    // BetterAuthGuard so the existing @Public()/@Roles()/@CurrentUser() stay intact.
+    BetterAuthModule.forRootAsync({
+      isGlobal: true,
+      disableGlobalAuthGuard: true,
+      inject: [PrismaService],
+      useFactory: (prisma: PrismaService) => {
+        // /api/auth routes bypass Nest's ThrottlerGuard; rate-limit them here.
+        const limiter = rateLimit({
+          windowMs: 60_000,
+          limit: 20,
+          standardHeaders: true,
+          legacyHeaders: false,
+        });
+        return {
+          auth: createAuth(prisma),
+          bodyParser: { rawBody: true },
+          middleware: (req, res, next) => {
+            limiter(req, res, next);
+          },
+        };
+      },
+    }),
     UsersModule,
     ParentsModule,
     SchoolsModule,
@@ -87,7 +116,7 @@ import { HealthModule } from './health/health.module';
     },
     {
       provide: APP_GUARD,
-      useClass: JwtAuthGuard,
+      useClass: BetterAuthGuard,
     },
     {
       provide: APP_GUARD,

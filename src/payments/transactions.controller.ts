@@ -1,11 +1,10 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { PaymentService } from './payment.service';
-import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../common/decorators/user.decorator';
 import { SkipThrottle } from '@nestjs/throttler';
 
+// Auth enforced globally by BetterAuthGuard.
 @Controller('transactions')
-@UseGuards(AuthGuard('jwt'))
 export class TransactionsController {
   constructor(private readonly paymentService: PaymentService) {}
 

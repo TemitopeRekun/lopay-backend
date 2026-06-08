@@ -8,15 +8,14 @@ import {
   Query,
 } from '@nestjs/common';
 import { AdminService } from './admin.service';
-import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../generated/prisma/client';
 import { CreateSchoolDto } from './dto/create.school.dto';
 import { CurrentUser } from '../common/decorators/user.decorator';
 
+// Auth + roles are enforced globally (BetterAuthGuard + RolesGuard).
 @Controller('admin')
-@UseGuards(AuthGuard('jwt'), RolesGuard)
 @Roles(UserRole.SUPER_ADMIN)
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}

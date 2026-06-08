@@ -1,10 +1,9 @@
-import { Controller, Get, Patch, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Param } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
-import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../common/decorators/user.decorator';
 
+// Auth enforced globally by BetterAuthGuard.
 @Controller('notifications')
-@UseGuards(AuthGuard('jwt'))
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 

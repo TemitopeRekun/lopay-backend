@@ -568,10 +568,6 @@ export type SchoolUncheckedUpdateOneWithoutOwnerNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.SchoolUpdateToOneWithWhereWithoutOwnerInput, Prisma.SchoolUpdateWithoutOwnerInput>, Prisma.SchoolUncheckedUpdateWithoutOwnerInput>
 }
 
-export type BoolFieldUpdateOperationsInput = {
-  set?: boolean
-}
-
 export type SchoolCreateNestedOneWithoutClassesInput = {
   create?: Prisma.XOR<Prisma.SchoolCreateWithoutClassesInput, Prisma.SchoolUncheckedCreateWithoutClassesInput>
   connectOrCreate?: Prisma.SchoolCreateOrConnectWithoutClassesInput

@@ -48,9 +48,11 @@ export class PaystackWebhookController {
     @Headers('x-paystack-signature') signature: string,
   ) {
     const secret = process.env.PAYSTACK_SECRET_KEY ?? '';
-    // req.body is a Buffer here because bodyParser.raw is mounted on this path.
-    const raw: Buffer = Buffer.isBuffer(req.body)
-      ? req.body
+    // The Better Auth module attaches the unparsed body to req.rawBody
+    // (bodyParser.rawBody:true). Fall back to a re-stringified body just in case.
+    const rawBody = (req as unknown as { rawBody?: Buffer }).rawBody;
+    const raw: Buffer = Buffer.isBuffer(rawBody)
+      ? rawBody
       : Buffer.from(JSON.stringify(req.body ?? {}));
 
     const expected = createHmac('sha512', secret).update(raw).digest('hex');

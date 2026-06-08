@@ -2,12 +2,17 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import * as bodyParser from 'body-parser';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // bodyParser:false — the Better Auth NestJS module owns body parsing (it must
+  // hand the raw request to the auth handler). It re-adds JSON/urlencoded for all
+  // other routes and, with bodyParser.rawBody:true, attaches req.rawBody (used by
+  // the Paystack webhook for HMAC verification).
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false,
+  });
 
   // Security headers
   app.use((_req: unknown, res: { setHeader: (k: string, v: string) => void }, next: () => void) => {
@@ -22,15 +27,8 @@ async function bootstrap() {
     next();
   });
 
-  // Paystack webhook needs the RAW body for HMAC-SHA512 signature verification.
-  // Mount the raw parser on the exact path BEFORE the JSON parser; body-parser
-  // marks the request as parsed so the JSON parser below skips it.
-  app.use(
-    '/api/v1/payments/paystack/webhook',
-    bodyParser.raw({ type: '*/*', limit: '1mb' }),
-  );
-  app.use(bodyParser.json({ limit: '10mb' }));
-  app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
+  // Note: the global prefix excludes the Better Auth handler (the module adds
+  // /api/auth to the prefix exclude list automatically).
   app.setGlobalPrefix('api/v1', { exclude: ['health'] });
   app.useGlobalFilters(new GlobalExceptionFilter());
   app.useGlobalPipes(

@@ -5,7 +5,7 @@ import {
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import { AuthService } from '@thallesp/nestjs-better-auth';
 import { Server, Socket } from 'socket.io';
 
 /** Decoded identity attached to every authenticated socket. */
@@ -35,9 +35,9 @@ export interface ChangeTargets {
 /**
  * Single Socket.IO gateway for the whole platform.
  *
- * Auth: clients pass their backend JWT via `handshake.auth.token` (or an
- * Authorization header / `?token=` query as fallbacks). Unverified sockets are
- * disconnected immediately.
+ * Auth: clients pass their Better Auth bearer token via `handshake.auth.token`
+ * (or an Authorization header / `?token=` query as fallbacks). The token is
+ * validated against the Better Auth session; unverified sockets are disconnected.
  *
  * Rooms: every socket joins `user:{userId}`; school owners also join
  * `school:{schoolId}`; super admins also join `admins`. Feature services emit
@@ -52,7 +52,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   private readonly server!: Server;
 
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(private readonly authService: AuthService) {}
 
   async handleConnection(client: Socket) {
     try {
@@ -63,16 +63,25 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      const payload = await this.jwtService.verifyAsync<{
-        sub: string;
-        role: string;
-        schoolId?: string | null;
-      }>(token);
+      // Validate the bearer token against the Better Auth session.
+      const session = await this.authService.api.getSession({
+        headers: new Headers({ authorization: `Bearer ${token}` }),
+      });
+      if (!session) {
+        this.logger.warn(`Socket ${client.id} rejected: invalid session`);
+        client.disconnect(true);
+        return;
+      }
 
+      const sessionUser = session.user as {
+        id: string;
+        role?: string;
+        schoolId?: string | null;
+      };
       const data: AuthedSocketData = {
-        userId: payload.sub,
-        role: payload.role,
-        schoolId: payload.schoolId ?? null,
+        userId: sessionUser.id,
+        role: sessionUser.role ?? 'PARENT',
+        schoolId: sessionUser.schoolId ?? null,
       };
       client.data = data;
 

@@ -1,7 +1,6 @@
 import {
   Injectable,
   BadRequestException,
-  Inject,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
@@ -15,7 +14,7 @@ import {
   AuditAction,
   Prisma,
 } from '../generated/prisma/client';
-import * as admin from 'firebase-admin';
+import { AuthService } from '@thallesp/nestjs-better-auth';
 import { CreateSchoolDto } from '../admin/dto/create.school.dto';
 import { UpdateSchoolDto } from './dto/update.school.dto';
 import { DocumentsService } from '../documents/documents.service';
@@ -33,34 +32,10 @@ export class SchoolPaymentsService {
     private readonly documentsService: DocumentsService,
     private readonly events: EventsGateway,
     private readonly audit: AuditService,
-    @Inject('FIREBASE_ADMIN') private readonly firebaseAdmin: admin.app.App,
+    private readonly authService: AuthService,
   ) {}
 
   async createSchool(dto: CreateSchoolDto) {
-    // 1. Create Firebase User
-    let firebaseUser;
-    try {
-      firebaseUser = await this.firebaseAdmin.auth().createUser({
-        email: dto.ownerEmail,
-        password: dto.ownerPassword,
-        displayName: dto.ownerName,
-      });
-    } catch (error) {
-      if (error.code === 'auth/email-already-exists') {
-        try {
-          firebaseUser = await this.firebaseAdmin
-            .auth()
-            .getUserByEmail(dto.ownerEmail);
-        } catch (retrieveError: any) {
-          throw new BadRequestException(
-            `User exists in Firebase but could not be retrieved: ${retrieveError.message}`,
-          );
-        }
-      } else {
-        throw new BadRequestException(`Firebase Error: ${error.message}`);
-      }
-    }
-
     const existingUser = await this.prisma.user.findUnique({
       where: { email: dto.ownerEmail },
     });
@@ -70,30 +45,45 @@ export class SchoolPaymentsService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      // 2. Create User record
-      const user = await tx.user.create({
-        data: {
-          id: firebaseUser.uid,
+    // 1. Create the owner via Better Auth (User + credential account).
+    let ownerUserId: string;
+    try {
+      const signUp = await this.authService.api.signUpEmail({
+        body: {
           email: dto.ownerEmail,
-          role: UserRole.SCHOOL_OWNER,
-          fullName: dto.ownerName,
-        },
+          password: dto.ownerPassword,
+          name: dto.ownerName,
+        } as any,
       });
+      ownerUserId = signUp.user.id;
+      // role is not a sign-up input (security); elevate to SCHOOL_OWNER server-side.
+      await this.prisma.user.update({
+        where: { id: ownerUserId },
+        data: { role: UserRole.SCHOOL_OWNER },
+      });
+    } catch (error: any) {
+      throw new BadRequestException(
+        `Could not create owner account: ${error?.message ?? 'unknown error'}`,
+      );
+    }
 
-      // 3. Create School record
-      const school = await tx.school.create({
+    // 2. Create the School row; roll back the orphan auth user on failure.
+    try {
+      const school = await this.prisma.school.create({
         data: {
           name: dto.schoolName,
           email: dto.ownerEmail,
           address: dto.address,
           phone: dto.phone,
-          bankName: '',
-          accountName: '',
-          accountNumber: '',
-          ownerId: user.id,
-          // logo: dto.logo, // School model might not have logo yet, checking schema... DTO has it.
+          bankName: dto.bankName ?? '',
+          bankCode: dto.bankCode,
+          accountName: dto.accountName ?? '',
+          accountNumber: dto.accountNumber ?? '',
+          ownerId: ownerUserId,
         },
+      });
+      const user = await this.prisma.user.findUniqueOrThrow({
+        where: { id: ownerUserId },
       });
 
       return {
@@ -106,7 +96,12 @@ export class SchoolPaymentsService {
         },
         message: 'School and School Owner created successfully',
       };
-    });
+    } catch (error) {
+      await this.prisma.user
+        .delete({ where: { id: ownerUserId } })
+        .catch(() => undefined);
+      throw error;
+    }
   }
 
   async updateSchool(id: string, dto: UpdateSchoolDto) {

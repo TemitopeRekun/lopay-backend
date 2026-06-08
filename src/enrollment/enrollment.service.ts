@@ -61,17 +61,23 @@ export class EnrollmentService {
 
     let parent = await this.prisma.parent.findUnique({ where: { userId } });
     if (!parent) {
+      // Lazy-create the domain Parent profile on first enrollment. Works for any
+      // user (parent self-registered, or a school owner enrolling their own child)
+      // regardless of how they signed up (email or Google). Phone falls back to
+      // the user's stored phone, then their school's phone, then empty.
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
         include: { school: true },
       });
-      if (user && user.role === UserRole.SCHOOL_OWNER && user.school) {
-        parent = await this.prisma.parent.create({
-          data: { userId: user.id, phoneNumber: user.school.phone },
-        });
-      } else {
-        throw new BadRequestException('Parent profile not found');
+      if (!user) {
+        throw new BadRequestException('User not found');
       }
+      parent = await this.prisma.parent.create({
+        data: {
+          userId: user.id,
+          phoneNumber: user.phoneNumber || user.school?.phone || '',
+        },
+      });
     }
 
     if (childId) {
@@ -863,12 +869,15 @@ export class EnrollmentService {
 
     return {
       ...payment,
-      amount: payment.amountPaid, // Alias
-      date: payment.paymentDate, // Alias
-      type: payment.paymentType, // Alias
-      studentName: enrollment.child.fullName, // Alias
-      childName: enrollment.child.fullName, // Alias
-      schoolName: enrollment.school.name, // Alias
+      amount: Money.fromKobo(payment.amountPaid).toNaira(),
+      amountPaid: Money.fromKobo(payment.amountPaid).toNaira(),
+      platformAmount: Money.fromKobo(payment.platformAmount).toNaira(),
+      schoolAmount: Money.fromKobo(payment.schoolAmount).toNaira(),
+      date: payment.paymentDate,
+      type: payment.paymentType,
+      studentName: enrollment.child.fullName,
+      childName: enrollment.child.fullName,
+      schoolName: enrollment.school.name,
     };
   }
 

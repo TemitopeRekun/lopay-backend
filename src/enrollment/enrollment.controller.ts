@@ -29,16 +29,13 @@ export class EnrollmentController {
     return this.enrollmentService.getEnrollmentHistory(id, user.userId);
   }
 
-  @Post()
-  @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
-  @Throttle({ default: { ttl: 60000, limit: 10 } })
-  enrollChild(@Body() dto: CreateEnrollmentDto, @CurrentUser() user: any) {
-    return this.enrollmentService.enrollChild(dto, user.userId);
-  }
-
   /**
    * Initiate a first payment via Paystack split. Returns the inline-popup
    * access code + reference; activation happens on the webhook/verify.
+   *
+   * NOTE: the old manual receipt-based first-payment route (`POST /enrollments`)
+   * was removed — first payments must go through Paystack so money is actually
+   * collected. There is no offline bypass.
    */
   @Post('initiate-first-payment')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)

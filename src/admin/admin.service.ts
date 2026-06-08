@@ -1,5 +1,4 @@
 import {
-  Inject,
   Injectable,
   BadRequestException,
   Logger,
@@ -16,7 +15,7 @@ import {
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import * as admin from 'firebase-admin';
+import { AuthService } from '@thallesp/nestjs-better-auth';
 import { CreateSchoolDto } from './dto/create.school.dto';
 import { DocumentsService } from '../documents/documents.service';
 import { AuditService, AuditActor } from '../audit/audit.service';
@@ -33,7 +32,7 @@ export class AdminService {
     private readonly documentsService: DocumentsService,
     private readonly audit: AuditService,
     private readonly paystack: PaystackService,
-    @Inject('FIREBASE_ADMIN') private readonly firebaseAdmin: admin.app.App,
+    private readonly authService: AuthService,
   ) {}
 
   /**
@@ -101,40 +100,7 @@ export class AdminService {
 
   /** Onboard a new school and create the school owner account */
   async onboardSchool(dto: CreateSchoolDto) {
-    // 1. Create Firebase User
-    let firebaseUser;
-    try {
-      this.logger.log(`Creating Firebase user: ${dto.ownerEmail}`);
-      firebaseUser = await this.firebaseAdmin.auth().createUser({
-        email: dto.ownerEmail,
-        password: dto.ownerPassword,
-        displayName: dto.ownerName,
-      });
-      this.logger.log(`Firebase user created: ${firebaseUser.uid}`);
-    } catch (error: unknown) {
-      const err = error as { code?: string; message?: string };
-      this.logger.error(`Firebase user creation failed: ${err.message}`);
-      if (err.code === 'auth/email-already-exists') {
-        try {
-          this.logger.log(`User exists in Firebase, retrieving: ${dto.ownerEmail}`);
-          firebaseUser = await this.firebaseAdmin.auth().getUserByEmail(dto.ownerEmail);
-          this.logger.log(`Retrieved existing Firebase user: ${firebaseUser.uid}`);
-        } catch (retrieveError: unknown) {
-          const re = retrieveError as { message?: string };
-          throw new BadRequestException(
-            `User exists in Firebase but could not be retrieved: ${re.message}`,
-          );
-        }
-      } else {
-        throw new BadRequestException(`Firebase Error: ${err.message}`);
-      }
-    }
-
-    // If we are reusing an existing firebase user, we must ensure they don't already have a role that conflicts,
-    // or we just overwrite/assign SCHOOL_OWNER role in our DB.
-    // For safety in this MVP, let's assume strict onboarding:
-    // If user exists in DB, fail.
-
+    // Fail fast if the owner already has an account.
     const existingUser = await this.prisma.user.findUnique({
       where: { email: dto.ownerEmail },
     });
@@ -144,35 +110,58 @@ export class AdminService {
       );
     }
 
-    const created = await this.prisma.$transaction(async (tx) => {
-      // 2. Create User record — ID intentionally synced to Firebase UID
-      const user = await tx.user.create({
-        data: {
-          id: firebaseUser.uid,
+    // 1. Create the owner via Better Auth (creates the User + credential Account).
+    let ownerUserId: string;
+    try {
+      const signUp = await this.authService.api.signUpEmail({
+        body: {
           email: dto.ownerEmail,
-          role: UserRole.SCHOOL_OWNER,
-          fullName: dto.ownerName,
-        },
+          password: dto.ownerPassword,
+          name: dto.ownerName,
+        } as any,
       });
+      ownerUserId = signUp.user.id;
+      // role is not a sign-up input (security); elevate to SCHOOL_OWNER server-side.
+      await this.prisma.user.update({
+        where: { id: ownerUserId },
+        data: { role: UserRole.SCHOOL_OWNER },
+      });
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      this.logger.error(`Owner account creation failed: ${err.message}`);
+      throw new BadRequestException(
+        `Could not create owner account: ${err.message ?? 'unknown error'}`,
+      );
+    }
 
-      // 3. Create School record
-      const school = await tx.school.create({
+    // 2. Create the School row linked to the new owner. Better Auth created the
+    // User outside this transaction, so compensate by deleting it on failure.
+    let created;
+    try {
+      const school = await this.prisma.school.create({
         data: {
           name: dto.schoolName,
-          email: dto.ownerEmail, // School email defaults to owner email
+          email: dto.ownerEmail,
           address: dto.address,
           phone: dto.phone,
-          // Bank details provided during onboarding
           bankName: dto.bankName,
           bankCode: dto.bankCode,
           accountName: dto.accountName,
           accountNumber: dto.accountNumber,
-          ownerId: user.id,
+          ownerId: ownerUserId,
         },
       });
-
-      return { school, user };
-    });
+      const user = await this.prisma.user.findUniqueOrThrow({
+        where: { id: ownerUserId },
+      });
+      created = { school, user };
+    } catch (error) {
+      // Roll back the orphaned auth user (cascades to session/account).
+      await this.prisma.user
+        .delete({ where: { id: ownerUserId } })
+        .catch(() => undefined);
+      throw error;
+    }
 
     // 4. Provision the Paystack subaccount (external call, post-transaction).
     // Best-effort: onboarding succeeds even if this fails; retry via admin endpoint.
