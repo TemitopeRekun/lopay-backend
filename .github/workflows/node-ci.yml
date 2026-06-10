@@ -35,10 +35,8 @@ jobs:
       FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
       FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
       FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-      SUPABASE_STORAGE_BUCKET: ${{ secrets.SUPABASE_STORAGE_BUCKET }}
-      SUPABASE_SIGNED_URL_TTL_SECONDS: ${{ secrets.SUPABASE_SIGNED_URL_TTL_SECONDS }}
+      FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+      FIREBASE_SIGNED_URL_TTL_SECONDS: ${{ secrets.FIREBASE_SIGNED_URL_TTL_SECONDS }}
       ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
       ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
     steps:
@@ -51,7 +49,7 @@ jobs:
         run: npm ci
       - name: Secrets sanity check
         run: |
-          node -e "const req=['DATABASE_URL','JWT_SECRET','FIREBASE_PROJECT_ID','FIREBASE_CLIENT_EMAIL','FIREBASE_PRIVATE_KEY','SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY','SUPABASE_STORAGE_BUCKET']; const opt=['PORT','CORS_ORIGINS','SUPABASE_SIGNED_URL_TTL_SECONDS','ADMIN_EMAIL','ADMIN_PASSWORD']; const miss=req.filter(k=>!process.env[k]||!String(process.env[k]).trim()); if(miss.length){console.error('Missing required secrets:', miss.join(', ')); process.exit(1)} const missOpt=opt.filter(k=>!process.env[k]||!String(process.env[k]).trim()); if(missOpt.length){console.warn('Missing optional secrets:', missOpt.join(', '))}"
+          node -e "const req=['DATABASE_URL','JWT_SECRET','FIREBASE_PROJECT_ID','FIREBASE_CLIENT_EMAIL','FIREBASE_PRIVATE_KEY','FIREBASE_STORAGE_BUCKET']; const opt=['PORT','CORS_ORIGINS','FIREBASE_SIGNED_URL_TTL_SECONDS','ADMIN_EMAIL','ADMIN_PASSWORD']; const miss=req.filter(k=>!process.env[k]||!String(process.env[k]).trim()); if(miss.length){console.error('Missing required secrets:', miss.join(', ')); process.exit(1)} const missOpt=opt.filter(k=>!process.env[k]||!String(process.env[k]).trim()); if(missOpt.length){console.warn('Missing optional secrets:', missOpt.join(', '))}"
       - name: Run Prisma migrations
         run: npm run migrate:deploy
         env:

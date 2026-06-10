@@ -1,15 +1,17 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserRole } from '../generated/prisma/client';
+import { FIREBASE_STORAGE } from '../firebase/firebase.module';
+import type { Storage } from 'firebase-admin/storage';
 
 const ALLOWED_RECEIPT_CONTENT_TYPES = new Set([
   'image/jpeg',
@@ -24,37 +26,35 @@ type CurrentUser = {
   schoolId?: string | null;
 };
 
+const DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+
 @Injectable()
 export class DocumentsService {
-  private readonly supabase: SupabaseClient;
-  private readonly bucket: string;
   private readonly signedUrlTtlSeconds: number;
+  private readonly maxUploadBytes: number;
 
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    @Inject(FIREBASE_STORAGE) private readonly storage: Storage,
   ) {
-    const url = this.config.get<string>('SUPABASE_URL');
-    const key = this.config.get<string>('SUPABASE_SERVICE_ROLE_KEY');
-    if (!url || !key) {
-      throw new Error(
-        'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required',
-      );
-    }
-
-    this.supabase = createClient(url, key, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false,
-      },
-    });
-
-    this.bucket = this.config.get<string>('SUPABASE_STORAGE_BUCKET') ?? 'lopay';
     const ttl = Number(
-      this.config.get<string>('SUPABASE_SIGNED_URL_TTL_SECONDS') ?? 600,
+      this.config.get<string>('FIREBASE_SIGNED_URL_TTL_SECONDS') ?? 600,
     );
     this.signedUrlTtlSeconds = Number.isFinite(ttl) ? ttl : 600;
+
+    const maxBytes = Number(
+      this.config.get<string>('FIREBASE_MAX_UPLOAD_BYTES') ??
+        DEFAULT_MAX_UPLOAD_BYTES,
+    );
+    this.maxUploadBytes =
+      Number.isFinite(maxBytes) && maxBytes > 0
+        ? maxBytes
+        : DEFAULT_MAX_UPLOAD_BYTES;
+  }
+
+  private get bucket() {
+    return this.storage.bucket();
   }
 
   async createReceiptUploadUrl(
@@ -77,22 +77,35 @@ export class DocumentsService {
     const safeName = this.sanitizeFileName(fileName);
     const objectPath = `receipts/${userId}/${randomUUID()}_${safeName}`;
 
-    const { data, error } = await this.supabase.storage
-      .from(this.bucket)
-      .createSignedUploadUrl(objectPath, { upsert: false });
+    // Bind a max content-length into the signature. The client must echo this
+    // exact header on the PUT; GCS then rejects any upload larger than the cap.
+    const contentLengthRange = `0,${this.maxUploadBytes}`;
 
-    if (error || !data?.signedUrl) {
+    try {
+      const [signedUrl] = await this.bucket.file(objectPath).getSignedUrl({
+        version: 'v4',
+        action: 'write',
+        expires: Date.now() + this.signedUrlTtlSeconds * 1000,
+        contentType: contentType ?? 'image/jpeg',
+        extensionHeaders: {
+          'x-goog-content-length-range': contentLengthRange,
+        },
+      });
+
+      return {
+        path: objectPath,
+        signedUrl,
+        expiresIn: this.signedUrlTtlSeconds,
+        maxUploadBytes: this.maxUploadBytes,
+        requiredHeaders: {
+          'x-goog-content-length-range': contentLengthRange,
+        },
+      };
+    } catch (e: any) {
       throw new BadRequestException(
-        error?.message ?? 'Failed to create signed upload URL',
+        e?.message ?? 'Failed to create signed upload URL',
       );
     }
-
-    return {
-      path: data.path ?? objectPath,
-      signedUrl: data.signedUrl,
-      token: data.token ?? null,
-      expiresIn: this.signedUrlTtlSeconds,
-    };
   }
 
   async createReceiptDownloadUrl(paymentId: string, user: CurrentUser) {
@@ -128,21 +141,25 @@ export class DocumentsService {
       throw new ForbiddenException('Not authorized to access this receipt');
     }
 
-    const { data, error } = await this.supabase.storage
-      .from(this.bucket)
-      .createSignedUrl(payment.receiptUrl, this.signedUrlTtlSeconds);
+    try {
+      const [signedUrl] = await this.bucket
+        .file(payment.receiptUrl)
+        .getSignedUrl({
+          version: 'v4',
+          action: 'read',
+          expires: Date.now() + this.signedUrlTtlSeconds * 1000,
+        });
 
-    if (error || !data?.signedUrl) {
+      return {
+        path: payment.receiptUrl,
+        signedUrl,
+        expiresIn: this.signedUrlTtlSeconds,
+      };
+    } catch (e: any) {
       throw new BadRequestException(
-        error?.message ?? 'Failed to create signed download URL',
+        e?.message ?? 'Failed to create signed download URL',
       );
     }
-
-    return {
-      path: payment.receiptUrl,
-      signedUrl: data.signedUrl,
-      expiresIn: this.signedUrlTtlSeconds,
-    };
   }
 
   async createSignedUrlForPath(path: string) {
@@ -150,20 +167,29 @@ export class DocumentsService {
       throw new BadRequestException('Path is required');
     }
 
-    const { data, error } = await this.supabase.storage
-      .from(this.bucket)
-      .createSignedUrl(path, this.signedUrlTtlSeconds);
+    const TIMEOUT_MS = 4000;
 
-    if (error || !data?.signedUrl) {
+    try {
+      const [signedUrl] = await Promise.race([
+        this.bucket.file(path).getSignedUrl({
+          version: 'v4',
+          action: 'read',
+          expires: Date.now() + this.signedUrlTtlSeconds * 1000,
+        }),
+        new Promise<string[]>((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), TIMEOUT_MS),
+        ),
+      ]);
+
+      return {
+        signedUrl,
+        expiresIn: this.signedUrlTtlSeconds,
+      };
+    } catch (e: any) {
       throw new BadRequestException(
-        error?.message ?? 'Failed to create signed download URL',
+        e?.message ?? 'Failed to create signed download URL',
       );
     }
-
-    return {
-      signedUrl: data.signedUrl,
-      expiresIn: this.signedUrlTtlSeconds,
-    };
   }
 
   private sanitizeFileName(fileName: string) {

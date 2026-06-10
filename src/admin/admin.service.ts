@@ -260,12 +260,14 @@ export class AdminService {
 
     const { enrollment } = payment;
 
-    await this.prisma.$transaction(async (tx) => {
-      // 1️⃣ Mark payment as confirmed
-      await tx.payment.update({
-        where: { id: payment.id },
+    const settled = await this.prisma.$transaction(async (tx) => {
+      // 1️⃣ Mark payment as confirmed (guarded — only an unconfirmed payment
+      // flips, so a concurrent settle/reject/confirm can't double-process).
+      const res = await tx.payment.updateMany({
+        where: { id: payment.id, isConfirmed: false },
         data: { isConfirmed: true, status: PaymentTransactionStatus.SUCCESS },
       });
+      if (res.count === 0) return false;
 
       // 2️⃣ Activate enrollment
       await tx.childEnrollment.update({
@@ -311,7 +313,12 @@ export class AdminService {
           link: `/parent/enrollments/${enrollment.id}`,
         },
       });
+      return true;
     });
+
+    if (!settled) {
+      throw new NotFoundException('Payment not found or already settled');
+    }
 
     return {
       message: 'Payment settled and enrollment activated successfully',
@@ -340,7 +347,8 @@ export class AdminService {
     return payments.map((p) => ({
       ...p,
       date: p.paymentDate,
-      amount: p.amountPaid,
+      amount: Money.fromKobo(p.amountPaid).toNaira(),
+      amountPaid: Money.fromKobo(p.amountPaid).toNaira(),
       studentName: p.enrollment?.child?.fullName,
       childName: p.enrollment?.child?.fullName,
       className: p.enrollment?.className,
@@ -377,14 +385,15 @@ export class AdminService {
 
     const { enrollment } = payment;
 
-    await this.prisma.$transaction(async (tx) => {
-      // 1️⃣ Mark payment as failed (not confirmed)
-      await tx.payment.update({
-        where: { id: payment.id },
+    const rejectedOk = await this.prisma.$transaction(async (tx) => {
+      // 1️⃣ Mark payment as failed (guarded — only an unprocessed payment flips).
+      const res = await tx.payment.updateMany({
+        where: { id: payment.id, isConfirmed: false },
         data: {
           status: PaymentTransactionStatus.FAILED,
         },
       });
+      if (res.count === 0) return false;
 
       // 2️⃣ Mark enrollment as FAILED (no balance changes)
       await tx.childEnrollment.update({
@@ -434,7 +443,12 @@ export class AdminService {
           link: `/parent/enrollments/${enrollment.id}`,
         },
       });
+      return true;
     });
+
+    if (!rejectedOk) {
+      throw new NotFoundException('First payment not found or already processed');
+    }
 
     return {
       message: 'First payment rejected and enrollment marked as failed',

@@ -48,6 +48,22 @@ export class EnrollmentService {
   ) {}
 
   /**
+   * A receipt path must live under the caller's own namespace
+   * (`receipts/<userId>/...`, as minted by the documents upload endpoint).
+   * Without this check a client could attach an arbitrary bucket object path to
+   * their payment and later mint a signed read URL for it (IDOR).
+   */
+  private assertOwnedReceiptPath(
+    receiptUrl: string | undefined,
+    userId: string,
+  ) {
+    if (receiptUrl === undefined) return;
+    if (!receiptUrl.startsWith(`receipts/${userId}/`)) {
+      throw new BadRequestException('Invalid receipt path');
+    }
+  }
+
+  /**
    * Resolve the parent, child, and any retryable (FAILED) enrollment for an
    * enrollment request. Shared by the manual `enrollChild` flow and the Paystack
    * `initiateFirstPayment` flow. Creates a Parent/Child record when needed.
@@ -493,6 +509,8 @@ export class EnrollmentService {
    * Returns the inline-popup `accessCode` + `reference` for the frontend.
    */
   async initiateFirstPayment(dto: CreateEnrollmentDto, userId: string) {
+    this.assertOwnedReceiptPath(dto.receiptUrl, userId);
+
     // Idempotency: replay an in-flight/completed intent rather than double-charging.
     if (dto.idempotencyKey) {
       const existing = await this.findPaymentByIdempotencyKey(dto.idempotencyKey);
@@ -679,16 +697,24 @@ export class EnrollmentService {
     const newBalance = enrollment.remainingBalance; // already net of this deposit at initiation
     const isCompleted = newBalance <= 0;
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.payment.update({
-        where: { id: payment.id },
+    // Concurrency: the webhook and the verify-on-return endpoint both call this.
+    // Guard the SUCCESS flip with a conditional write so only the first one wins;
+    // a second concurrent call finds count === 0 and is a clean no-op (no double
+    // activation, no duplicate audit row, no duplicate notification).
+    const processed = await this.prisma.$transaction(async (tx) => {
+      const flipped = await tx.payment.updateMany({
+        where: { id: payment.id, status: PaymentTransactionStatus.PENDING },
         data: {
           status: PaymentTransactionStatus.SUCCESS,
           isConfirmed: true,
-          paystackFee: actualFeeKobo ?? payment.paystackFee,
+          // estimate stays in paystackFee; the authoritative fee is recorded below.
+          actualPaystackFee: actualFeeKobo ?? null,
           paymentDate: new Date(),
         },
       });
+      if (flipped.count === 0) {
+        return false; // already reconciled by a concurrent caller
+      }
 
       await tx.childEnrollment.update({
         where: { id: enrollment.id },
@@ -698,6 +724,13 @@ export class EnrollmentService {
             : PaymentStatus.ACTIVE,
         },
       });
+
+      // Reconcile the estimated Paystack fee against the actual one Paystack
+      // charged the platform account, so the book vs. bank discrepancy is
+      // auditable rather than silently absorbed (the platform bears the fee).
+      const estimateFee = payment.paystackFee ?? 0;
+      const actualFee = actualFeeKobo ?? estimateFee;
+      const feeDelta = actualFee - estimateFee;
 
       await this.audit.record(
         {
@@ -719,12 +752,29 @@ export class EnrollmentService {
             amountCharged: payment.amountCharged,
             platformAmount: payment.platformAmount,
             schoolAmount: payment.schoolAmount,
-            paystackFee: actualFeeKobo ?? payment.paystackFee,
+            estimatedPaystackFee: estimateFee,
+            actualPaystackFee: actualFee,
+            // Non-zero means the platform main account netted platformFee ± this
+            // amount (Paystack bears the fee off that account). Surfaced for
+            // reconciliation; investigate sustained drift.
+            paystackFeeDelta: feeDelta,
           },
         },
         tx,
       );
+
+      if (feeDelta !== 0) {
+        this.logger.warn(
+          `Paystack fee delta ${feeDelta} kobo on ${reference} (estimate ${estimateFee}, actual ${actualFee})`,
+        );
+      }
+
+      return true;
     });
+
+    if (!processed) {
+      return { reconciled: true, alreadyProcessed: true };
+    }
 
     // Notify parent + school owner (post-transaction).
     await this.notificationsService.create({
@@ -766,16 +816,23 @@ export class EnrollmentService {
       return { updated: false };
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.payment.update({
-        where: { id: payment.id },
+    // Guard the FAILED flip: only a still-PENDING payment may fail. A replayed
+    // charge.failed (or one racing a charge.success) finds count === 0 and is a
+    // no-op, so it can't flip an already-succeeded payment.
+    const flipped = await this.prisma.$transaction(async (tx) => {
+      const res = await tx.payment.updateMany({
+        where: { id: payment.id, status: PaymentTransactionStatus.PENDING },
         data: { status: PaymentTransactionStatus.FAILED },
       });
+      if (res.count === 0) return false;
       await tx.childEnrollment.update({
         where: { id: payment.enrollmentId },
         data: { paymentStatus: PaymentStatus.FAILED },
       });
+      return true;
     });
+
+    if (!flipped) return { updated: false };
 
     if (payment.enrollment?.child?.parent?.userId) {
       await this.notificationsService.create({
@@ -788,12 +845,138 @@ export class EnrollmentService {
     return { updated: true };
   }
 
+  /**
+   * Process a verified inbound Paystack webhook event. Persists every delivery to
+   * a replayable log first (dedup via a unique key) so a duplicate delivery is a
+   * no-op and a transient processing failure can be retried/replayed. Dispatch is
+   * idempotent (the status-guarded reconcile/fail handlers above).
+   */
+  async processPaystackWebhookEvent(
+    event: any,
+  ): Promise<{ received: boolean; duplicate?: boolean }> {
+    const eventType: string = event?.event ?? 'unknown';
+    const reference: string | null = event?.data?.reference ?? null;
+    const dedupeKey = `${eventType}:${event?.data?.id ?? reference ?? randomUUID()}`;
+
+    // Persist + dedup. A duplicate delivery (same event) short-circuits.
+    try {
+      await this.prisma.webhookEvent.create({
+        data: {
+          provider: 'paystack',
+          eventType,
+          dedupeKey,
+          reference,
+          payload: (event ?? {}) as Prisma.InputJsonValue,
+        },
+      });
+    } catch (error) {
+      if (this.isUniqueConflictOn(error, 'dedupeKey')) {
+        return { received: true, duplicate: true };
+      }
+      throw error;
+    }
+
+    try {
+      if (reference && eventType === 'charge.success') {
+        const fees =
+          typeof event?.data?.fees === 'number' ? event.data.fees : null;
+        await this.reconcilePaystackPayment(reference, fees, null);
+      } else if (reference && eventType === 'charge.failed') {
+        await this.failPaystackPayment(reference);
+      } else if (
+        eventType.startsWith('charge.dispute') ||
+        eventType.startsWith('refund.')
+      ) {
+        await this.recordPaystackDispute(eventType, reference, event);
+      }
+      await this.prisma.webhookEvent.update({
+        where: { dedupeKey },
+        data: { processedAt: new Date() },
+      });
+    } catch (err) {
+      // Leave the row unprocessed (with the error) so it can be replayed; rethrow
+      // so Paystack receives a non-2xx and retries within its window.
+      await this.prisma.webhookEvent
+        .update({
+          where: { dedupeKey },
+          data: { error: (err as Error).message },
+        })
+        .catch(() => undefined);
+      throw err;
+    }
+
+    return { received: true };
+  }
+
+  /**
+   * Record a dispute/chargeback/refund. First-payment money already moved via the
+   * Paystack split, and first payments have no automatic reversal path, so this
+   * is logged to the audit trail and escalated to admins for manual reconciliation
+   * rather than silently acknowledged.
+   */
+  private async recordPaystackDispute(
+    eventType: string,
+    reference: string | null,
+    event: any,
+  ) {
+    const payment = reference
+      ? await this.prisma.payment.findUnique({
+          where: { paystackReference: reference },
+        })
+      : null;
+
+    await this.audit.record({
+      action: AuditAction.PAYMENT_DISPUTED,
+      entityType: 'Payment',
+      entityId: payment?.id ?? reference ?? 'unknown',
+      actor: null,
+      schoolId: payment?.schoolId ?? null,
+      metadata: {
+        eventType,
+        reference,
+        data: (event?.data ?? null) as Prisma.InputJsonValue,
+      },
+    });
+
+    const admins = await this.prisma.user.findMany({
+      where: { role: UserRole.SUPER_ADMIN },
+      select: { id: true },
+    });
+    await Promise.all(
+      admins.map((a) =>
+        this.notificationsService.create({
+          userId: a.id,
+          title: 'Paystack Dispute / Refund',
+          message: `A "${eventType}" event was received${reference ? ` for ${reference}` : ''}. Manual reconciliation may be required.`,
+          link: '/admin/payments',
+        }),
+      ),
+    );
+  }
+
+  /** True when an error is the unique-constraint violation on the given field. */
+  private isUniqueConflictOn(error: unknown, field: string): boolean {
+    if (
+      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+      error.code !== 'P2002'
+    ) {
+      return false;
+    }
+    const target = error.meta?.target;
+    return Array.isArray(target)
+      ? target.includes(field)
+      : String(target ?? '').includes(field);
+  }
+
   async submitInstallmentPayment(
     enrollmentId: string,
     amountPaid: number,
+    user: { userId: string; role: UserRole; schoolId?: string | null },
     receiptUrl?: string,
     idempotencyKey?: string,
   ) {
+    this.assertOwnedReceiptPath(receiptUrl, user.userId);
+
     // Idempotency: replay the original payment if this submission already ran.
     if (idempotencyKey) {
       const existing = await this.findPaymentByIdempotencyKey(idempotencyKey);
@@ -802,10 +985,26 @@ export class EnrollmentService {
 
     const enrollment = await this.prisma.childEnrollment.findUnique({
       where: { id: enrollmentId },
-      include: { school: true, child: true },
+      include: { school: true, child: { include: { parent: true } } },
     });
 
     if (!enrollment) throw new NotFoundException('Enrollment not found');
+
+    // Authorization: prevent paying (and attaching a receipt) against another
+    // family's enrollment. A parent may only pay their own child's enrollment;
+    // a school owner may only act within their own school.
+    const ownsAsParent =
+      user.role === UserRole.PARENT &&
+      enrollment.child.parent.userId === user.userId;
+    const ownsAsSchool =
+      user.role === UserRole.SCHOOL_OWNER &&
+      !!user.schoolId &&
+      enrollment.schoolId === user.schoolId;
+    if (!ownsAsParent && !ownsAsSchool) {
+      throw new BadRequestException(
+        'You are not authorized to pay this enrollment',
+      );
+    }
 
     // Convert Naira (from DTO/frontend) to kobo for DB storage.
     const amountPaidKobo = Money.fromNaira(amountPaid).toKobo();
@@ -923,19 +1122,23 @@ export class EnrollmentService {
         throw new BadRequestException('No pending first payment found');
       }
 
-      // 3. Update Payment
-      await tx.payment.update({
-        where: { id: payment.id },
+      // 3. Update Payment (guarded — only an unconfirmed payment flips, so a
+      // concurrent confirm/settle/reconcile can't double-activate or double-audit).
+      const confirmed = await tx.payment.updateMany({
+        where: { id: payment.id, isConfirmed: false },
         data: {
           isConfirmed: true,
           status: PaymentTransactionStatus.SUCCESS,
           paymentDate: new Date(),
         },
       });
+      if (confirmed.count === 0) {
+        throw new BadRequestException('First payment already processed');
+      }
 
-      // 4. Activate Enrollment
-      await tx.childEnrollment.update({
-        where: { id: enrollmentId },
+      // 4. Activate Enrollment (guarded on the PENDING precondition)
+      await tx.childEnrollment.updateMany({
+        where: { id: enrollmentId, paymentStatus: PaymentStatus.PENDING },
         data: { paymentStatus: PaymentStatus.ACTIVE },
       });
 

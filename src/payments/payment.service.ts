@@ -1,6 +1,10 @@
 // src/services/payment.service.ts
 
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, UserRole } from '../generated/prisma/client';
 import { DocumentsService } from '../documents/documents.service';
@@ -234,17 +238,24 @@ export class PaymentService {
     includeReceiptSignedUrls = false,
     receiptType: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT' = 'ALL',
   ) {
-    let whereClause: Prisma.PaymentWhereInput = {};
-
+    // Default-deny: this endpoint only serves a parent's own payments or a
+    // school owner's tenant. Any other role (incl. an unexpected/undefined role)
+    // must NOT fall through to an unscoped `where: {}` that would leak every
+    // tenant's payments. Super admins use the dedicated admin endpoints.
+    let whereClause: Prisma.PaymentWhereInput;
     if (role === UserRole.PARENT) {
       whereClause = {
         enrollment: { child: { parent: { userId } } },
       };
     } else if (role === UserRole.SCHOOL_OWNER) {
       if (!schoolId) {
-        throw new Error('School ID is required for school owners');
+        throw new ForbiddenException('School ID is required for school owners');
       }
       whereClause = { schoolId };
+    } else {
+      throw new ForbiddenException(
+        'This endpoint is only available to parents and school owners',
+      );
     }
 
     const payments = await this.prisma.payment.findMany({
@@ -260,14 +271,24 @@ export class PaymentService {
       orderBy: { paymentDate: 'desc' },
     });
 
+    // DB stores kobo; API consumers expect naira. The frontend reads
+    // `amount ?? amountPaid` as naira, so both must be converted here.
+    const toDto = (
+      p: (typeof payments)[number],
+      receiptSignedUrl?: string | null,
+    ) => ({
+      ...p,
+      amount: Money.fromKobo(p.amountPaid).toNaira(),
+      amountPaid: Money.fromKobo(p.amountPaid).toNaira(),
+      status: p.status,
+      studentName: p.enrollment?.child?.fullName,
+      className: p.enrollment?.className,
+      schoolName: p.enrollment?.school?.name,
+      ...(receiptSignedUrl !== undefined ? { receiptSignedUrl } : {}),
+    });
+
     if (!includeReceiptSignedUrls) {
-      return payments.map((p) => ({
-        ...p,
-        status: p.status,
-        studentName: p.enrollment?.child?.fullName,
-        className: p.enrollment?.className,
-        schoolName: p.enrollment?.school?.name,
-      }));
+      return payments.map((p) => toDto(p));
     }
 
     const shouldSign = (paymentType: string) =>
@@ -287,14 +308,7 @@ export class PaymentService {
           }
         }
 
-        return {
-          ...p,
-          status: p.status,
-          studentName: p.enrollment?.child?.fullName,
-          className: p.enrollment?.className,
-          schoolName: p.enrollment?.school?.name,
-          receiptSignedUrl,
-        };
+        return toDto(p, receiptSignedUrl);
       }),
     );
 

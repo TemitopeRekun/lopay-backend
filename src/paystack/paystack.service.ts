@@ -175,8 +175,16 @@ export class PaystackService {
     path: string,
     body?: unknown,
   ): Promise<T> {
+    const MAX_ATTEMPTS = 3;
     let lastErr: unknown;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+      // Exponential backoff with jitter before retries (not before the first
+      // attempt), so a Paystack brownout isn't hammered at the worst moment.
+      if (attempt > 0) {
+        const base = 200 * 2 ** (attempt - 1); // 200ms, 400ms
+        const jitter = Math.floor(base * (0.5 + (attempt % 2) * 0.25));
+        await new Promise((r) => setTimeout(r, base + jitter));
+      }
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
       try {
@@ -198,7 +206,7 @@ export class PaystackService {
 
         if (!res.ok || !json?.status) {
           // 5xx is retryable; 4xx is a real error — surface immediately.
-          if (res.status >= 500 && attempt === 0) {
+          if (res.status >= 500 && attempt < MAX_ATTEMPTS - 1) {
             lastErr = new Error(`Paystack ${res.status}: ${json?.message}`);
             continue;
           }
@@ -210,8 +218,8 @@ export class PaystackService {
       } catch (err) {
         lastErr = err;
         if (err instanceof BadGatewayException) throw err;
-        // network/abort error — retry once
-        if (attempt === 0) continue;
+        // network/abort error — retry with backoff
+        if (attempt < MAX_ATTEMPTS - 1) continue;
       } finally {
         clearTimeout(timer);
       }

@@ -25,6 +25,8 @@ import { APP_GUARD } from '@nestjs/core';
 import { BetterAuthGuard } from './auth/better-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { HealthModule } from './health/health.module';
+import { FirebaseModule } from './firebase/firebase.module';
+import { DeviceTokensModule } from './device-tokens/device-tokens.module';
 
 @Module({
   imports: [
@@ -38,26 +40,52 @@ import { HealthModule } from './health/health.module';
         PORT: Joi.number().default(3001),
         DATABASE_URL: Joi.string().uri().required(),
         // Better Auth (replaces Firebase + the old backend JWT)
-        BETTER_AUTH_SECRET: Joi.string().min(32).required(),
+        // Reject obvious placeholders so a deploy can't boot with template values.
+        BETTER_AUTH_SECRET: Joi.string()
+          .min(32)
+          .invalid('dev-better-auth-secret-please-change-min-32-chars')
+          .pattern(/REPLACE_ME/i, { invert: true })
+          .required(),
         BETTER_AUTH_URL: Joi.string().uri().required(),
         GOOGLE_WEB_CLIENT_ID: Joi.string().optional(),
         GOOGLE_WEB_CLIENT_SECRET: Joi.string().optional(),
         GOOGLE_ANDROID_CLIENT_ID: Joi.string().optional(),
-        SUPABASE_URL: Joi.string().uri().required(),
-        SUPABASE_SERVICE_ROLE_KEY: Joi.string().required(),
-        SUPABASE_STORAGE_BUCKET: Joi.string().required(),
-        SUPABASE_SIGNED_URL_TTL_SECONDS: Joi.number()
+        // Firebase Admin SDK
+        FIREBASE_PROJECT_ID: Joi.string().required(),
+        FIREBASE_CLIENT_EMAIL: Joi.string().email().required(),
+        FIREBASE_PRIVATE_KEY: Joi.string().required(),
+        FIREBASE_STORAGE_BUCKET: Joi.string().required(),
+        FIREBASE_SIGNED_URL_TTL_SECONDS: Joi.number()
           .integer()
           .min(60)
           .max(86400)
           .optional(),
+        FIREBASE_MAX_UPLOAD_BYTES: Joi.number()
+          .integer()
+          .min(1024)
+          .optional(),
         ADMIN_EMAIL: Joi.string().email().optional(),
         ADMIN_PASSWORD: Joi.string().min(8).optional(),
-        CORS_ORIGINS: Joi.string().allow('').optional(),
-        // Paystack split payments (first-payment collection + settlement)
-        PAYSTACK_SECRET_KEY: Joi.string().required(),
+        // Required (non-empty) in production so the API can't boot wide-open;
+        // optional locally where main.ts reflects the dev origin.
+        CORS_ORIGINS: Joi.when('NODE_ENV', {
+          is: 'production',
+          then: Joi.string().required(),
+          otherwise: Joi.string().allow('').optional(),
+        }),
+        // Paystack split payments. Must be a real sk_(test|live)_ key — reject
+        // placeholders; require a LIVE key in production.
+        PAYSTACK_SECRET_KEY: Joi.when('NODE_ENV', {
+          is: 'production',
+          then: Joi.string().pattern(/^sk_live_/).required(),
+          otherwise: Joi.string().pattern(/^sk_(test|live)_/).required(),
+        }),
         PAYSTACK_WEBHOOK_ALLOWED_IPS: Joi.string().allow('').optional(),
         PAYSTACK_CALLBACK_URL: Joi.string().uri().optional(),
+        // Optional observability + multi-instance realtime (inert when unset).
+        SENTRY_DSN: Joi.string().uri().optional(),
+        SENTRY_TRACES_SAMPLE_RATE: Joi.number().min(0).max(1).optional(),
+        REDIS_URL: Joi.string().optional(),
       }),
       validationOptions: {
         abortEarly: true,
@@ -66,19 +94,14 @@ import { HealthModule } from './health/health.module';
     ThrottlerModule.forRoot([
       {
         ttl: 60000,
-        limit: 500, // More generous global limit for dashboard/general traffic
+        limit: 500,
       },
     ]),
-    // Better Auth: auto-mounts the handler at /api/auth/* (outside the api/v1
-    // prefix), manages body parsing (rawBody for the Paystack webhook), and
-    // exposes AuthService globally. We disable its global guard and use our own
-    // BetterAuthGuard so the existing @Public()/@Roles()/@CurrentUser() stay intact.
     BetterAuthModule.forRootAsync({
       isGlobal: true,
       disableGlobalAuthGuard: true,
       inject: [PrismaService],
       useFactory: (prisma: PrismaService) => {
-        // /api/auth routes bypass Nest's ThrottlerGuard; rate-limit them here.
         const limiter = rateLimit({
           windowMs: 60_000,
           limit: 20,
@@ -94,6 +117,7 @@ import { HealthModule } from './health/health.module';
         };
       },
     }),
+    FirebaseModule,
     UsersModule,
     ParentsModule,
     SchoolsModule,
@@ -101,6 +125,7 @@ import { HealthModule } from './health/health.module';
     PaymentsModule,
     DocumentsModule,
     NotificationsModule,
+    DeviceTokensModule,
     CommonModule,
     PrismaModule,
     EnrollmentModule,

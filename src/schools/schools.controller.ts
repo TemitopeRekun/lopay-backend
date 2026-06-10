@@ -74,11 +74,22 @@ export class SchoolPaymentsController {
     return this.schoolPaymentsService.getClassFees(schoolId);
   }
 
-  /** ✅ Get School Bank Details for a specific school (Public/Parent access) */
-  @SkipThrottle()
+  /**
+   * Get a school's bank details. Sensitive — scoped server-side to the owning
+   * owner, a super admin, or a parent enrolled at that school (not throttle-skipped
+   * so enumeration is rate-limited).
+   */
   @Get('bank-details/:schoolId')
-  async getSchoolBankDetails(@Param('schoolId') schoolId: string) {
-    return this.schoolPaymentsService.getSchoolBankDetails(schoolId);
+  @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER, UserRole.SUPER_ADMIN)
+  async getSchoolBankDetails(
+    @Param('schoolId') schoolId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.schoolPaymentsService.getSchoolBankDetails(schoolId, {
+      userId: user.userId,
+      role: user.role,
+      schoolId: user.schoolId,
+    });
   }
 
   /** ✅ Update School Bank Details (School Owner Profile) */

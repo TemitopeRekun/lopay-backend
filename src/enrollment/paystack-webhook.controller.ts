@@ -47,6 +47,26 @@ export class PaystackWebhookController {
     @Req() req: Request,
     @Headers('x-paystack-signature') signature: string,
   ) {
+    // Defense-in-depth: if an allowlist is configured, only accept webhooks from
+    // Paystack's published IPs. The HMAC below remains the primary control.
+    const allowedIps = (process.env.PAYSTACK_WEBHOOK_ALLOWED_IPS ?? '')
+      .split(',')
+      .map((ip) => ip.trim())
+      .filter(Boolean);
+    if (allowedIps.length > 0) {
+      const fwd = req.headers['x-forwarded-for'];
+      const clientIp = (
+        (Array.isArray(fwd) ? fwd[0] : fwd)?.split(',')[0] ??
+        req.ip ??
+        req.socket?.remoteAddress ??
+        ''
+      ).trim();
+      if (!allowedIps.includes(clientIp)) {
+        this.logger.warn(`Rejected Paystack webhook from disallowed IP: ${clientIp}`);
+        throw new UnauthorizedException('Origin not allowed');
+      }
+    }
+
     const secret = process.env.PAYSTACK_SECRET_KEY ?? '';
     // The Better Auth module attaches the unparsed body to req.rawBody
     // (bodyParser.rawBody:true). Fall back to a re-stringified body just in case.
@@ -72,18 +92,9 @@ export class PaystackWebhookController {
       throw new BadRequestException('Invalid webhook payload');
     }
 
-    const reference: string | undefined = event?.data?.reference;
-    if (!reference) return { received: true };
-
-    // Process known events; everything else is acknowledged and ignored.
-    if (event.event === 'charge.success') {
-      const fees = typeof event.data.fees === 'number' ? event.data.fees : null;
-      await this.enrollment.reconcilePaystackPayment(reference, fees, null);
-    } else if (event.event === 'charge.failed') {
-      await this.enrollment.failPaystackPayment(reference);
-    }
-
-    return { received: true };
+    // Persist (replayable log + dedup) and dispatch idempotently. charge.success/
+    // failed reconcile the payment; disputes/refunds are logged + escalated.
+    return this.enrollment.processPaystackWebhookEvent(event);
   }
 
   /**

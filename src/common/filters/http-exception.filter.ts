@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { REQUEST_ID_HEADER } from '../middleware/request-id.middleware';
+import { captureException } from '../observability/sentry';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -43,6 +44,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         exception instanceof Error ? exception.stack : String(exception),
         requestId,
       );
+      // Report to Sentry when configured (no-op otherwise).
+      captureException(exception, {
+        method: request.method,
+        path: request.url,
+        requestId,
+      });
     }
 
     response.status(status).json({

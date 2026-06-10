@@ -62,7 +62,10 @@ export const ModelName = {
   Payment: 'Payment',
   ChildEnrollment: 'ChildEnrollment',
   PlatformSetting: 'PlatformSetting',
+  SchedulerLock: 'SchedulerLock',
+  WebhookEvent: 'WebhookEvent',
   Notification: 'Notification',
+  DeviceToken: 'DeviceToken',
   AuditLog: 'AuditLog'
 } as const
 
@@ -215,6 +218,7 @@ export const PaymentScalarFieldEnum = {
   paystackAccessCode: 'paystackAccessCode',
   amountCharged: 'amountCharged',
   paystackFee: 'paystackFee',
+  actualPaystackFee: 'actualPaystackFee',
   transactionCharge: 'transactionCharge'
 } as const
 
@@ -251,6 +255,29 @@ export const PlatformSettingScalarFieldEnum = {
 export type PlatformSettingScalarFieldEnum = (typeof PlatformSettingScalarFieldEnum)[keyof typeof PlatformSettingScalarFieldEnum]
 
 
+export const SchedulerLockScalarFieldEnum = {
+  name: 'name',
+  lockedAt: 'lockedAt'
+} as const
+
+export type SchedulerLockScalarFieldEnum = (typeof SchedulerLockScalarFieldEnum)[keyof typeof SchedulerLockScalarFieldEnum]
+
+
+export const WebhookEventScalarFieldEnum = {
+  id: 'id',
+  provider: 'provider',
+  eventType: 'eventType',
+  dedupeKey: 'dedupeKey',
+  reference: 'reference',
+  payload: 'payload',
+  processedAt: 'processedAt',
+  error: 'error',
+  createdAt: 'createdAt'
+} as const
+
+export type WebhookEventScalarFieldEnum = (typeof WebhookEventScalarFieldEnum)[keyof typeof WebhookEventScalarFieldEnum]
+
+
 export const NotificationScalarFieldEnum = {
   id: 'id',
   userId: 'userId',
@@ -262,6 +289,18 @@ export const NotificationScalarFieldEnum = {
 } as const
 
 export type NotificationScalarFieldEnum = (typeof NotificationScalarFieldEnum)[keyof typeof NotificationScalarFieldEnum]
+
+
+export const DeviceTokenScalarFieldEnum = {
+  id: 'id',
+  userId: 'userId',
+  token: 'token',
+  platform: 'platform',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type DeviceTokenScalarFieldEnum = (typeof DeviceTokenScalarFieldEnum)[keyof typeof DeviceTokenScalarFieldEnum]
 
 
 export const AuditLogScalarFieldEnum = {
@@ -288,6 +327,13 @@ export const SortOrder = {
 } as const
 
 export type SortOrder = (typeof SortOrder)[keyof typeof SortOrder]
+
+
+export const JsonNullValueInput = {
+  JsonNull: JsonNull
+} as const
+
+export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
 
 
 export const NullableJsonNullValueInput = {

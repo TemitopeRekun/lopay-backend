@@ -43,8 +43,27 @@ export interface ChangeTargets {
  * `school:{schoolId}`; super admins also join `admins`. Feature services emit
  * to these rooms via the public helpers below.
  */
+/**
+ * Resolve the Socket.IO CORS origin from the same CORS_ORIGINS allowlist as the
+ * HTTP layer (read at request time, so env is populated). In production with no
+ * allowlist configured, deny rather than reflect every origin.
+ */
+const socketCorsOrigin = (
+  origin: string | undefined,
+  cb: (err: Error | null, allow?: boolean) => void,
+) => {
+  const allowed = (process.env.CORS_ORIGINS ?? '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  if (allowed.length === 0) {
+    return cb(null, process.env.NODE_ENV !== 'production');
+  }
+  cb(null, !origin || allowed.includes(origin));
+};
+
 @WebSocketGateway({
-  cors: { origin: true, credentials: true },
+  cors: { origin: socketCorsOrigin, credentials: true },
 })
 export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(EventsGateway.name);

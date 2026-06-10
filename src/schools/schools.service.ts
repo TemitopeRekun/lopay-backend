@@ -1,6 +1,7 @@
 import {
   Injectable,
   BadRequestException,
+  ForbiddenException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
@@ -121,9 +122,34 @@ export class SchoolPaymentsService {
     });
   }
 
-  async getSchoolBankDetails(schoolId: string) {
-    const school = await this.prisma.school.findUnique({
-      where: { id: schoolId },
+  async getSchoolBankDetails(
+    schoolId: string,
+    user: { userId: string; role: UserRole; schoolId?: string | null },
+  ) {
+    // Bank account details are sensitive (fraud/redirection risk). Restrict to:
+    // the owning school owner, a super admin, or a parent who actually has an
+    // enrollment at this school — so they can't be mass-harvested by iterating
+    // schoolIds.
+    if (user.role === UserRole.SCHOOL_OWNER) {
+      if (user.schoolId !== schoolId) {
+        throw new ForbiddenException('You can only view your own school details');
+      }
+    } else if (user.role === UserRole.PARENT) {
+      const hasEnrollment = await this.prisma.childEnrollment.findFirst({
+        where: { schoolId, child: { parent: { userId: user.userId } } },
+        select: { id: true },
+      });
+      if (!hasEnrollment) {
+        throw new ForbiddenException(
+          'You can only view bank details for a school you are enrolled with',
+        );
+      }
+    } else if (user.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Not authorized to view bank details');
+    }
+
+    const school = await this.prisma.school.findFirst({
+      where: { id: schoolId, deletedAt: null },
       select: {
         bankName: true,
         accountName: true,
@@ -231,10 +257,12 @@ export class SchoolPaymentsService {
           _sum: { schoolAmount: true },
         }),
 
-        // 3. Pending Payments (Unconfirmed amounts parents claim to have paid)
+        // 3. Pending Payments — sum the SCHOOL's share, not the gross deposit.
+        // For first payments amountPaid includes the 2.5% platform fee, which is
+        // not owed to the school; schoolAmount is the school's actual share.
         this.prisma.payment.aggregate({
           where: { schoolId, isConfirmed: false },
-          _sum: { amountPaid: true },
+          _sum: { schoolAmount: true },
         }),
 
         // 4. Defaulted Amount (from defaulted enrollments)
@@ -246,7 +274,7 @@ export class SchoolPaymentsService {
 
     // DB stores kobo; return Naira for API consumers.
     const totalRevenue = Money.fromKobo(confirmedPayments._sum.schoolAmount || 0).toNaira();
-    const pendingRevenue = Money.fromKobo(pendingPayments._sum.amountPaid || 0).toNaira();
+    const pendingRevenue = Money.fromKobo(pendingPayments._sum.schoolAmount || 0).toNaira();
     const defaultedAmount = Money.fromKobo(
       enrollments.reduce((sum, e) => sum + e.remainingBalance, 0),
     ).toNaira();
@@ -481,8 +509,14 @@ export class SchoolPaymentsService {
   }
 
   async confirmPayment(paymentId: string, schoolId: string, actor: AuditActor) {
+    // Pre-fetch (tenant-scoped) for relations + a fast not-found path. The
+    // authoritative guard is the conditional updateMany inside the transaction.
     const payment = await this.prisma.withTenant(schoolId).payment.findFirst({
-      where: { id: paymentId, isConfirmed: false },
+      where: {
+        id: paymentId,
+        isConfirmed: false,
+        paymentType: PaymentType.INSTALLMENT, // first payments settle via their own flow
+      },
       include: {
         enrollment: {
           include: { school: true, child: { include: { parent: true } } },
@@ -495,31 +529,51 @@ export class SchoolPaymentsService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. Confirm Payment
-      const updatedPayment = await tx.payment.update({
-        where: { id: paymentId },
+      // 1. Confirm the payment with a guarded conditional write. If a concurrent
+      // request already confirmed it, count === 0 and we abort — no double-credit.
+      const confirmed = await tx.payment.updateMany({
+        where: {
+          id: paymentId,
+          schoolId,
+          isConfirmed: false,
+          paymentType: PaymentType.INSTALLMENT,
+        },
         data: {
           isConfirmed: true,
           status: PaymentTransactionStatus.SUCCESS,
           paymentDate: new Date(),
         },
       });
+      if (confirmed.count === 0) {
+        throw new BadRequestException('Payment not found or already confirmed');
+      }
 
-      // 2. Update Enrollment Balance
-      // Note: remainingBalance tracks what is LEFT to pay.
-      const currentBalance = payment.enrollment.remainingBalance;
-      const newBalance = currentBalance - payment.amountPaid;
-      // If newBalance is effectively 0 (or less), mark completed.
-      const isCompleted = newBalance <= 0;
-
-      await tx.childEnrollment.update({
+      // 2. Apply the balance change with an ATOMIC decrement (no read-modify-write),
+      // so concurrent confirmations can't lose an update. Read the pre-state only
+      // for the audit "before" value — the decrement itself is race-safe.
+      const before = await tx.childEnrollment.findUniqueOrThrow({
         where: { id: payment.enrollmentId },
-        data: {
-          remainingBalance: Math.max(0, newBalance),
-          paymentStatus: isCompleted
-            ? PaymentStatus.COMPLETED
-            : payment.enrollment.paymentStatus,
-        },
+      });
+      const decremented = await tx.childEnrollment.update({
+        where: { id: payment.enrollmentId },
+        data: { remainingBalance: { decrement: payment.amountPaid } },
+      });
+
+      const isCompleted = decremented.remainingBalance <= 0;
+      const newBalance = Math.max(0, decremented.remainingBalance);
+      if (isCompleted) {
+        // Clamp the (possibly negative) balance to 0 and mark completed.
+        await tx.childEnrollment.update({
+          where: { id: payment.enrollmentId },
+          data: {
+            remainingBalance: 0,
+            paymentStatus: PaymentStatus.COMPLETED,
+          },
+        });
+      }
+
+      const updatedPayment = await tx.payment.findUniqueOrThrow({
+        where: { id: paymentId },
       });
 
       // 2b. Audit (atomic with the confirmation)
@@ -533,15 +587,15 @@ export class SchoolPaymentsService {
           before: {
             status: payment.status,
             isConfirmed: payment.isConfirmed,
-            remainingBalance: currentBalance,
+            remainingBalance: before.remainingBalance,
           },
           after: {
             status: PaymentTransactionStatus.SUCCESS,
             isConfirmed: true,
-            remainingBalance: Math.max(0, newBalance),
+            remainingBalance: newBalance,
             enrollmentStatus: isCompleted
               ? PaymentStatus.COMPLETED
-              : payment.enrollment.paymentStatus,
+              : before.paymentStatus,
           },
           metadata: { amount: payment.amountPaid, isCompleted },
         },
@@ -563,7 +617,7 @@ export class SchoolPaymentsService {
 
       return {
         ...updatedPayment,
-        amount: updatedPayment.amountPaid,
+        amount: Money.fromKobo(updatedPayment.amountPaid).toNaira(),
         date: updatedPayment.paymentDate,
         type: updatedPayment.paymentType,
         studentName: payment.enrollment.child.fullName,
@@ -599,13 +653,20 @@ export class SchoolPaymentsService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. Update Payment Status
-      const updatedPayment = await tx.payment.update({
-        where: { id: paymentId },
+      // 1. Update Payment Status with a guarded conditional write (idempotent
+      // under concurrent reject/confirm — only an unprocessed payment flips).
+      const rejected = await tx.payment.updateMany({
+        where: { id: paymentId, schoolId, isConfirmed: false },
         data: {
           status: PaymentTransactionStatus.FAILED,
           // isConfirmed stays false
         },
+      });
+      if (rejected.count === 0) {
+        throw new BadRequestException('Payment not found or already processed');
+      }
+      const updatedPayment = await tx.payment.findUniqueOrThrow({
+        where: { id: paymentId },
       });
 
       // 2. If First Payment, Fail Enrollment
@@ -651,7 +712,7 @@ export class SchoolPaymentsService {
 
       return {
         ...updatedPayment,
-        amount: updatedPayment.amountPaid,
+        amount: Money.fromKobo(updatedPayment.amountPaid).toNaira(),
         date: updatedPayment.paymentDate,
         type: updatedPayment.paymentType,
         studentName: payment.enrollment.child.fullName,
@@ -758,31 +819,56 @@ export class SchoolPaymentsService {
       );
     }
 
-    const currentBalance = payment.enrollment.remainingBalance;
-    const restoredBalance = currentBalance + payment.amountPaid;
-    // A reversal re-opens a completed enrollment.
-    const reopened =
-      payment.enrollment.paymentStatus === PaymentStatus.COMPLETED;
-
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. Mark payment as reversed
-      const updatedPayment = await tx.payment.update({
-        where: { id: paymentId },
+      // 1. Mark payment as reversed with a guarded conditional write. Only a
+      // currently-confirmed SUCCESS installment flips — a concurrent double-tap
+      // (or replay) finds count === 0 and aborts, so the balance is restored
+      // exactly once (no 2× inflation / phantom debt).
+      const reversed = await tx.payment.updateMany({
+        where: {
+          id: paymentId,
+          schoolId,
+          isConfirmed: true,
+          status: PaymentTransactionStatus.SUCCESS,
+          paymentType: PaymentType.INSTALLMENT,
+        },
         data: {
           status: PaymentTransactionStatus.REVERSED,
           isConfirmed: false,
         },
       });
+      if (reversed.count === 0) {
+        throw new BadRequestException(
+          'No confirmed installment payment found to reverse',
+        );
+      }
 
-      // 2. Restore the enrollment balance
-      await tx.childEnrollment.update({
+      // 2. Restore the enrollment balance with an ATOMIC increment, clamped so a
+      // restored balance can never exceed the original total school fee.
+      const before = await tx.childEnrollment.findUniqueOrThrow({
+        where: { id: payment.enrollmentId },
+      });
+      const reopened = before.paymentStatus === PaymentStatus.COMPLETED;
+      const incremented = await tx.childEnrollment.update({
         where: { id: payment.enrollmentId },
         data: {
-          remainingBalance: restoredBalance,
+          remainingBalance: { increment: payment.amountPaid },
           paymentStatus: reopened
             ? PaymentStatus.ACTIVE
-            : payment.enrollment.paymentStatus,
+            : before.paymentStatus,
         },
+      });
+      let restoredBalance = incremented.remainingBalance;
+      if (restoredBalance > before.totalSchoolFee) {
+        restoredBalance = before.totalSchoolFee;
+        await tx.childEnrollment.update({
+          where: { id: payment.enrollmentId },
+          data: { remainingBalance: restoredBalance },
+        });
+      }
+
+      const updatedPayment = await tx.payment.findUniqueOrThrow({
+        where: { id: paymentId },
       });
 
       // 3. Audit (atomic with the reversal)
@@ -797,8 +883,8 @@ export class SchoolPaymentsService {
           before: {
             status: payment.status,
             isConfirmed: true,
-            remainingBalance: currentBalance,
-            enrollmentStatus: payment.enrollment.paymentStatus,
+            remainingBalance: before.remainingBalance,
+            enrollmentStatus: before.paymentStatus,
           },
           after: {
             status: PaymentTransactionStatus.REVERSED,
@@ -806,7 +892,7 @@ export class SchoolPaymentsService {
             remainingBalance: restoredBalance,
             enrollmentStatus: reopened
               ? PaymentStatus.ACTIVE
-              : payment.enrollment.paymentStatus,
+              : before.paymentStatus,
           },
           metadata: { amount: payment.amountPaid, reopened },
         },
@@ -822,7 +908,7 @@ export class SchoolPaymentsService {
 
       return {
         ...updatedPayment,
-        amount: updatedPayment.amountPaid,
+        amount: Money.fromKobo(updatedPayment.amountPaid).toNaira(),
         date: updatedPayment.paymentDate,
         type: updatedPayment.paymentType,
         studentName: payment.enrollment.child.fullName,

@@ -95,10 +95,30 @@ export type ChildEnrollment = Prisma.ChildEnrollmentModel
  */
 export type PlatformSetting = Prisma.PlatformSettingModel
 /**
+ * Model SchedulerLock
+ * Leader-election lock for scheduled jobs, so a job runs on only ONE instance
+ * when horizontally scaled (a row is claimed only if absent or its lock has
+ * expired). Connection-independent, unlike pg advisory locks over a pool.
+ */
+export type SchedulerLock = Prisma.SchedulerLockModel
+/**
+ * Model WebhookEvent
+ * Persistent, replayable log of inbound provider webhooks. Written BEFORE
+ * processing (signature already verified) so a transient processing failure
+ * past the provider's retry window can be replayed, and duplicate deliveries
+ * are deduped via `dedupeKey`.
+ */
+export type WebhookEvent = Prisma.WebhookEventModel
+/**
  * Model Notification
  * 
  */
 export type Notification = Prisma.NotificationModel
+/**
+ * Model DeviceToken
+ * Device tokens for Firebase Cloud Messaging push notifications.
+ */
+export type DeviceToken = Prisma.DeviceTokenModel
 /**
  * Model AuditLog
  * Append-only audit trail for money-state-changing actions. Rows are written

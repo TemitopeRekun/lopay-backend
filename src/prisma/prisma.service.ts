@@ -35,6 +35,30 @@ export class PrismaService
   }
 
   /**
+   * Run `fn` only if this instance can claim the named scheduler lock — i.e. the
+   * lock row is absent or its previous claim is older than `ttlMs`. Ensures a
+   * scheduled job executes on a single instance when horizontally scaled. The
+   * claim auto-expires after `ttlMs` (no explicit release needed).
+   */
+  async withLeaderLock(
+    name: string,
+    ttlMs: number,
+    fn: () => Promise<void>,
+  ): Promise<boolean> {
+    const cutoff = new Date(Date.now() - ttlMs);
+    // Insert the lock, or steal it only if the existing claim is stale.
+    // Returns 1 only when this instance acquired it.
+    const acquired = await this.$executeRaw`
+      INSERT INTO "SchedulerLock" ("name", "lockedAt")
+      VALUES (${name}, now())
+      ON CONFLICT ("name") DO UPDATE SET "lockedAt" = now()
+      WHERE "SchedulerLock"."lockedAt" < ${cutoff}`;
+    if (acquired !== 1) return false;
+    await fn();
+    return true;
+  }
+
+  /**
    * Returns a Prisma client scoped to a single school tenant.
    * Automatically injects `schoolId` into every multi-row read/mutation on
    * Payment, ChildEnrollment, and ClassFee so a forgotten where-clause cannot

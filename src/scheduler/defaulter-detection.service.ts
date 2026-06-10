@@ -23,6 +23,20 @@ export class DefaulterDetectionService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async detectDefaulters() {
+    // Leader lock: when scaled to N instances, only one runs the job — otherwise
+    // parents get duplicate "defaulted" notices and the audit log gets duplicate
+    // rows. The daily claim auto-expires well before the next run.
+    const ran = await this.prisma.withLeaderLock(
+      'defaulter-detection',
+      6 * 60 * 60 * 1000,
+      () => this.runDetection(),
+    );
+    if (!ran) {
+      this.logger.log('Defaulter detection skipped (lock held by another instance)');
+    }
+  }
+
+  private async runDetection() {
     const now = new Date();
     this.logger.log(`Running defaulter detection at ${now.toISOString()}`);
 
@@ -43,15 +57,23 @@ export class DefaulterDetectionService {
       return;
     }
 
-    this.logger.warn(`Marking ${overdue.length} enrollment(s) as DEFAULTED`);
+    this.logger.warn(`Marking up to ${overdue.length} enrollment(s) as DEFAULTED`);
 
     await Promise.all(
       overdue.map(async (enrollment) => {
-        await this.prisma.$transaction(async (tx) => {
-          await tx.childEnrollment.update({
-            where: { id: enrollment.id },
+        const flipped = await this.prisma.$transaction(async (tx) => {
+          // Per-row guard: only flip a still-ACTIVE+overdue enrollment, so a row
+          // that was paid/completed since the snapshot isn't wrongly defaulted
+          // and isn't notified twice.
+          const res = await tx.childEnrollment.updateMany({
+            where: {
+              id: enrollment.id,
+              paymentStatus: PaymentStatus.ACTIVE,
+              remainingBalance: { gt: 0 },
+            },
             data: { paymentStatus: PaymentStatus.DEFAULTED },
           });
+          if (res.count === 0) return false;
 
           // Audit (atomic). actor is null — this is a system action.
           await this.audit.record(
@@ -79,7 +101,10 @@ export class DefaulterDetectionService {
               link: '/history',
             },
           });
+          return true;
         });
+
+        if (!flipped) return;
 
         this.events.emitEnrollmentsChanged({
           parentUserId: enrollment.child.parent.userId,

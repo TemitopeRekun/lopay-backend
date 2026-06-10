@@ -12,5 +12,6 @@ import { PaystackWebhookController } from './paystack-webhook.controller';
   imports: [PaymentsModule, NotificationsModule, EventsModule, AuditModule, PaystackModule],
   providers: [EnrollmentService],
   controllers: [EnrollmentController, PaystackWebhookController],
+  exports: [EnrollmentService],
 })
 export class EnrollmentModule {}

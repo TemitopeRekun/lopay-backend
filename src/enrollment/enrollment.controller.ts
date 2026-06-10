@@ -50,10 +50,14 @@ export class EnrollmentController {
   @Post('pay-installment')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
   @Throttle({ default: { ttl: 60000, limit: 10 } })
-  async payInstallment(@Body() dto: CreateInstallmentDto) {
+  async payInstallment(
+    @Body() dto: CreateInstallmentDto,
+    @CurrentUser() user: any,
+  ) {
     return this.enrollmentService.submitInstallmentPayment(
       dto.enrollmentId,
       dto.amountPaid,
+      { userId: user.userId, role: user.role, schoolId: user.schoolId },
       dto.receiptUrl,
       dto.idempotencyKey,
     );

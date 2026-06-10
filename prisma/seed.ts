@@ -13,6 +13,13 @@ const prisma = new PrismaClient({ adapter });
 const auth = createAuth(prisma as unknown as PrismaClient);
 
 async function main() {
+  // Never seed a guessable default credential in production. Require an explicit
+  // strong password there; only fall back to a dev default outside production.
+  if (process.env.NODE_ENV === 'production' && !process.env.ADMIN_PASSWORD) {
+    throw new Error(
+      'ADMIN_PASSWORD must be set in production before seeding the super admin.',
+    );
+  }
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@lopay.com';
   const adminPassword = process.env.ADMIN_PASSWORD || 'admin12345';
 
