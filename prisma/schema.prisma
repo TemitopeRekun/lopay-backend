@@ -209,6 +209,12 @@ model Child {
   enrollment ChildEnrollment?
 
   createdAt  DateTime @default(now())
+
+  // A parent cannot have two children with the same name in the same class —
+  // this is always a duplicate (double-tap / retry), never a real second child.
+  // Guards against duplicate Child rows races; child creation reuses the existing
+  // row on conflict (see EnrollmentService.resolveEnrollmentTarget).
+  @@unique([parentId, fullName, className])
 }
 
 

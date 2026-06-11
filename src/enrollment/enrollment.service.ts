@@ -71,9 +71,16 @@ export class EnrollmentService {
   private async resolveEnrollmentTarget(
     dto: CreateEnrollmentDto,
     userId: string,
-  ): Promise<{ parent: { id: string }; childId: string; retryEnrollmentId: string | null }> {
+    allowPendingRetry = false,
+  ): Promise<{
+    parent: { id: string };
+    childId: string;
+    retryEnrollmentId: string | null;
+    pendingEnrollmentId: string | null;
+  }> {
     let childId = dto.childId;
     let retryEnrollmentId: string | null = null;
+    let pendingEnrollmentId: string | null = null;
 
     let parent = await this.prisma.parent.findUnique({ where: { userId } });
     if (!parent) {
@@ -102,50 +109,75 @@ export class EnrollmentService {
         throw new BadRequestException('Child not found or does not belong to user');
       }
     } else if (dto.childName) {
-      const failedEnrollment = await this.prisma.childEnrollment.findFirst({
-        where: {
-          paymentStatus: PaymentStatus.FAILED,
-          schoolId: dto.schoolId,
-          child: {
-            parentId: parent.id,
-            fullName: dto.childName,
-            className: dto.className,
-          },
-        },
+      // Reuse an existing child with the same identity rather than creating a
+      // duplicate. The unique constraint on (parentId, fullName, className) makes
+      // this race-safe: if a concurrent request creates the row first, we catch
+      // the conflict and re-fetch it. Retry/conflict on the child's enrollment is
+      // resolved uniformly by the existing-enrollment block below (from childId).
+      const childIdentity = {
+        parentId: parent.id,
+        fullName: dto.childName,
+        className: dto.className,
+      };
+      const existingChild = await this.prisma.child.findFirst({
+        where: childIdentity,
       });
-      if (failedEnrollment) {
-        this.logger.log(`Retrying failed enrollment: ${failedEnrollment.id}`);
-        childId = failedEnrollment.childId;
-        retryEnrollmentId = failedEnrollment.id;
+      if (existingChild) {
+        childId = existingChild.id;
       } else {
-        const newChild = await this.prisma.child.create({
-          data: {
-            fullName: dto.childName,
-            parentId: parent.id,
-            className: dto.className,
-          },
-        });
-        childId = newChild.id;
+        try {
+          const newChild = await this.prisma.child.create({ data: childIdentity });
+          childId = newChild.id;
+        } catch (error) {
+          if (
+            error instanceof Prisma.PrismaClientKnownRequestError &&
+            error.code === 'P2002'
+          ) {
+            const raced = await this.prisma.child.findFirst({
+              where: childIdentity,
+            });
+            if (!raced) throw error;
+            childId = raced.id;
+          } else {
+            throw error;
+          }
+        }
       }
     } else {
       throw new BadRequestException('Either childId or childName must be provided');
     }
 
-    // Only FAILED enrollments may be retried; everything else is a conflict.
+    // FAILED enrollments may always be retried. PENDING enrollments (an abandoned
+    // or in-flight first payment) may be retried only when the caller opts in via
+    // `allowPendingRetry` — and the caller must first resolve the in-flight
+    // Paystack transaction so we never double-charge. ACTIVE/COMPLETED are real
+    // conflicts.
     const existingEnrollment = await this.prisma.childEnrollment.findUnique({
       where: { childId },
     });
     if (existingEnrollment) {
-      if (existingEnrollment.paymentStatus !== PaymentStatus.FAILED) {
+      const sameSchool = existingEnrollment.schoolId === dto.schoolId;
+      const status = existingEnrollment.paymentStatus;
+
+      if (status === PaymentStatus.FAILED) {
+        if (!sameSchool) {
+          throw new BadRequestException(
+            'Failed enrollment belongs to a different school',
+          );
+        }
+        retryEnrollmentId = existingEnrollment.id;
+      } else if (
+        allowPendingRetry &&
+        status === PaymentStatus.PENDING &&
+        sameSchool
+      ) {
+        pendingEnrollmentId = existingEnrollment.id;
+      } else {
         throw new BadRequestException('Enrollment already exists for this child');
       }
-      if (existingEnrollment.schoolId !== dto.schoolId) {
-        throw new BadRequestException('Failed enrollment belongs to a different school');
-      }
-      retryEnrollmentId = existingEnrollment.id;
     }
 
-    return { parent, childId, retryEnrollmentId };
+    return { parent, childId, retryEnrollmentId, pendingEnrollmentId };
   }
 
   /** Look up an already-recorded payment by its client idempotency key. */
@@ -185,6 +217,80 @@ export class EnrollmentService {
       childName: payment.enrollment?.child?.fullName,
       studentName: payment.enrollment?.child?.fullName,
     };
+  }
+
+  /** Replay shape for an existing in-flight (or just-resolved) first payment. */
+  private buildResumeResponse(payment: {
+    paystackReference: string | null;
+    paystackAccessCode: string | null;
+    amountCharged: number | null;
+    status: PaymentTransactionStatus;
+  }) {
+    return {
+      idempotent: true as const,
+      reference: payment.paystackReference,
+      accessCode: payment.paystackAccessCode,
+      amountCharged: payment.amountCharged
+        ? Money.fromKobo(payment.amountCharged).toNaira()
+        : null,
+      status: payment.status,
+    };
+  }
+
+  /**
+   * Resolve an abandoned/in-flight first payment on a PENDING enrollment so the
+   * parent is never blocked from retrying. Verifies the latest first payment with
+   * Paystack:
+   *   - failed/abandoned/no-row → `{ resolved: false }`: free the enrollment for a
+   *     fresh charge.
+   *   - success/still-pending/Paystack-unreachable → `{ resolved: true, response }`:
+   *     resume the SAME single-use reference (cannot double-charge). A success is
+   *     also reconciled immediately so the enrollment activates.
+   */
+  private async resolvePendingFirstPayment(
+    enrollmentId: string,
+  ): Promise<
+    | { resolved: true; response: ReturnType<EnrollmentService['buildResumeResponse']> }
+    | { resolved: false }
+  > {
+    const payment = await this.prisma.payment.findFirst({
+      where: {
+        enrollmentId,
+        paymentType: PaymentType.FIRST_PAYMENT,
+        status: PaymentTransactionStatus.PENDING,
+      },
+      orderBy: { paymentDate: 'desc' },
+    });
+
+    // No in-flight charge to worry about → safe to create a fresh one.
+    if (!payment?.paystackReference) {
+      return { resolved: false };
+    }
+
+    let verified: Awaited<ReturnType<PaystackService['verifyTransaction']>>;
+    try {
+      verified = await this.paystack.verifyTransaction(payment.paystackReference);
+    } catch (err) {
+      // Can't reach Paystack — never risk a double charge. Resume the same txn.
+      this.logger.warn(
+        `Pending first-payment verify failed for ${payment.paystackReference}: ${String(err)}`,
+      );
+      return { resolved: true, response: this.buildResumeResponse(payment) };
+    }
+
+    if (verified.status === 'failed' || verified.status === 'abandoned') {
+      await this.failPaystackPayment(payment.paystackReference);
+      return { resolved: false };
+    }
+
+    if (verified.status === 'success') {
+      await this.reconcilePaystackPayment(
+        payment.paystackReference,
+        verified.fees,
+        null,
+      );
+    }
+    return { resolved: true, response: this.buildResumeResponse(payment) };
   }
 
   /** Shape an installment payment row into the enriched API response (naira). */
@@ -527,12 +633,10 @@ export class EnrollmentService {
       }
     }
 
-    const { childId, retryEnrollmentId } = await this.resolveEnrollmentTarget(
-      dto,
-      userId,
-    );
-
-    // Fee snapshot (kobo) + parent's chosen deposit (kobo).
+    // Validate the school + fee config BEFORE touching the Parent/Child graph.
+    // resolveEnrollmentTarget lazily creates Parent/Child rows, so running these
+    // guards first prevents an orphaned Child when the school can't accept online
+    // payments or has no active fee for the class.
     const classFee = await this.prisma.classFee.findFirst({
       where: { schoolId: dto.schoolId, className: dto.className, isActive: true },
     });
@@ -550,6 +654,19 @@ export class EnrollmentService {
       throw new BadRequestException(
         'This school is not set up to accept online payments yet.',
       );
+    }
+
+    const { childId, retryEnrollmentId, pendingEnrollmentId } =
+      await this.resolveEnrollmentTarget(dto, userId, true);
+
+    // A child with a PENDING enrollment has an abandoned/in-flight first payment.
+    // Resolve it before creating a new charge: resume the existing transaction if
+    // it's still live (or already paid), otherwise free the enrollment to retry.
+    let reuseEnrollmentId = retryEnrollmentId;
+    if (pendingEnrollmentId) {
+      const pending = await this.resolvePendingFirstPayment(pendingEnrollmentId);
+      if (pending.resolved) return pending.response;
+      reuseEnrollmentId = pendingEnrollmentId;
     }
 
     // Validates min/max bounds and computes the platform/school split.
@@ -588,9 +705,9 @@ export class EnrollmentService {
           termEndDate: dto.termEndDate,
         };
 
-        const enrollment = retryEnrollmentId
+        const enrollment = reuseEnrollmentId
           ? await tx.childEnrollment.update({
-              where: { id: retryEnrollmentId },
+              where: { id: reuseEnrollmentId },
               data: enrollmentData,
             })
           : await tx.childEnrollment.create({
@@ -1011,36 +1128,68 @@ export class EnrollmentService {
 
     // Feature 2 — flexible amounts: the parent may pay any amount up to the
     // outstanding balance (a larger payment clears the balance faster and shrinks
-    // the next recomputed installment). Reject non-positive and over-payment.
+    // the next recomputed installment). Reject non-positive amounts up front.
     if (amountPaidKobo <= 0) {
       throw new BadRequestException('Payment amount must be greater than zero');
     }
-    if (amountPaidKobo > enrollment.remainingBalance) {
-      throw new BadRequestException(
-        `Payment exceeds the outstanding balance of ${Money.fromKobo(
-          enrollment.remainingBalance,
-        ).formatNaira()}`,
-      );
-    }
 
-    // Create Payment
+    // Create Payment.
+    //
+    // The overpayment guard must be race-safe. `remainingBalance` is only
+    // decremented when a school owner CONFIRMS a payment, so two concurrent
+    // submissions that each read the same balance could both pass a naive check
+    // and, once both are confirmed, overshoot the balance — the parent overpays
+    // with no automatic refund. To prevent this we, inside one transaction:
+    //   1. lock the enrollment row (`FOR UPDATE`) so concurrent submissions for
+    //      the same enrollment serialize instead of racing, and
+    //   2. reserve already-submitted-but-unconfirmed installments against the
+    //      balance, so the *available* balance reflects in-flight payments too.
     let payment;
     try {
-      payment = await this.prisma.payment.create({
-        data: {
-          enrollmentId,
-          schoolId: enrollment.schoolId,
-          amountPaid: amountPaidKobo,    // kobo
-          platformAmount: 0,
-          schoolAmount: amountPaidKobo,   // kobo
-          receiver: PaymentReceiver.SCHOOL,
-          paymentType: PaymentType.INSTALLMENT,
-          status: PaymentTransactionStatus.PENDING,
-          isConfirmed: false,
-          receiptUrl,
-          idempotencyKey: idempotencyKey ?? null,
-          paymentDate: new Date(),
-        },
+      payment = await this.prisma.$transaction(async (tx) => {
+        const locked = await tx.$queryRaw<{ remainingBalance: number }[]>`
+          SELECT "remainingBalance" FROM "ChildEnrollment"
+          WHERE "id" = ${enrollmentId} FOR UPDATE`;
+        if (locked.length === 0) {
+          throw new NotFoundException('Enrollment not found');
+        }
+
+        const reserved = await tx.payment.aggregate({
+          where: {
+            enrollmentId,
+            paymentType: PaymentType.INSTALLMENT,
+            status: PaymentTransactionStatus.PENDING,
+            isConfirmed: false,
+          },
+          _sum: { amountPaid: true },
+        });
+        const reservedKobo = reserved._sum.amountPaid ?? 0;
+        const availableKobo = locked[0].remainingBalance - reservedKobo;
+
+        if (amountPaidKobo > availableKobo) {
+          throw new BadRequestException(
+            `Payment exceeds the outstanding balance of ${Money.fromKobo(
+              Math.max(0, availableKobo),
+            ).formatNaira()}`,
+          );
+        }
+
+        return tx.payment.create({
+          data: {
+            enrollmentId,
+            schoolId: enrollment.schoolId,
+            amountPaid: amountPaidKobo,    // kobo
+            platformAmount: 0,
+            schoolAmount: amountPaidKobo,   // kobo
+            receiver: PaymentReceiver.SCHOOL,
+            paymentType: PaymentType.INSTALLMENT,
+            status: PaymentTransactionStatus.PENDING,
+            isConfirmed: false,
+            receiptUrl,
+            idempotencyKey: idempotencyKey ?? null,
+            paymentDate: new Date(),
+          },
+        });
       });
     } catch (error) {
       // Lost the race to a concurrent request with the same key — replay it.

@@ -94,8 +94,11 @@ export class PaymentService {
         type,
         frequencyLabel: label,
         numberOfPayments: count,
+        // Per-payment amount (display rounding); the final installment absorbs
+        // the remainder so the true total paid over the plan is exactly the
+        // remaining balance — not baseAmount × count.
         baseAmount: installmentNaira,
-        totalAmount: installmentNaira,
+        totalAmount: remainingBalance.toNaira(),
       };
     };
 
@@ -237,6 +240,8 @@ export class PaymentService {
     schoolId?: string,
     includeReceiptSignedUrls = false,
     receiptType: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT' = 'ALL',
+    page = 1,
+    limit = 100,
   ) {
     // Default-deny: this endpoint only serves a parent's own payments or a
     // school owner's tenant. Any other role (incl. an unexpected/undefined role)
@@ -258,6 +263,12 @@ export class PaymentService {
       );
     }
 
+    // Bound the query so a large history can never load the whole table in one
+    // request. Defaults serve a parent's full realistic history in one page; a
+    // client can page via ?page=&limit= for larger (school-owner) result sets.
+    const take = Math.min(Math.max(Math.trunc(limit) || 1, 1), 200);
+    const skip = (Math.max(Math.trunc(page) || 1, 1) - 1) * take;
+
     const payments = await this.prisma.payment.findMany({
       where: whereClause,
       include: {
@@ -269,6 +280,8 @@ export class PaymentService {
         },
       },
       orderBy: { paymentDate: 'desc' },
+      take,
+      skip,
     });
 
     // DB stores kobo; API consumers expect naira. The frontend reads

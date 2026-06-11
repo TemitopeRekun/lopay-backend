@@ -14,6 +14,8 @@ export class TransactionsController {
     @CurrentUser() user: any,
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
     @Query('receiptType') receiptType?: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT',
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
     const include = includeReceiptSignedUrls === 'true';
     return this.paymentService.getHistory(
@@ -22,6 +24,8 @@ export class TransactionsController {
       user.schoolId,
       include,
       receiptType ?? 'ALL',
+      page ? Number(page) : undefined,
+      limit ? Number(limit) : undefined,
     );
   }
 }

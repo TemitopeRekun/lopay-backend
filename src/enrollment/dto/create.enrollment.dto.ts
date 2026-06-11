@@ -49,7 +49,7 @@ export class CreateEnrollmentDto {
   })
   @Type(() => Number)
   @IsNumber()
-  @Min(0)
+  @Min(1)
   firstPaymentPaid: number;
 
   @ApiProperty({ example: '2023-09-01T00:00:00Z' })

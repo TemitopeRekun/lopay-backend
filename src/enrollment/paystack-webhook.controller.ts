@@ -8,6 +8,7 @@ import {
   HttpCode,
   UnauthorizedException,
   BadRequestException,
+  InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
@@ -68,12 +69,29 @@ export class PaystackWebhookController {
     }
 
     const secret = process.env.PAYSTACK_SECRET_KEY ?? '';
-    // The Better Auth module attaches the unparsed body to req.rawBody
-    // (bodyParser.rawBody:true). Fall back to a re-stringified body just in case.
+    if (!secret) {
+      // Misconfiguration, not an attacker — fail loudly so it's diagnosable.
+      this.logger.error(
+        'PAYSTACK_SECRET_KEY is not set — cannot verify webhook signature.',
+      );
+      throw new InternalServerErrorException('Webhook verification unavailable');
+    }
+
+    // The signature is an HMAC over the EXACT raw bytes Paystack sent, which the
+    // Better Auth module attaches to req.rawBody (bodyParser.rawBody:true). We must
+    // NOT fall back to re-stringifying req.body: JSON.stringify is not byte-for-byte
+    // identical to the original payload (key order, whitespace, unicode escaping),
+    // so its HMAC would silently mismatch and reject EVERY legitimate webhook as a
+    // "bad signature". A missing rawBody is a server/body-parser misconfiguration,
+    // so surface it explicitly instead of masquerading as an auth failure.
     const rawBody = (req as unknown as { rawBody?: Buffer }).rawBody;
-    const raw: Buffer = Buffer.isBuffer(rawBody)
-      ? rawBody
-      : Buffer.from(JSON.stringify(req.body ?? {}));
+    if (!Buffer.isBuffer(rawBody)) {
+      this.logger.error(
+        'Paystack webhook raw body unavailable — check the raw-body parser config in main.ts.',
+      );
+      throw new InternalServerErrorException('Webhook body unavailable');
+    }
+    const raw: Buffer = rawBody;
 
     const expected = createHmac('sha512', secret).update(raw).digest('hex');
     const provided = signature ?? '';

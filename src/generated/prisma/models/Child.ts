@@ -198,6 +198,7 @@ export type ChildOrderByWithRelationInput = {
 
 export type ChildWhereUniqueInput = Prisma.AtLeast<{
   id?: string
+  parentId_fullName_className?: Prisma.ChildParentIdFullNameClassNameCompoundUniqueInput
   AND?: Prisma.ChildWhereInput | Prisma.ChildWhereInput[]
   OR?: Prisma.ChildWhereInput[]
   NOT?: Prisma.ChildWhereInput | Prisma.ChildWhereInput[]
@@ -207,7 +208,7 @@ export type ChildWhereUniqueInput = Prisma.AtLeast<{
   createdAt?: Prisma.DateTimeFilter<"Child"> | Date | string
   parent?: Prisma.XOR<Prisma.ParentScalarRelationFilter, Prisma.ParentWhereInput>
   enrollment?: Prisma.XOR<Prisma.ChildEnrollmentNullableScalarRelationFilter, Prisma.ChildEnrollmentWhereInput> | null
-}, "id">
+}, "id" | "parentId_fullName_className">
 
 export type ChildOrderByWithAggregationInput = {
   id?: Prisma.SortOrder
@@ -298,6 +299,12 @@ export type ChildListRelationFilter = {
 
 export type ChildOrderByRelationAggregateInput = {
   _count?: Prisma.SortOrder
+}
+
+export type ChildParentIdFullNameClassNameCompoundUniqueInput = {
+  parentId: string
+  fullName: string
+  className: string
 }
 
 export type ChildCountOrderByAggregateInput = {

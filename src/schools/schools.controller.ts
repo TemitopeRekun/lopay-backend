@@ -67,9 +67,15 @@ export class SchoolPaymentsController {
     );
   }
 
-  /** ✅ Get Class Fees for a specific school (Public/Parent access) */
+  /**
+   * Get Class Fees for a specific school. Parents need this to pick a class fee
+   * before enrolling, so it is open to every authenticated role (class fees are
+   * non-sensitive published prices). Roles are listed explicitly rather than left
+   * implicit so the access decision is documented and future-proof.
+   */
   @SkipThrottle()
   @Get('fees/:schoolId')
+  @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER, UserRole.SUPER_ADMIN)
   async getClassFeesForSchool(@Param('schoolId') schoolId: string) {
     return this.schoolPaymentsService.getClassFees(schoolId);
   }
