@@ -20,9 +20,13 @@ export class Money {
     return new Money(Math.round(naira * 100));
   }
 
-  /** From a stored kobo integer (e.g. DB column). */
+  /**
+   * From a stored kobo integer (e.g. a DB Int column). Kobo are always whole;
+   * the constructor throws on a non-integer so an accidental float surfaces as a
+   * bug at its origin rather than being silently rounded away.
+   */
   static fromKobo(kobo: number): Money {
-    return new Money(Math.round(kobo)); // Math.round handles any accidental float
+    return new Money(kobo);
   }
 
   toKobo(): number {
