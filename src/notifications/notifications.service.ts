@@ -61,6 +61,15 @@ export class NotificationsService {
     });
   }
 
+  /** Mark every unread notification for a user as read in one query. */
+  async markAllAsRead(userId: string) {
+    const result = await this.prisma.notification.updateMany({
+      where: { userId, isRead: false },
+      data: { isRead: true },
+    });
+    return { updated: result.count };
+  }
+
   private async sendPushNotification(
     userId: string,
     title: string,
@@ -77,12 +86,19 @@ export class NotificationsService {
         data: link ? { link } : undefined,
       });
 
+      // FCM error codes that mean the token is permanently invalid and should be
+      // pruned (vs. transient errors like 'messaging/internal-error' or quota,
+      // which we keep and retry on the next send).
+      const PERMANENT_TOKEN_ERRORS = new Set([
+        'messaging/registration-token-not-registered',
+        'messaging/invalid-registration-token',
+        'messaging/invalid-argument',
+      ]);
+
       const invalidTokens: string[] = [];
       response.responses.forEach((resp, idx) => {
-        if (
-          !resp.success &&
-          resp.error?.code === 'messaging/registration-token-not-registered'
-        ) {
+        const code = resp.error?.code;
+        if (!resp.success && code && PERMANENT_TOKEN_ERRORS.has(code)) {
           invalidTokens.push(tokens[idx]);
         }
       });
