@@ -1,7 +1,17 @@
-import { Controller, Get, Body, Param, Delete, Put } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Body,
+  Param,
+  Delete,
+  Put,
+  Patch,
+} from '@nestjs/common';
 import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update.user.dto';
+import { UpdateProfileDto } from './dto/update.profile.dto';
 import { Roles } from '../auth/roles.decorator';
+import { CurrentUser } from '../common/decorators/user.decorator';
 import { UserRole } from '../generated/prisma/client';
 
 // Auth + roles enforced globally (BetterAuthGuard + RolesGuard).
@@ -9,12 +19,38 @@ import { UserRole } from '../generated/prisma/client';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  // ─── Self-service profile (any authenticated user, scoped to themselves) ───
+  // Declared before the parameterised ':id' routes so 'me' is never captured as
+  // an :id.
+  @Get('me')
+  getMe(@CurrentUser('userId') userId: string) {
+    return this.usersService.findOne(userId);
+  }
+
+  @Patch('me')
+  updateMe(
+    @CurrentUser('userId') userId: string,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.usersService.updateProfile(userId, dto);
+  }
+
+  // ─── Admin user management (SUPER_ADMIN only) ──────────────────────────────
   @Get()
   @Roles(UserRole.SUPER_ADMIN)
   findAll() {
     return this.usersService.findAll();
   }
 
+  @Get(':id')
+  @Roles(UserRole.SUPER_ADMIN)
+  findOne(@Param('id') id: string) {
+    return this.usersService.findOne(id);
+  }
+
+  // PATCH is the canonical verb (partial update) and matches the client; PUT is
+  // kept as an alias for back-compat and removed in a later milestone.
+  @Patch(':id')
   @Put(':id')
   @Roles(UserRole.SUPER_ADMIN)
   update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {

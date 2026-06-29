@@ -45,6 +45,24 @@ export function createAuth(prisma: PrismaClient) {
       minPasswordLength: 8,
     },
 
+    // Cross-origin cookie session support for the web SPA (M2 dual-path "cookie"
+    // mode). The SPA is served from a different origin than the API, so the
+    // session cookie must be SameSite=None; Secure to be sent on API/socket
+    // requests; httpOnly keeps it out of JS (XSS-safe). Only applied in
+    // production — local dev is same-site over http where the Lax default works
+    // and a Secure cookie would be dropped. The bearer path ignores cookies, so
+    // this is inert for native/bearer clients.
+    advanced:
+      process.env.NODE_ENV === 'production'
+        ? {
+            defaultCookieAttributes: {
+              sameSite: 'none',
+              secure: true,
+              httpOnly: true,
+            },
+          }
+        : undefined,
+
     socialProviders: {
       google: {
         clientId: [

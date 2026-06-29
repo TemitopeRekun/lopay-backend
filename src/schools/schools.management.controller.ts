@@ -23,7 +23,8 @@ export class SchoolsManagementController {
   @Public()
   @Get()
   findAll(@Query('search') search: string) {
-    return this.schoolsService.getAllSchools(search);
+    // Public directory: id + name only (no PII). See getPublicSchools.
+    return this.schoolsService.getPublicSchools(search);
   }
 
   @Post()

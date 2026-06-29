@@ -15,8 +15,10 @@ export class CreateSchoolDto {
   @IsNotEmpty()
   ownerEmail: string;
 
+  // Must match Better Auth's minPasswordLength (8); a shorter value passes DTO
+  // validation but is then rejected by Better Auth on owner account creation.
   @IsString()
-  @MinLength(6)
+  @MinLength(8)
   ownerPassword: string;
 
   @IsString()
