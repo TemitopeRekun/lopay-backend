@@ -1,0 +1,68 @@
+# Local infrastructure for Lopay backend development & testing.
+#
+# Services here are the *backing infra* the backend talks to locally:
+#   - postgres : the primary database (drop-in for the old ad-hoc `lopay-db`)
+#   - redis    : optional Socket.IO multi-instance adapter backend (REDIS_URL)
+#
+# The backend app itself is intentionally NOT containerised here — it runs on
+# the host via `npm run start:dev` because it needs developer-held external
+# secrets (Firebase Admin, Supabase) and benefits from host hot-reload.
+# See docs/infrastructure.md for the full rationale and usage.
+#
+# Quick start:
+#   docker compose up -d
+#   npm run migrate:deploy && npx prisma db seed
+#
+# Credentials below are throwaway LOCAL-ONLY values (matching .env / LOCAL_DEV.md).
+# Never reuse them anywhere real.
+
+name: lopay
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lopay-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lopay
+      POSTGRES_PASSWORD: lopay
+      POSTGRES_DB: lopaydb
+    ports:
+      # host:container — 5434 keeps clear of any local Postgres on 5432/5433/5435.
+      # Matches DATABASE_URL in .env: postgresql://lopay:lopay@localhost:5434/lopaydb
+      - "5434:5432"
+    volumes:
+      - lopay-pgdata:/var/lib/postgresql/data
+      # Runs ONLY on first init (empty data dir): also creates `lopay_test`
+      # so an isolated e2e database is available without touching dev data.
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lopay -d lopaydb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: lopay-redis
+    restart: unless-stopped
+    # Optional infra: the backend only attaches the Redis Socket.IO adapter when
+    # REDIS_URL is set (src/events/redis-io.adapter.ts). To use it locally, add
+    #   REDIS_URL=redis://localhost:6379
+    # to lopay-backend/.env. Without it the app falls back to the in-memory adapter.
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - lopay-redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  lopay-pgdata:
+  lopay-redisdata:
