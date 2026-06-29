@@ -20,6 +20,9 @@ import { CreateSchoolDto } from './dto/create.school.dto';
 import { DocumentsService } from '../documents/documents.service';
 import { AuditService, AuditActor } from '../audit/audit.service';
 import { Money } from '../common/money';
+import { PLATFORM_FEE_RATE } from '../common/fees';
+import { errorMessage } from '../common/errors';
+import { paymentCommonFields } from '../common/payment-dto';
 import { PaystackService } from '../paystack/paystack.service';
 
 @Injectable()
@@ -47,7 +50,10 @@ export class AdminService {
     accountNumber: string;
   }): Promise<{ active: boolean; subaccountCode?: string; warning?: string }> {
     if (!school.bankCode) {
-      return { active: false, warning: 'No bank code on file; cannot create Paystack subaccount.' };
+      return {
+        active: false,
+        warning: 'No bank code on file; cannot create Paystack subaccount.',
+      };
     }
     try {
       const subaccountCode = await this.paystack.createSubaccount({
@@ -58,13 +64,15 @@ export class AdminService {
       });
       await this.prisma.school.update({
         where: { id: school.id },
-        data: { paystackSubaccountCode: subaccountCode, paystackSubaccountActive: true },
+        data: {
+          paystackSubaccountCode: subaccountCode,
+          paystackSubaccountActive: true,
+        },
       });
       return { active: true, subaccountCode };
     } catch (error) {
       this.logger.error(
-        `Paystack subaccount creation failed for school ${school.id}`,
-        error as any,
+        `Paystack subaccount creation failed for school ${school.id}: ${errorMessage(error)}`,
       );
       return {
         active: false,
@@ -89,11 +97,15 @@ export class AdminService {
 
   /** Admin action: (re)create a Paystack subaccount for an existing school. */
   async createSubaccountForSchool(schoolId: string) {
-    const school = await this.prisma.school.findUnique({ where: { id: schoolId } });
+    const school = await this.prisma.school.findUnique({
+      where: { id: schoolId },
+    });
     if (!school) throw new NotFoundException('School not found');
     const result = await this.provisionSubaccount(school);
     if (!result.active) {
-      throw new BadRequestException(result.warning ?? 'Subaccount creation failed');
+      throw new BadRequestException(
+        result.warning ?? 'Subaccount creation failed',
+      );
     }
     return { subaccountCode: result.subaccountCode, active: true };
   }
@@ -118,7 +130,7 @@ export class AdminService {
           email: dto.ownerEmail,
           password: dto.ownerPassword,
           name: dto.ownerName,
-        } as any,
+        },
       });
       ownerUserId = signUp.user.id;
       // role is not a sign-up input (security); elevate to SCHOOL_OWNER server-side.
@@ -127,10 +139,11 @@ export class AdminService {
         data: { role: UserRole.SCHOOL_OWNER },
       });
     } catch (error: unknown) {
-      const err = error as { message?: string };
-      this.logger.error(`Owner account creation failed: ${err.message}`);
+      this.logger.error(
+        `Owner account creation failed: ${errorMessage(error)}`,
+      );
       throw new BadRequestException(
-        `Could not create owner account: ${err.message ?? 'unknown error'}`,
+        `Could not create owner account: ${errorMessage(error)}`,
       );
     }
 
@@ -168,7 +181,10 @@ export class AdminService {
     const subaccount = await this.provisionSubaccount(created.school);
 
     return {
-      school: { ...created.school, paystackSubaccountActive: subaccount.active },
+      school: {
+        ...created.school,
+        paystackSubaccountActive: subaccount.active,
+      },
       user: {
         id: created.user.id,
         email: created.user.email,
@@ -447,7 +463,9 @@ export class AdminService {
     });
 
     if (!rejectedOk) {
-      throw new NotFoundException('First payment not found or already processed');
+      throw new NotFoundException(
+        'First payment not found or already processed',
+      );
     }
 
     return {
@@ -593,16 +611,12 @@ export class AdminService {
 
         return {
           ...p,
-          amount: Money.fromKobo(p.amountPaid).toNaira(),
-          amountPaid: Money.fromKobo(p.amountPaid).toNaira(),
+          ...paymentCommonFields(p),
           date: p.paymentDate,
           type: p.paymentType,
-          studentName: p.enrollment?.child?.fullName,
           childName: p.enrollment?.child?.fullName,
-          schoolName: p.enrollment?.school?.name,
-          className: p.enrollment?.className,
           platformFeeAmount: Money.fromKobo(p.platformAmount).toNaira(),
-          platformFeePercentage: 0.025,
+          platformFeePercentage: PLATFORM_FEE_RATE,
           receiptSignedUrl,
         };
       }),
@@ -654,7 +668,9 @@ export class AdminService {
       activeStudents,
       pendingFirstPayments,
       defaultedStudents,
-      totalOutstandingBalance: Money.fromKobo(outstandingBalance._sum.remainingBalance ?? 0).toNaira(),
+      totalOutstandingBalance: Money.fromKobo(
+        outstandingBalance._sum.remainingBalance ?? 0,
+      ).toNaira(),
     };
   }
 

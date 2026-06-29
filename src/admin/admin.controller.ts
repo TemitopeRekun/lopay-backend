@@ -1,18 +1,9 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Param,
-  Body,
-  UseGuards,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Query } from '@nestjs/common';
 import { AdminService } from './admin.service';
-import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../generated/prisma/client';
 import { CreateSchoolDto } from './dto/create.school.dto';
-import { CurrentUser } from '../common/decorators/user.decorator';
+import { CurrentUser, AuthUser } from '../common/decorators/user.decorator';
 
 // Auth + roles are enforced globally (BetterAuthGuard + RolesGuard).
 @Controller('admin')
@@ -69,7 +60,9 @@ export class AdminController {
     @Query('limit') limit?: string,
   ) {
     return this.adminService.getSchoolStudents(
-      schoolId, className, search,
+      schoolId,
+      className,
+      search,
       page ? parseInt(page, 10) : 1,
       limit ? Math.min(parseInt(limit, 10), 100) : 50,
     );
@@ -79,7 +72,7 @@ export class AdminController {
   @Post('settle-first-payment/:paymentId')
   settleFirstPayment(
     @Param('paymentId') paymentId: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     return this.adminService.settleFirstPayment(paymentId, {
       userId: user.userId,
@@ -91,7 +84,7 @@ export class AdminController {
   @Post('reject-first-payment/:paymentId')
   rejectFirstPayment(
     @Param('paymentId') paymentId: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     return this.adminService.rejectFirstPayment(paymentId, {
       userId: user.userId,

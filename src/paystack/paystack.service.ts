@@ -4,9 +4,32 @@ import {
   BadGatewayException,
   InternalServerErrorException,
 } from '@nestjs/common';
+import { errorMessage } from '../common/errors';
 
 const PAYSTACK_BASE_URL = 'https://api.paystack.co';
 const REQUEST_TIMEOUT_MS = 15_000;
+
+/** The `data` field of a Paystack `transaction/verify` response (fields we read). */
+export interface PaystackVerifyData {
+  status: string;
+  reference: string;
+  amount: number;
+  fees?: number | null;
+  subaccount?: { subaccount_code?: string } | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+/** A verified inbound Paystack webhook payload (only the fields we dispatch on). */
+export interface PaystackWebhookEvent {
+  event: string;
+  data?: {
+    id?: number | string;
+    reference?: string;
+    fees?: number;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
 
 export interface PaystackBank {
   name: string;
@@ -44,7 +67,7 @@ export interface VerifyTransactionResult {
   fees: number | null; // kobo — authoritative Paystack fee
   subaccount?: { subaccount_code?: string } | null;
   metadata?: Record<string, unknown> | null;
-  raw: any;
+  raw: unknown;
 }
 
 /**
@@ -151,7 +174,7 @@ export class PaystackService {
 
   /** Verify a transaction by reference (used on return + as webhook fallback). */
   async verifyTransaction(reference: string): Promise<VerifyTransactionResult> {
-    const data = await this.request<any>(
+    const data = await this.request<PaystackVerifyData>(
       'GET',
       `/transaction/verify/${encodeURIComponent(reference)}`,
     );
@@ -224,7 +247,9 @@ export class PaystackService {
         clearTimeout(timer);
       }
     }
-    this.logger.error(`Paystack request failed: ${method} ${path}`, lastErr as any);
+    this.logger.error(
+      `Paystack request failed: ${method} ${path}: ${errorMessage(lastErr)}`,
+    );
     throw new InternalServerErrorException('Payment provider unavailable');
   }
 }

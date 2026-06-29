@@ -128,7 +128,12 @@ describe('Enrollment & installment integration (real DB)', () => {
       },
     });
     await prisma.classFee.create({
-      data: { schoolId, className: 'Basic 1', feeAmount: 100_000, isActive: true },
+      data: {
+        schoolId,
+        className: 'Basic 1',
+        feeAmount: 100_000,
+        isActive: true,
+      },
     });
     await prisma.parent.create({
       data: { id: parentId, userId: parentUserId, phoneNumber: '08000000000' },
@@ -312,7 +317,10 @@ describe('Enrollment & installment integration (real DB)', () => {
       );
 
       // Resume response points back at the original transaction (no new charge).
-      expect(second).toMatchObject({ idempotent: true, reference: first.reference });
+      expect(second).toMatchObject({
+        idempotent: true,
+        reference: first.reference,
+      });
       expect(paystackStub.initializeTransaction).toHaveBeenCalledTimes(1);
 
       const enr = await prisma.childEnrollment.findFirstOrThrow({

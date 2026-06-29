@@ -1,0 +1,8 @@
+# Generated Prisma client — never hand-format
+src/generated/
+# Build output and deps
+dist/
+node_modules/
+coverage/
+# Native project
+android/

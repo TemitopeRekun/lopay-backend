@@ -9,6 +9,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, UserRole } from '../generated/prisma/client';
 import { DocumentsService } from '../documents/documents.service';
 import { Money } from '../common/money';
+import {
+  PLATFORM_FEE_RATE,
+  FIRST_PAYMENT_DEPOSIT_RATE,
+  WEEKLY_INSTALLMENTS,
+  MONTHLY_INSTALLMENTS,
+} from '../common/fees';
+import { paymentCommonFields } from '../common/payment-dto';
 
 export type InstallmentPlan = 'WEEKLY' | 'MONTHLY';
 export type ChildPaymentStatus =
@@ -73,8 +80,8 @@ export class PaymentService {
       );
     }
 
-    const DEPOSIT_PERCENTAGE = 0.25;
-    const PLATFORM_FEE_PERCENTAGE = 0.025;
+    const DEPOSIT_PERCENTAGE = FIRST_PAYMENT_DEPOSIT_RATE;
+    const PLATFORM_FEE_PERCENTAGE = PLATFORM_FEE_RATE;
 
     const total = Money.fromNaira(totalAmount);
     const platformFee = total.percent(PLATFORM_FEE_PERCENTAGE);
@@ -112,8 +119,8 @@ export class PaymentService {
       remainingBalance: remainingBalance.toNaira(),
       platformFeePercentage: PLATFORM_FEE_PERCENTAGE,
       plans: [
-        createPlan('Weekly', '/ week', 12),
-        createPlan('Monthly', '/ month', 3),
+        createPlan('Weekly', '/ week', WEEKLY_INSTALLMENTS),
+        createPlan('Monthly', '/ month', MONTHLY_INSTALLMENTS),
       ],
     };
   }
@@ -127,10 +134,11 @@ export class PaymentService {
     schoolFeesKobo: number,
     depositPaidKobo: number,
   ): DepositCalculationResult {
-    if (schoolFeesKobo <= 0) throw new BadRequestException('Invalid school fees');
+    if (schoolFeesKobo <= 0)
+      throw new BadRequestException('Invalid school fees');
 
-    const PLATFORM_FEE_PERCENT = 0.025;
-    const SCHOOL_FIRST_PAYMENT_PERCENT = 0.25;
+    const PLATFORM_FEE_PERCENT = PLATFORM_FEE_RATE;
+    const SCHOOL_FIRST_PAYMENT_PERCENT = FIRST_PAYMENT_DEPOSIT_RATE;
 
     const schoolFees = Money.fromKobo(schoolFeesKobo);
     const depositPaid = Money.fromKobo(depositPaidKobo);
@@ -178,10 +186,10 @@ export class PaymentService {
 
     switch (plan) {
       case 'WEEKLY':
-        numberOfInstallments = 12; // 3 months ≈ 12 weeks
+        numberOfInstallments = WEEKLY_INSTALLMENTS; // 3 months ≈ 12 weeks
         break;
       case 'MONTHLY':
-        numberOfInstallments = 3; // 3 months
+        numberOfInstallments = MONTHLY_INSTALLMENTS; // 3 months
         break;
       default:
         throw new BadRequestException('Invalid installment plan');
@@ -189,7 +197,9 @@ export class PaymentService {
 
     // Kobo-safe: each recurring installment is rounded down to whole kobo and the
     // FINAL installment absorbs the remainder, so the schedule sums to the balance exactly.
-    const installmentAmount = Math.floor(remainingBalance / numberOfInstallments);
+    const installmentAmount = Math.floor(
+      remainingBalance / numberOfInstallments,
+    );
     const finalInstallmentAmount =
       remainingBalance - installmentAmount * (numberOfInstallments - 1);
 
@@ -210,7 +220,9 @@ export class PaymentService {
   ): number {
     // depositPaid INCLUDES the platform fee; deduct it via Money (no float drift)
     // to find what was actually credited toward the school fees.
-    const platformFee = Money.fromKobo(schoolFees).percent(0.025).toKobo();
+    const platformFee = Money.fromKobo(schoolFees)
+      .percent(PLATFORM_FEE_RATE)
+      .toKobo();
     const effectiveDepositToSchool = Math.max(0, depositPaid - platformFee);
 
     const totalPaidToSchool = effectiveDepositToSchool + installmentsPaid;
@@ -291,12 +303,8 @@ export class PaymentService {
       receiptSignedUrl?: string | null,
     ) => ({
       ...p,
-      amount: Money.fromKobo(p.amountPaid).toNaira(),
-      amountPaid: Money.fromKobo(p.amountPaid).toNaira(),
+      ...paymentCommonFields(p),
       status: p.status,
-      studentName: p.enrollment?.child?.fullName,
-      className: p.enrollment?.className,
-      schoolName: p.enrollment?.school?.name,
       ...(receiptSignedUrl !== undefined ? { receiptSignedUrl } : {}),
     });
 

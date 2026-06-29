@@ -1,13 +1,30 @@
 name: Node CI
 on:
   push:
-    branches: [ main ]
+    branches: [main, master]
   pull_request:
-    branches: [ main ]
+    branches: [main, master]
   workflow_dispatch:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lopay
+          POSTGRES_PASSWORD: lopay
+          POSTGRES_DB: lopay_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lopay"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://lopay:lopay@localhost:5432/lopay_test?schema=public
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,8 +35,12 @@ jobs:
         run: npm ci
       - name: Lint
         run: npm run lint
-      - name: Test
-        run: npm run test
+      - name: Apply migrations (test DB)
+        run: npm run migrate:deploy
+      - name: Unit tests + coverage gate
+        run: npm run test:cov
+      - name: E2E tests (real DB)
+        run: npm run test:e2e
       - name: Build
         run: npm run build
   deploy:
@@ -31,12 +52,18 @@ jobs:
       PORT: ${{ secrets.PORT }}
       CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      # Better Auth (replaces the removed Firebase Auth + backend JWT)
+      BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+      BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL }}
+      GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
+      GOOGLE_WEB_CLIENT_SECRET: ${{ secrets.GOOGLE_WEB_CLIENT_SECRET }}
+      # Firebase Admin SDK (storage / FCM only — no longer used for auth)
       FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
       FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
       FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
       FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
-      FIREBASE_SIGNED_URL_TTL_SECONDS: ${{ secrets.FIREBASE_SIGNED_URL_TTL_SECONDS }}
+      # Paystack split payments
+      PAYSTACK_SECRET_KEY: ${{ secrets.PAYSTACK_SECRET_KEY }}
       ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
       ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
     steps:
@@ -49,7 +76,7 @@ jobs:
         run: npm ci
       - name: Secrets sanity check
         run: |
-          node -e "const req=['DATABASE_URL','JWT_SECRET','FIREBASE_PROJECT_ID','FIREBASE_CLIENT_EMAIL','FIREBASE_PRIVATE_KEY','FIREBASE_STORAGE_BUCKET']; const opt=['PORT','CORS_ORIGINS','FIREBASE_SIGNED_URL_TTL_SECONDS','ADMIN_EMAIL','ADMIN_PASSWORD']; const miss=req.filter(k=>!process.env[k]||!String(process.env[k]).trim()); if(miss.length){console.error('Missing required secrets:', miss.join(', ')); process.exit(1)} const missOpt=opt.filter(k=>!process.env[k]||!String(process.env[k]).trim()); if(missOpt.length){console.warn('Missing optional secrets:', missOpt.join(', '))}"
+          node -e "const req=['DATABASE_URL','BETTER_AUTH_SECRET','BETTER_AUTH_URL','FIREBASE_PROJECT_ID','FIREBASE_CLIENT_EMAIL','FIREBASE_PRIVATE_KEY','FIREBASE_STORAGE_BUCKET','PAYSTACK_SECRET_KEY','CORS_ORIGINS']; const opt=['PORT','GOOGLE_WEB_CLIENT_ID','GOOGLE_WEB_CLIENT_SECRET','ADMIN_EMAIL','ADMIN_PASSWORD']; const miss=req.filter(k=>!process.env[k]||!String(process.env[k]).trim()); if(miss.length){console.error('Missing required secrets:', miss.join(', ')); process.exit(1)} const missOpt=opt.filter(k=>!process.env[k]||!String(process.env[k]).trim()); if(missOpt.length){console.warn('Missing optional secrets:', missOpt.join(', '))}"
       - name: Run Prisma migrations
         run: npm run migrate:deploy
         env:

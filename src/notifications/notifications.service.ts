@@ -1,9 +1,4 @@
-import {
-  Inject,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateNotificationDto } from './dto/create.notification.dto';
 import { EventsGateway } from '../events/events.gateway';
@@ -34,7 +29,12 @@ export class NotificationsService {
 
     this.events.pushNotification(notification.userId, notification);
 
-    await this.sendPushNotification(dto.userId, dto.title, dto.message, dto.link);
+    await this.sendPushNotification(
+      dto.userId,
+      dto.title,
+      dto.message,
+      dto.link,
+    );
 
     return notification;
   }

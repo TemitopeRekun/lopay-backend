@@ -53,7 +53,9 @@ export interface GrossUp {
  */
 export function grossUp(baseKobo: number): GrossUp {
   if (!Number.isInteger(baseKobo) || baseKobo <= 0) {
-    throw new Error(`grossUp requires a positive integer kobo base, got ${baseKobo}`);
+    throw new Error(
+      `grossUp requires a positive integer kobo base, got ${baseKobo}`,
+    );
   }
 
   // Region 1 — charged amount below the flat-fee waiver threshold.

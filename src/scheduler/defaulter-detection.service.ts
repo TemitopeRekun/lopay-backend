@@ -32,7 +32,9 @@ export class DefaulterDetectionService {
       () => this.runDetection(),
     );
     if (!ran) {
-      this.logger.log('Defaulter detection skipped (lock held by another instance)');
+      this.logger.log(
+        'Defaulter detection skipped (lock held by another instance)',
+      );
     }
   }
 
@@ -57,7 +59,9 @@ export class DefaulterDetectionService {
       return;
     }
 
-    this.logger.warn(`Marking up to ${overdue.length} enrollment(s) as DEFAULTED`);
+    this.logger.warn(
+      `Marking up to ${overdue.length} enrollment(s) as DEFAULTED`,
+    );
 
     await Promise.all(
       overdue.map(async (enrollment) => {

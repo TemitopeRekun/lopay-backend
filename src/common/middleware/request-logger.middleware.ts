@@ -14,7 +14,8 @@ export class RequestLoggerMiddleware implements NestMiddleware {
     res.on('finish', () => {
       const { statusCode } = res;
       const duration = Date.now() - start;
-      const level = statusCode >= 500 ? 'error' : statusCode >= 400 ? 'warn' : 'log';
+      const level =
+        statusCode >= 500 ? 'error' : statusCode >= 400 ? 'warn' : 'log';
       this.logger[level](
         `${method} ${originalUrl} ${statusCode} ${duration}ms [${requestId ?? '-'}]`,
       );

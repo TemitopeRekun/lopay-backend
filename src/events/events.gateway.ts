@@ -104,12 +104,12 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       };
       client.data = data;
 
-      client.join(this.userRoom(data.userId));
+      await client.join(this.userRoom(data.userId));
       if (data.schoolId) {
-        client.join(this.schoolRoom(data.schoolId));
+        await client.join(this.schoolRoom(data.schoolId));
       }
       if (data.role === 'SUPER_ADMIN') {
-        client.join('admins');
+        await client.join('admins');
       }
 
       this.logger.log(
@@ -176,7 +176,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private extractToken(client: Socket): string | null {
     const strip = (raw: string) => raw.replace(/^Bearer\s+/i, '').trim();
 
-    const authToken = client.handshake.auth?.token;
+    const authToken: unknown = client.handshake.auth?.token;
     if (typeof authToken === 'string' && authToken) return strip(authToken);
 
     const header = client.handshake.headers?.authorization;

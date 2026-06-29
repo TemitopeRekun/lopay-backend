@@ -14,7 +14,7 @@ import { MarkDefaultedDto } from './dto/mark-defaulted.dto';
 import { ReversePaymentDto } from './dto/reverse.payment.dto';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../generated/prisma/client';
-import { CurrentUser } from '../common/decorators/user.decorator';
+import { CurrentUser, AuthUser } from '../common/decorators/user.decorator';
 import { SkipThrottle } from '@nestjs/throttler';
 
 import { CreateClassFeeDto } from './dto/create-class-fee.dto';
@@ -29,7 +29,7 @@ export class SchoolPaymentsController {
   @Roles(UserRole.SCHOOL_OWNER)
   async createClassFee(
     @Body() dto: CreateClassFeeDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
@@ -44,7 +44,7 @@ export class SchoolPaymentsController {
   /** ✅ Get all Class Fees */
   @Get('fees')
   @Roles(UserRole.SCHOOL_OWNER, UserRole.PARENT) // Parents need to see fees too
-  async getClassFees(@CurrentUser() user: any) {
+  async getClassFees(@CurrentUser() user: AuthUser) {
     // If user is a school owner, get their school's fees
     if (user.role === UserRole.SCHOOL_OWNER) {
       if (!user.schoolId) {
@@ -89,7 +89,7 @@ export class SchoolPaymentsController {
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER, UserRole.SUPER_ADMIN)
   async getSchoolBankDetails(
     @Param('schoolId') schoolId: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     return this.schoolPaymentsService.getSchoolBankDetails(schoolId, {
       userId: user.userId,
@@ -103,7 +103,7 @@ export class SchoolPaymentsController {
   @Roles(UserRole.SCHOOL_OWNER)
   async updateSchoolBankDetails(
     @Body() dto: UpdateSchoolDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
@@ -119,7 +119,7 @@ export class SchoolPaymentsController {
   @Get('history')
   @Roles(UserRole.SCHOOL_OWNER)
   async getHistory(
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
     @Query('receiptType') receiptType?: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT',
     @Query('take') take?: string,
@@ -141,7 +141,7 @@ export class SchoolPaymentsController {
   @Get('history/all')
   @Roles(UserRole.SCHOOL_OWNER)
   async getHistoryAll(
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
     @Query('receiptType') receiptType?: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT',
     @Query('take') take?: string,
@@ -162,7 +162,7 @@ export class SchoolPaymentsController {
   @SkipThrottle()
   @Get('stats')
   @Roles(UserRole.SCHOOL_OWNER)
-  async getDashboardStats(@CurrentUser() user: any) {
+  async getDashboardStats(@CurrentUser() user: AuthUser) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
     }
@@ -174,7 +174,7 @@ export class SchoolPaymentsController {
   @Get('students')
   @Roles(UserRole.SCHOOL_OWNER)
   async getStudents(
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
     @Query('className') className?: string,
     @Query('search') search?: string,
     @Query('page') page?: string,
@@ -197,7 +197,7 @@ export class SchoolPaymentsController {
   @Get('pending')
   @Roles(UserRole.SCHOOL_OWNER)
   async getPendingPayments(
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
     @Query('receiptType') receiptType?: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT',
   ) {
@@ -217,15 +217,19 @@ export class SchoolPaymentsController {
   @Roles(UserRole.SCHOOL_OWNER)
   async confirmPayment(
     @Body() dto: ConfirmPaymentDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
     }
-    return this.schoolPaymentsService.confirmPayment(dto.paymentId, user.schoolId, {
-      userId: user.userId,
-      role: user.role,
-    });
+    return this.schoolPaymentsService.confirmPayment(
+      dto.paymentId,
+      user.schoolId,
+      {
+        userId: user.userId,
+        role: user.role,
+      },
+    );
   }
 
   /** ✅ Reject a single installment payment */
@@ -233,15 +237,19 @@ export class SchoolPaymentsController {
   @Roles(UserRole.SCHOOL_OWNER)
   async rejectPayment(
     @Body() dto: ConfirmPaymentDto, // Reusing DTO as it only needs paymentId
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
     }
-    return this.schoolPaymentsService.rejectPayment(dto.paymentId, user.schoolId, {
-      userId: user.userId,
-      role: user.role,
-    });
+    return this.schoolPaymentsService.rejectPayment(
+      dto.paymentId,
+      user.schoolId,
+      {
+        userId: user.userId,
+        role: user.role,
+      },
+    );
   }
 
   /** ✅ Mark an enrollment as defaulted */
@@ -249,7 +257,7 @@ export class SchoolPaymentsController {
   @Roles(UserRole.SCHOOL_OWNER)
   async markAsDefaulted(
     @Body() dto: MarkDefaultedDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
@@ -266,7 +274,7 @@ export class SchoolPaymentsController {
   @Roles(UserRole.SCHOOL_OWNER)
   async reversePayment(
     @Body() dto: ReversePaymentDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');

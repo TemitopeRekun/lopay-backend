@@ -6,6 +6,7 @@ import { Public } from '../common/decorators/public.decorator';
 import { FIREBASE_STORAGE } from '../firebase/firebase.module';
 import { Prisma } from '../generated/prisma/client';
 import type { Storage } from 'firebase-admin/storage';
+import { errorMessage } from '../common/errors';
 
 @Controller('health')
 export class HealthController {
@@ -26,13 +27,12 @@ export class HealthController {
     try {
       await this.prisma.$queryRaw(Prisma.sql`SELECT 1`);
       dbOk = true;
-    } catch (e: any) {
+    } catch (e: unknown) {
       dbOk = false;
-      dbError = e?.message ?? 'db_error';
+      dbError = errorMessage(e, 'db_error');
     }
 
-    const bucketName =
-      this.config.get<string>('FIREBASE_STORAGE_BUCKET') ?? '';
+    const bucketName = this.config.get<string>('FIREBASE_STORAGE_BUCKET') ?? '';
 
     let storageOk = false;
     let storageError: string | undefined;
@@ -44,9 +44,9 @@ export class HealthController {
         ),
       ]);
       storageOk = exists;
-    } catch (e: any) {
+    } catch (e: unknown) {
       storageOk = false;
-      storageError = e?.message ?? 'storage_error';
+      storageError = errorMessage(e, 'storage_error');
     }
 
     if (!dbOk) {

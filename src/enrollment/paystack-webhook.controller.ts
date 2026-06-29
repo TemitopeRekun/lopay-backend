@@ -16,10 +16,13 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import type { Request } from 'express';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../auth/roles.decorator';
-import { CurrentUser } from '../common/decorators/user.decorator';
+import { CurrentUser, AuthUser } from '../common/decorators/user.decorator';
 import { UserRole } from '../generated/prisma/client';
 import { EnrollmentService } from './enrollment.service';
-import { PaystackService } from '../paystack/paystack.service';
+import {
+  PaystackService,
+  PaystackWebhookEvent,
+} from '../paystack/paystack.service';
 
 /**
  * Paystack callbacks for first payments. The webhook is the source of truth for
@@ -63,7 +66,9 @@ export class PaystackWebhookController {
         ''
       ).trim();
       if (!allowedIps.includes(clientIp)) {
-        this.logger.warn(`Rejected Paystack webhook from disallowed IP: ${clientIp}`);
+        this.logger.warn(
+          `Rejected Paystack webhook from disallowed IP: ${clientIp}`,
+        );
         throw new UnauthorizedException('Origin not allowed');
       }
     }
@@ -74,7 +79,9 @@ export class PaystackWebhookController {
       this.logger.error(
         'PAYSTACK_SECRET_KEY is not set — cannot verify webhook signature.',
       );
-      throw new InternalServerErrorException('Webhook verification unavailable');
+      throw new InternalServerErrorException(
+        'Webhook verification unavailable',
+      );
     }
 
     // The signature is an HMAC over the EXACT raw bytes Paystack sent, which the
@@ -103,9 +110,9 @@ export class PaystackWebhookController {
       throw new UnauthorizedException('Invalid signature');
     }
 
-    let event: any;
+    let event: PaystackWebhookEvent;
     try {
-      event = JSON.parse(raw.toString('utf8'));
+      event = JSON.parse(raw.toString('utf8')) as PaystackWebhookEvent;
     } catch {
       throw new BadRequestException('Invalid webhook payload');
     }
@@ -121,7 +128,10 @@ export class PaystackWebhookController {
    */
   @Get('verify')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
-  async verify(@Query('reference') reference: string, @CurrentUser() _user: any) {
+  async verify(
+    @Query('reference') reference: string,
+    @CurrentUser() _user: AuthUser,
+  ) {
     if (!reference) throw new BadRequestException('reference is required');
     const result = await this.paystack.verifyTransaction(reference);
     if (result.status === 'success') {

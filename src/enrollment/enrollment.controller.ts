@@ -1,8 +1,15 @@
-import { Controller, Post, Get, Body, Param } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  Param,
+  ForbiddenException,
+} from '@nestjs/common';
 import { EnrollmentService } from './enrollment.service';
 import { CreateEnrollmentDto } from './dto/create.enrollment.dto';
 import { ConfirmEnrollmentDto } from './dto/confirm.enrollment.dto';
-import { CurrentUser } from '../common/decorators/user.decorator';
+import { CurrentUser, AuthUser } from '../common/decorators/user.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../generated/prisma/client';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
@@ -15,7 +22,7 @@ export class EnrollmentController {
   @SkipThrottle()
   @Get('my-children')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
-  async getMyChildren(@CurrentUser() user: any) {
+  async getMyChildren(@CurrentUser() user: AuthUser) {
     return this.enrollmentService.getParentEnrollments(user.userId);
   }
 
@@ -24,7 +31,7 @@ export class EnrollmentController {
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
   async getEnrollmentHistory(
     @Param('id') id: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     return this.enrollmentService.getEnrollmentHistory(id, user.userId);
   }
@@ -42,7 +49,7 @@ export class EnrollmentController {
   @Throttle({ default: { ttl: 60000, limit: 10 } })
   initiateFirstPayment(
     @Body() dto: CreateEnrollmentDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     return this.enrollmentService.initiateFirstPayment(dto, user.userId);
   }
@@ -52,7 +59,7 @@ export class EnrollmentController {
   @Throttle({ default: { ttl: 60000, limit: 10 } })
   async payInstallment(
     @Body() dto: CreateInstallmentDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     return this.enrollmentService.submitInstallmentPayment(
       dto.enrollmentId,
@@ -68,14 +75,20 @@ export class EnrollmentController {
   @Throttle({ default: { ttl: 60000, limit: 20 } })
   async confirmFirstPayment(
     @Body() dto: ConfirmEnrollmentDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
-    // School ID comes securely from the JWT token
-    const schoolId = user.schoolId;
+    // School ID comes securely from the authenticated session, never the body.
+    if (!user.schoolId) {
+      throw new ForbiddenException('User is not associated with any school');
+    }
 
-    return this.enrollmentService.confirmFirstPayment(dto.enrollmentId, schoolId, {
-      userId: user.userId,
-      role: user.role,
-    });
+    return this.enrollmentService.confirmFirstPayment(
+      dto.enrollmentId,
+      user.schoolId,
+      {
+        userId: user.userId,
+        role: user.role,
+      },
+    );
   }
 }
