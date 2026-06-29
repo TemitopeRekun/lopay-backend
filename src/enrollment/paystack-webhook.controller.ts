@@ -130,9 +130,12 @@ export class PaystackWebhookController {
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
   async verify(
     @Query('reference') reference: string,
-    @CurrentUser() _user: AuthUser,
+    @CurrentUser() user: AuthUser,
   ) {
     if (!reference) throw new BadRequestException('reference is required');
+    // Scope to the caller's own payment: without this, any authenticated
+    // parent/owner could trigger reconciliation against an arbitrary reference.
+    await this.enrollment.assertReferenceOwnedBy(reference, user);
     const result = await this.paystack.verifyTransaction(reference);
     if (result.status === 'success') {
       await this.enrollment.reconcilePaystackPayment(

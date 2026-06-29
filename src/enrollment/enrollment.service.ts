@@ -1,9 +1,11 @@
 import {
   Injectable,
   BadRequestException,
+  ForbiddenException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import type { AuthUser } from '../common/types/auth-user';
 import {
   PaymentStatus,
   PaymentType,
@@ -830,6 +832,42 @@ export class EnrollmentService {
    * verify-on-return endpoint, and idempotent: a payment already SUCCESS is a no-op.
    * Activates the enrollment (or marks it COMPLETED if paid in full).
    */
+  /**
+   * Authorize a verify-on-return call: the payment behind `reference` must
+   * belong to the caller. A parent owns it when they are the enrolled child's
+   * parent; a school owner owns it when the payment is for their school. Anything
+   * else (unknown reference, or someone else's payment) is rejected so the
+   * endpoint can't be used to probe/trigger reconciliation on arbitrary refs.
+   */
+  async assertReferenceOwnedBy(
+    reference: string,
+    user: AuthUser,
+  ): Promise<void> {
+    const payment = await this.prisma.payment.findUnique({
+      where: { paystackReference: reference },
+      select: {
+        schoolId: true,
+        enrollment: {
+          select: {
+            child: { select: { parent: { select: { userId: true } } } },
+          },
+        },
+      },
+    });
+    if (!payment) {
+      throw new NotFoundException('Unknown payment reference');
+    }
+    const isParentOwner =
+      payment.enrollment?.child?.parent?.userId === user.userId;
+    const isSchoolOwner =
+      user.role === UserRole.SCHOOL_OWNER &&
+      !!user.schoolId &&
+      payment.schoolId === user.schoolId;
+    if (!isParentOwner && !isSchoolOwner) {
+      throw new ForbiddenException('You do not have access to this payment');
+    }
+  }
+
   async reconcilePaystackPayment(
     reference: string,
     actualFeeKobo: number | null,

@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateUserDto } from './dto/update.user.dto';
+import { UpdateProfileDto } from './dto/update.profile.dto';
 
 @Injectable()
 export class UsersService {
@@ -51,6 +52,34 @@ export class UsersService {
         email: true,
         fullName: true,
         role: true,
+        updatedAt: true,
+      },
+    });
+  }
+
+  /**
+   * Self-service profile update. Only `fullName`/`phoneNumber` are writable here
+   * (see UpdateProfileDto); `fullName` is mirrored onto Better Auth's `name` to
+   * keep the two in sync. Role/email changes are intentionally NOT possible.
+   */
+  async updateProfile(id: string, dto: UpdateProfileDto) {
+    await this.findOne(id);
+    return this.prisma.user.update({
+      where: { id },
+      data: {
+        ...(dto.fullName !== undefined
+          ? { fullName: dto.fullName, name: dto.fullName }
+          : {}),
+        ...(dto.phoneNumber !== undefined
+          ? { phoneNumber: dto.phoneNumber }
+          : {}),
+      },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        phoneNumber: true,
         updatedAt: true,
       },
     });

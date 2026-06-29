@@ -1,7 +1,12 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { PrismaClient } from '../generated/prisma/client';
 import { ConfigService } from '@nestjs/config';
-import { Pool } from 'pg';
+import { Pool, type PoolConfig } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 @Injectable()
@@ -9,21 +14,44 @@ export class PrismaService
   extends PrismaClient
   implements OnModuleInit, OnModuleDestroy
 {
+  private static readonly bootLogger = new Logger(PrismaService.name);
+
   constructor(config: ConfigService) {
     const connectionString = config.get<string>('DATABASE_URL');
     const nodeEnv = config.get<string>('NODE_ENV') ?? 'development';
     const pool = new Pool({
       connectionString,
-      ...(nodeEnv === 'production'
-        ? {
-            ssl: {
-              rejectUnauthorized: false,
-            },
-          }
-        : {}),
+      ...PrismaService.buildSslConfig(nodeEnv, config),
     });
     const adapter = new PrismaPg(pool);
     super({ adapter });
+  }
+
+  /**
+   * TLS for the production DB connection.
+   *
+   * When `DATABASE_CA_CERT` (PEM contents) is provided we pin it and enforce
+   * `rejectUnauthorized: true` — the connection is verified against that CA and
+   * MITM is rejected. If no CA is configured we fall back to the previous
+   * permissive behaviour (`rejectUnauthorized: false`) so existing deploys keep
+   * connecting, but log a warning so the gap is visible and gets closed. Non-prod
+   * connects without TLS (local Postgres).
+   */
+  private static buildSslConfig(
+    nodeEnv: string,
+    config: ConfigService,
+  ): Pick<PoolConfig, 'ssl'> {
+    if (nodeEnv !== 'production') return {};
+    const ca = config.get<string>('DATABASE_CA_CERT');
+    if (ca && ca.trim()) {
+      return { ssl: { ca, rejectUnauthorized: true } };
+    }
+    PrismaService.bootLogger.warn(
+      'DATABASE_CA_CERT is not set — connecting with rejectUnauthorized:false ' +
+        '(no CA pinning). Set DATABASE_CA_CERT to the DB CA PEM to verify the ' +
+        'server certificate and close this MITM gap.',
+    );
+    return { ssl: { rejectUnauthorized: false } };
   }
 
   async onModuleInit() {

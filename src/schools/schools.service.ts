@@ -194,9 +194,46 @@ export class SchoolPaymentsService {
     });
     if (!school) throw new NotFoundException('School not found');
 
-    return this.prisma.school.update({
-      where: { id },
-      data: { deletedAt: new Date() },
+    // Soft-delete the school AND free its owner so the same person can be
+    // re-onboarded later. `School.ownerId` and `User.email` are both unique; if
+    // we only set `school.deletedAt`, the dangling owner row keeps the email +
+    // ownerId reserved and a fresh onboarding with the same email collides.
+    // Mirror UsersService.remove: anonymize the owner's email, soft-delete the
+    // owner, and revoke their sessions (a deleted school's owner must lose
+    // access). This is why M2 needs no partial-unique migration — anonymization
+    // frees the constraint without dropping the unique that auth.config's
+    // `school.findUnique({ where: { ownerId } })` relies on.
+    const anonymizedEmail = `deleted+${school.ownerId}@deleted.lopay`;
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.school.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      }),
+      this.prisma.user.update({
+        where: { id: school.ownerId },
+        data: { deletedAt: new Date(), email: anonymizedEmail },
+      }),
+      this.prisma.session.deleteMany({ where: { userId: school.ownerId } }),
+    ]);
+    return updated;
+  }
+
+  /**
+   * Public school directory (unauthenticated `GET /schools`). Returns ONLY the
+   * fields a parent needs to pick a school — `{ id, name }`. School email,
+   * address and phone are PII and must not be harvestable from an open endpoint
+   * (search is by name only, for the same reason). Authenticated/admin callers
+   * that need the full record use `getAllSchools`.
+   */
+  async getPublicSchools(search?: string) {
+    const where: Prisma.SchoolWhereInput = { deletedAt: null };
+    if (search) {
+      where.name = { contains: search, mode: 'insensitive' };
+    }
+    return this.prisma.school.findMany({
+      where,
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
     });
   }
 
