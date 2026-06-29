@@ -95,8 +95,58 @@
       "^@thallesp/nestjs-better-auth$": "<rootDir>/../test/mocks/nestjs-better-auth.ts"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.(t|j)s",
+      "!**/*.spec.ts",
+      "!**/*.module.ts",
+      "!**/dto/**",
+      "!main.ts",
+      "!generated/**",
+      "!common/observability/**"
     ],
+    "coverageThreshold": {
+      "global": {
+        "statements": 13,
+        "branches": 9,
+        "functions": 8,
+        "lines": 12
+      },
+      "src/common/money.ts": {
+        "statements": 90,
+        "branches": 50,
+        "functions": 100,
+        "lines": 90
+      },
+      "src/common/paystack-fee.ts": {
+        "statements": 95,
+        "branches": 90,
+        "functions": 100,
+        "lines": 95
+      },
+      "src/common/fees.ts": {
+        "statements": 100,
+        "branches": 100,
+        "functions": 100,
+        "lines": 100
+      },
+      "src/common/errors.ts": {
+        "statements": 100,
+        "branches": 100,
+        "functions": 100,
+        "lines": 100
+      },
+      "src/auth/roles.guard.ts": {
+        "statements": 100,
+        "branches": 90,
+        "functions": 100,
+        "lines": 100
+      },
+      "src/auth/better-auth.guard.ts": {
+        "statements": 100,
+        "branches": 85,
+        "functions": 100,
+        "lines": 100
+      }
+    },
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
   }

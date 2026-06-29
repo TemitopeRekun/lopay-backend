@@ -31,11 +31,11 @@ describe('PaymentService', () => {
       const result = service.calculatePaymentStructure(100_000);
 
       expect(result.originalAmount).toBe(100_000);
-      expect(result.platformFeeAmount).toBeCloseTo(2_500, 2);     // 2.5%
-      expect(result.totalPayable).toBeCloseTo(102_500, 2);        // + platform fee
-      expect(result.depositAmount).toBeCloseTo(25_000, 2);        // 25%
-      expect(result.totalInitialPayment).toBeCloseTo(27_500, 2);  // deposit + platform fee
-      expect(result.remainingBalance).toBeCloseTo(75_000, 2);     // totalPayable - initial
+      expect(result.platformFeeAmount).toBeCloseTo(2_500, 2); // 2.5%
+      expect(result.totalPayable).toBeCloseTo(102_500, 2); // + platform fee
+      expect(result.depositAmount).toBeCloseTo(25_000, 2); // 25%
+      expect(result.totalInitialPayment).toBeCloseTo(27_500, 2); // deposit + platform fee
+      expect(result.remainingBalance).toBeCloseTo(75_000, 2); // totalPayable - initial
       expect(result.plans).toHaveLength(2);
     });
 
@@ -54,15 +54,21 @@ describe('PaymentService', () => {
     });
 
     it('throws on zero amount', () => {
-      expect(() => service.calculatePaymentStructure(0)).toThrow(BadRequestException);
+      expect(() => service.calculatePaymentStructure(0)).toThrow(
+        BadRequestException,
+      );
     });
 
     it('throws on negative amount', () => {
-      expect(() => service.calculatePaymentStructure(-1000)).toThrow(BadRequestException);
+      expect(() => service.calculatePaymentStructure(-1000)).toThrow(
+        BadRequestException,
+      );
     });
 
     it('throws on NaN', () => {
-      expect(() => service.calculatePaymentStructure(NaN)).toThrow(BadRequestException);
+      expect(() => service.calculatePaymentStructure(NaN)).toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -75,7 +81,7 @@ describe('PaymentService', () => {
 
       expect(result.platformFee).toBeCloseTo(2_500, 2);
       expect(result.minimumDeposit).toBeCloseTo(27_500, 2);
-      expect(result.amountToSchool).toBeCloseTo(25_000, 2);  // depositPaid - platformFee
+      expect(result.amountToSchool).toBeCloseTo(25_000, 2); // depositPaid - platformFee
       expect(result.remainingBalance).toBeCloseTo(75_000, 2); // schoolFees - amountToSchool
     });
 
@@ -85,11 +91,15 @@ describe('PaymentService', () => {
     });
 
     it('throws when deposit is materially below minimum', () => {
-      expect(() => service.calculateInitialPayment(100_000, 10_000)).toThrow(BadRequestException);
+      expect(() => service.calculateInitialPayment(100_000, 10_000)).toThrow(
+        BadRequestException,
+      );
     });
 
     it('throws on zero school fees', () => {
-      expect(() => service.calculateInitialPayment(0, 0)).toThrow(BadRequestException);
+      expect(() => service.calculateInitialPayment(0, 0)).toThrow(
+        BadRequestException,
+      );
     });
 
     it('accepts the full fee upfront (remaining balance reaches zero)', () => {
@@ -123,7 +133,9 @@ describe('PaymentService', () => {
     });
 
     it('throws on zero remaining balance', () => {
-      expect(() => service.calculateInstallments(0, 'WEEKLY')).toThrow(BadRequestException);
+      expect(() => service.calculateInstallments(0, 'WEEKLY')).toThrow(
+        BadRequestException,
+      );
     });
 
     it('absorbs rounding in the final installment so the schedule sums exactly', () => {
@@ -142,23 +154,33 @@ describe('PaymentService', () => {
 
   describe('getNextStatus', () => {
     it('stays DEFAULTED once defaulted', () => {
-      expect(service.getNextStatus('DEFAULTED', 1000, true, 0, false)).toBe('DEFAULTED');
+      expect(service.getNextStatus('DEFAULTED', 1000, true, 0, false)).toBe(
+        'DEFAULTED',
+      );
     });
 
     it('returns COMPLETED when balance reaches zero', () => {
-      expect(service.getNextStatus('ACTIVE', 1000, true, 0, false)).toBe('COMPLETED');
+      expect(service.getNextStatus('ACTIVE', 1000, true, 0, false)).toBe(
+        'COMPLETED',
+      );
     });
 
     it('returns DEFAULTED when overdue', () => {
-      expect(service.getNextStatus('ACTIVE', 1000, true, 5000, true)).toBe('DEFAULTED');
+      expect(service.getNextStatus('ACTIVE', 1000, true, 5000, true)).toBe(
+        'DEFAULTED',
+      );
     });
 
     it('returns ACTIVE when deposit confirmed and balance remains', () => {
-      expect(service.getNextStatus('PENDING', 1000, true, 5000, false)).toBe('ACTIVE');
+      expect(service.getNextStatus('PENDING', 1000, true, 5000, false)).toBe(
+        'ACTIVE',
+      );
     });
 
     it('returns PENDING when deposit not yet confirmed', () => {
-      expect(service.getNextStatus('PENDING', 1000, false, 5000, false)).toBe('PENDING');
+      expect(service.getNextStatus('PENDING', 1000, false, 5000, false)).toBe(
+        'PENDING',
+      );
     });
   });
 

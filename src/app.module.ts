@@ -6,6 +6,7 @@ import { RequestLoggerMiddleware } from './common/middleware/request-logger.midd
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { AuthModule as BetterAuthModule } from '@thallesp/nestjs-better-auth';
 import rateLimit from 'express-rate-limit';
+import type { Request, Response, NextFunction } from 'express';
 import { createAuth } from './auth/auth.config';
 import { PrismaService } from './prisma/prisma.service';
 import { ConfigModule } from '@nestjs/config';
@@ -60,10 +61,7 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
           .min(60)
           .max(86400)
           .optional(),
-        FIREBASE_MAX_UPLOAD_BYTES: Joi.number()
-          .integer()
-          .min(1024)
-          .optional(),
+        FIREBASE_MAX_UPLOAD_BYTES: Joi.number().integer().min(1024).optional(),
         ADMIN_EMAIL: Joi.string().email().optional(),
         ADMIN_PASSWORD: Joi.string().min(8).optional(),
         // Required (non-empty) in production so the API can't boot wide-open;
@@ -77,8 +75,12 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
         // placeholders; require a LIVE key in production.
         PAYSTACK_SECRET_KEY: Joi.when('NODE_ENV', {
           is: 'production',
-          then: Joi.string().pattern(/^sk_live_/).required(),
-          otherwise: Joi.string().pattern(/^sk_(test|live)_/).required(),
+          then: Joi.string()
+            .pattern(/^sk_live_/)
+            .required(),
+          otherwise: Joi.string()
+            .pattern(/^sk_(test|live)_/)
+            .required(),
         }),
         PAYSTACK_WEBHOOK_ALLOWED_IPS: Joi.string().allow('').optional(),
         PAYSTACK_CALLBACK_URL: Joi.string().uri().optional(),
@@ -111,7 +113,7 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
         return {
           auth: createAuth(prisma),
           bodyParser: { rawBody: true },
-          middleware: (req, res, next) => {
+          middleware: (req: Request, res: Response, next: NextFunction) => {
             limiter(req, res, next);
           },
         };
@@ -151,8 +153,6 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer
-      .apply(RequestIdMiddleware, RequestLoggerMiddleware)
-      .forRoutes('*');
+    consumer.apply(RequestIdMiddleware, RequestLoggerMiddleware).forRoutes('*');
   }
 }

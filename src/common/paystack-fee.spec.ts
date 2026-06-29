@@ -26,7 +26,8 @@ describe('paystackFee (forward)', () => {
     const justBelow = PAYSTACK_FLAT_WAIVER_THRESHOLD_KOBO - 1;
     expect(paystackFee(justBelow)).toBe(Math.round(justBelow * 0.015)); // no flat
     expect(paystackFee(PAYSTACK_FLAT_WAIVER_THRESHOLD_KOBO)).toBe(
-      Math.round(PAYSTACK_FLAT_WAIVER_THRESHOLD_KOBO * 0.015) + PAYSTACK_FLAT_KOBO,
+      Math.round(PAYSTACK_FLAT_WAIVER_THRESHOLD_KOBO * 0.015) +
+        PAYSTACK_FLAT_KOBO,
     );
   });
 });

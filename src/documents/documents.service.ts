@@ -10,6 +10,8 @@ import { randomUUID } from 'crypto';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserRole } from '../generated/prisma/client';
+import type { AuthUser } from '../common/types/auth-user';
+import { errorMessage } from '../common/errors';
 import { FIREBASE_STORAGE } from '../firebase/firebase.module';
 import type { Storage } from 'firebase-admin/storage';
 
@@ -20,11 +22,9 @@ const ALLOWED_RECEIPT_CONTENT_TYPES = new Set([
   'application/pdf',
 ]);
 
-type CurrentUser = {
-  userId: string;
-  role: UserRole;
-  schoolId?: string | null;
-};
+// Canonical principal shape lives in common/types/auth-user.ts. Aliased here so
+// existing `user: CurrentUser` references in this file keep reading naturally.
+type CurrentUser = AuthUser;
 
 const DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
 
@@ -101,9 +101,9 @@ export class DocumentsService {
           'x-goog-content-length-range': contentLengthRange,
         },
       };
-    } catch (e: any) {
+    } catch (e: unknown) {
       throw new BadRequestException(
-        e?.message ?? 'Failed to create signed upload URL',
+        errorMessage(e, 'Failed to create signed upload URL'),
       );
     }
   }
@@ -155,9 +155,9 @@ export class DocumentsService {
         signedUrl,
         expiresIn: this.signedUrlTtlSeconds,
       };
-    } catch (e: any) {
+    } catch (e: unknown) {
       throw new BadRequestException(
-        e?.message ?? 'Failed to create signed download URL',
+        errorMessage(e, 'Failed to create signed download URL'),
       );
     }
   }
@@ -185,9 +185,9 @@ export class DocumentsService {
         signedUrl,
         expiresIn: this.signedUrlTtlSeconds,
       };
-    } catch (e: any) {
+    } catch (e: unknown) {
       throw new BadRequestException(
-        e?.message ?? 'Failed to create signed download URL',
+        errorMessage(e, 'Failed to create signed download URL'),
       );
     }
   }

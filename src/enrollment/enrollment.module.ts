@@ -9,7 +9,13 @@ import { PaystackModule } from '../paystack/paystack.module';
 import { PaystackWebhookController } from './paystack-webhook.controller';
 
 @Module({
-  imports: [PaymentsModule, NotificationsModule, EventsModule, AuditModule, PaystackModule],
+  imports: [
+    PaymentsModule,
+    NotificationsModule,
+    EventsModule,
+    AuditModule,
+    PaystackModule,
+  ],
   providers: [EnrollmentService],
   controllers: [EnrollmentController, PaystackWebhookController],
   exports: [EnrollmentService],

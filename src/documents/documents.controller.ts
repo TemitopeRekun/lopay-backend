@@ -2,7 +2,7 @@ import { Body, Controller, Post } from '@nestjs/common';
 import { DocumentsService } from './documents.service';
 import { CreateReceiptUploadDto } from './dto/create-receipt-upload.dto';
 import { CreateReceiptDownloadDto } from './dto/create-receipt-download.dto';
-import { CurrentUser } from '../common/decorators/user.decorator';
+import { CurrentUser, AuthUser } from '../common/decorators/user.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../generated/prisma/client';
 
@@ -14,7 +14,7 @@ export class DocumentsController {
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
   async createReceiptUploadUrl(
     @Body() dto: CreateReceiptUploadDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     return this.documentsService.createReceiptUploadUrl(
       user.userId,
@@ -27,7 +27,7 @@ export class DocumentsController {
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER, UserRole.SUPER_ADMIN)
   async createReceiptDownloadUrl(
     @Body() dto: CreateReceiptDownloadDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     return this.documentsService.createReceiptDownloadUrl(dto.paymentId, user);
   }

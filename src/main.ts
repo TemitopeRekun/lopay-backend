@@ -19,24 +19,36 @@ async function bootstrap() {
   });
 
   // Security headers
-  app.use((_req: unknown, res: { setHeader: (k: string, v: string) => void }, next: () => void) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
-    if (process.env.NODE_ENV === 'production') {
-      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-      // This service returns JSON only (the SPA is a separate origin). A strict
-      // CSP is the strongest defense against any reflected-content XSS — and
-      // replaces the deprecated X-XSS-Protection header. Swagger (dev only) needs
-      // inline assets, so the CSP is applied in production only.
+  app.use(
+    (
+      _req: unknown,
+      res: { setHeader: (k: string, v: string) => void },
+      next: () => void,
+    ) => {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('X-Frame-Options', 'DENY');
+      res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
       res.setHeader(
-        'Content-Security-Policy',
-        "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+        'Permissions-Policy',
+        'geolocation=(), microphone=(), camera=()',
       );
-    }
-    next();
-  });
+      if (process.env.NODE_ENV === 'production') {
+        res.setHeader(
+          'Strict-Transport-Security',
+          'max-age=31536000; includeSubDomains',
+        );
+        // This service returns JSON only (the SPA is a separate origin). A strict
+        // CSP is the strongest defense against any reflected-content XSS — and
+        // replaces the deprecated X-XSS-Protection header. Swagger (dev only) needs
+        // inline assets, so the CSP is applied in production only.
+        res.setHeader(
+          'Content-Security-Policy',
+          "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+        );
+      }
+      next();
+    },
+  );
 
   // Note: the global prefix excludes the Better Auth handler (the module adds
   // /api/auth to the prefix exclude list automatically).
@@ -98,4 +110,4 @@ async function bootstrap() {
   logger.log(`Application is running on: ${await app.getUrl()}`);
   logger.log(`API available at: ${await app.getUrl()}/api/v1`);
 }
-bootstrap();
+void bootstrap();

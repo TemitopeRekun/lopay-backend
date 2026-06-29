@@ -39,7 +39,9 @@ export class CreateEnrollmentDto {
   className: string;
 
   @ApiProperty({ enum: InstallmentFrequency, example: 'MONTHLY' })
-  @Transform(({ value }) => value?.toUpperCase())
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.toUpperCase() : value,
+  )
   @IsEnum(InstallmentFrequency)
   installmentFrequency: InstallmentFrequency;
 

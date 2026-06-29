@@ -39,7 +39,9 @@ export class PaystackReconciliationService {
       () => this.runSweep(),
     );
     if (!ran) {
-      this.logger.debug('Paystack sweep skipped (lock held by another instance)');
+      this.logger.debug(
+        'Paystack sweep skipped (lock held by another instance)',
+      );
     }
   }
 
@@ -49,21 +51,29 @@ export class PaystackReconciliationService {
       where: {
         status: PaymentTransactionStatus.PENDING,
         paystackReference: { not: null },
-        paymentDate: { lt: new Date(now - PaystackReconciliationService.MIN_AGE_MS) },
+        paymentDate: {
+          lt: new Date(now - PaystackReconciliationService.MIN_AGE_MS),
+        },
       },
       select: { id: true, paystackReference: true, paymentDate: true },
       take: 100,
     });
 
     if (stale.length === 0) return;
-    this.logger.warn(`Reconciling ${stale.length} stale PENDING Paystack payment(s)`);
+    this.logger.warn(
+      `Reconciling ${stale.length} stale PENDING Paystack payment(s)`,
+    );
 
     for (const p of stale) {
       const reference = p.paystackReference as string;
       try {
         const result = await this.paystack.verifyTransaction(reference);
         if (result.status === 'success') {
-          await this.enrollment.reconcilePaystackPayment(reference, result.fees, null);
+          await this.enrollment.reconcilePaystackPayment(
+            reference,
+            result.fees,
+            null,
+          );
           this.logger.log(`Recovered stuck payment ${reference} via sweep`);
         } else if (result.status === 'failed') {
           await this.enrollment.failPaystackPayment(reference);
@@ -74,7 +84,9 @@ export class PaystackReconciliationService {
           // Still unresolved (abandoned/never-completed) after the window — fail it
           // so the enrollment can be retried rather than dangling forever.
           await this.enrollment.failPaystackPayment(reference);
-          this.logger.warn(`Abandoned stale payment ${reference} (status=${result.status})`);
+          this.logger.warn(
+            `Abandoned stale payment ${reference} (status=${result.status})`,
+          );
         }
       } catch (err) {
         this.logger.error(

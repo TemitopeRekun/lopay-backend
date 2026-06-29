@@ -79,23 +79,36 @@ export class PrismaService
     return this.$extends({
       query: {
         payment: {
-          findMany:   ({ args, query }) => query({ ...args, where: { ...args.where, ...filter } }),
-          findFirst:  ({ args, query }) => query({ ...args, where: { ...args.where, ...filter } }),
-          count:      ({ args, query }) => query({ ...args, where: { ...args.where, ...filter } }),
-          updateMany: ({ args, query }) => query({ ...args, where: { ...args.where, ...filter } }),
-          deleteMany: ({ args, query }) => query({ ...args, where: { ...args.where, ...filter } }),
+          findMany: ({ args, query }) =>
+            query({ ...args, where: { ...args.where, ...filter } }),
+          findFirst: ({ args, query }) =>
+            query({ ...args, where: { ...args.where, ...filter } }),
+          count: ({ args, query }) =>
+            query({ ...args, where: { ...args.where, ...filter } }),
+          updateMany: ({ args, query }) =>
+            query({ ...args, where: { ...args.where, ...filter } }),
+          deleteMany: ({ args, query }) =>
+            query({ ...args, where: { ...args.where, ...filter } }),
         },
         childEnrollment: {
-          findMany:   ({ args, query }) => query({ ...args, where: { ...args.where, ...filter } }),
-          findFirst:  ({ args, query }) => query({ ...args, where: { ...args.where, ...filter } }),
-          count:      ({ args, query }) => query({ ...args, where: { ...args.where, ...filter } }),
-          updateMany: ({ args, query }) => query({ ...args, where: { ...args.where, ...filter } }),
-          deleteMany: ({ args, query }) => query({ ...args, where: { ...args.where, ...filter } }),
+          findMany: ({ args, query }) =>
+            query({ ...args, where: { ...args.where, ...filter } }),
+          findFirst: ({ args, query }) =>
+            query({ ...args, where: { ...args.where, ...filter } }),
+          count: ({ args, query }) =>
+            query({ ...args, where: { ...args.where, ...filter } }),
+          updateMany: ({ args, query }) =>
+            query({ ...args, where: { ...args.where, ...filter } }),
+          deleteMany: ({ args, query }) =>
+            query({ ...args, where: { ...args.where, ...filter } }),
         },
         classFee: {
-          findMany:   ({ args, query }) => query({ ...args, where: { ...args.where, ...filter } }),
-          findFirst:  ({ args, query }) => query({ ...args, where: { ...args.where, ...filter } }),
-          count:      ({ args, query }) => query({ ...args, where: { ...args.where, ...filter } }),
+          findMany: ({ args, query }) =>
+            query({ ...args, where: { ...args.where, ...filter } }),
+          findFirst: ({ args, query }) =>
+            query({ ...args, where: { ...args.where, ...filter } }),
+          count: ({ args, query }) =>
+            query({ ...args, where: { ...args.where, ...filter } }),
         },
       },
     });

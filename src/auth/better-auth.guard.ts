@@ -7,7 +7,10 @@ import {
 import { Reflector } from '@nestjs/core';
 import { AuthService } from '@thallesp/nestjs-better-auth';
 import { fromNodeHeaders } from 'better-auth/node';
+import type { IncomingHttpHeaders } from 'http';
 import { IS_PUBLIC_KEY } from '../common/decorators/public.decorator';
+import type { AuthUser } from '../common/types/auth-user';
+import { UserRole } from '../generated/prisma/client';
 
 /**
  * Global authentication guard backed by Better Auth.
@@ -34,7 +37,11 @@ export class BetterAuthGuard implements CanActivate {
     ]);
     if (isPublic) return true;
 
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<{
+      headers: IncomingHttpHeaders;
+      user?: AuthUser;
+      session?: unknown;
+    }>();
     const session = await this.authService.api.getSession({
       headers: fromNodeHeaders(request.headers),
     });
@@ -45,12 +52,12 @@ export class BetterAuthGuard implements CanActivate {
 
     const user = session.user as {
       id: string;
-      role?: string;
+      role?: UserRole;
       schoolId?: string | null;
     };
     request.user = {
       userId: user.id,
-      role: user.role,
+      role: user.role ?? UserRole.PARENT,
       schoolId: user.schoolId ?? null,
     };
     request.session = session;

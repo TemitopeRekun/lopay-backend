@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Post } from '@nestjs/common';
 import { DeviceTokensService } from './device-tokens.service';
 import { RegisterDeviceTokenDto } from './dto/register-device-token.dto';
 import { UnregisterDeviceTokenDto } from './dto/unregister-device-token.dto';
-import { CurrentUser } from '../common/decorators/user.decorator';
+import { CurrentUser, AuthUser } from '../common/decorators/user.decorator';
 
 @Controller('device-tokens')
 export class DeviceTokensController {
@@ -11,7 +11,7 @@ export class DeviceTokensController {
   @Post()
   async register(
     @Body() dto: RegisterDeviceTokenDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     return this.deviceTokensService.register(user.userId, dto);
   }
@@ -19,7 +19,7 @@ export class DeviceTokensController {
   @Delete()
   async unregister(
     @Body() dto: UnregisterDeviceTokenDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     return this.deviceTokensService.unregister(user.userId, dto.token);
   }

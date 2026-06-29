@@ -22,6 +22,8 @@ import { DocumentsService } from '../documents/documents.service';
 import { EventsGateway } from '../events/events.gateway';
 import { AuditService, AuditActor } from '../audit/audit.service';
 import { Money } from '../common/money';
+import { errorMessage } from '../common/errors';
+import { paymentCommonFields } from '../common/payment-dto';
 
 @Injectable()
 export class SchoolPaymentsService {
@@ -54,7 +56,7 @@ export class SchoolPaymentsService {
           email: dto.ownerEmail,
           password: dto.ownerPassword,
           name: dto.ownerName,
-        } as any,
+        },
       });
       ownerUserId = signUp.user.id;
       // role is not a sign-up input (security); elevate to SCHOOL_OWNER server-side.
@@ -62,9 +64,9 @@ export class SchoolPaymentsService {
         where: { id: ownerUserId },
         data: { role: UserRole.SCHOOL_OWNER },
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       throw new BadRequestException(
-        `Could not create owner account: ${error?.message ?? 'unknown error'}`,
+        `Could not create owner account: ${errorMessage(error)}`,
       );
     }
 
@@ -106,7 +108,9 @@ export class SchoolPaymentsService {
   }
 
   async updateSchool(id: string, dto: UpdateSchoolDto) {
-    const school = await this.prisma.school.findFirst({ where: { id, deletedAt: null } });
+    const school = await this.prisma.school.findFirst({
+      where: { id, deletedAt: null },
+    });
     if (!school) throw new NotFoundException('School not found');
 
     return this.prisma.school.update({
@@ -132,7 +136,9 @@ export class SchoolPaymentsService {
     // schoolIds.
     if (user.role === UserRole.SCHOOL_OWNER) {
       if (user.schoolId !== schoolId) {
-        throw new ForbiddenException('You can only view your own school details');
+        throw new ForbiddenException(
+          'You can only view your own school details',
+        );
       }
     } else if (user.role === UserRole.PARENT) {
       const hasEnrollment = await this.prisma.childEnrollment.findFirst({
@@ -241,7 +247,10 @@ export class SchoolPaymentsService {
       where: { isActive: true },
       orderBy: { className: 'asc' },
     });
-    return fees.map((f) => ({ ...f, feeAmount: Money.fromKobo(f.feeAmount).toNaira() }));
+    return fees.map((f) => ({
+      ...f,
+      feeAmount: Money.fromKobo(f.feeAmount).toNaira(),
+    }));
   }
 
   async getDashboardStats(schoolId: string) {
@@ -273,8 +282,12 @@ export class SchoolPaymentsService {
       ]);
 
     // DB stores kobo; return Naira for API consumers.
-    const totalRevenue = Money.fromKobo(confirmedPayments._sum.schoolAmount || 0).toNaira();
-    const pendingRevenue = Money.fromKobo(pendingPayments._sum.schoolAmount || 0).toNaira();
+    const totalRevenue = Money.fromKobo(
+      confirmedPayments._sum.schoolAmount || 0,
+    ).toNaira();
+    const pendingRevenue = Money.fromKobo(
+      pendingPayments._sum.schoolAmount || 0,
+    ).toNaira();
     const defaultedAmount = Money.fromKobo(
       enrollments.reduce((sum, e) => sum + e.remainingBalance, 0),
     ).toNaira();
@@ -369,7 +382,13 @@ export class SchoolPaymentsService {
       };
     });
 
-    return { items, total, page, limit: take, totalPages: Math.ceil(total / take) };
+    return {
+      items,
+      total,
+      page,
+      limit: take,
+      totalPages: Math.ceil(total / take),
+    };
   }
 
   async getHistory(
@@ -380,7 +399,7 @@ export class SchoolPaymentsService {
   ) {
     const cappedTake = Math.min(take, 200);
     const baseWhere: Prisma.PaymentWhereInput =
-      receiptType !== 'ALL' ? { paymentType: receiptType as any } : {};
+      receiptType !== 'ALL' ? { paymentType: receiptType as PaymentType } : {};
 
     const payments = await this.prisma.withTenant(schoolId).payment.findMany({
       where: baseWhere,
@@ -396,17 +415,16 @@ export class SchoolPaymentsService {
       take: cappedTake,
     });
 
-    const toPaymentDto = (payment: (typeof payments)[0], receiptSignedUrl?: string | null) => ({
+    const toPaymentDto = (
+      payment: (typeof payments)[0],
+      receiptSignedUrl?: string | null,
+    ) => ({
       id: payment.id,
       schoolId: payment.schoolId,
       date: payment.paymentDate,
       paymentDate: payment.paymentDate,
-      amount: Money.fromKobo(payment.amountPaid).toNaira(),
-      amountPaid: Money.fromKobo(payment.amountPaid).toNaira(),
-      studentName: payment.enrollment.child.fullName,
+      ...paymentCommonFields(payment),
       childName: payment.enrollment.child.fullName,
-      className: payment.enrollment.className,
-      schoolName: payment.enrollment.school.name,
       type: payment.paymentType,
       paymentType: payment.paymentType,
       status: payment.status,
@@ -467,17 +485,16 @@ export class SchoolPaymentsService {
       },
     });
 
-    const toPendingDto = (p: (typeof payments)[0], receiptSignedUrl?: string | null) => ({
+    const toPendingDto = (
+      p: (typeof payments)[0],
+      receiptSignedUrl?: string | null,
+    ) => ({
       ...p,
       date: p.paymentDate,
-      amount: Money.fromKobo(p.amountPaid).toNaira(),
-      amountPaid: Money.fromKobo(p.amountPaid).toNaira(),
+      ...paymentCommonFields(p),
       platformAmount: Money.fromKobo(p.platformAmount).toNaira(),
       schoolAmount: Money.fromKobo(p.schoolAmount).toNaira(),
-      studentName: p.enrollment?.child?.fullName,
       childName: p.enrollment?.child?.fullName,
-      className: p.enrollment?.className,
-      schoolName: p.enrollment?.school?.name,
       ...(receiptSignedUrl !== undefined ? { receiptSignedUrl } : {}),
     });
 
@@ -603,7 +620,9 @@ export class SchoolPaymentsService {
       );
 
       // 3. Notify Parent
-      const confirmedAmountStr = Money.fromKobo(payment.amountPaid).formatNaira();
+      const confirmedAmountStr = Money.fromKobo(
+        payment.amountPaid,
+      ).formatNaira();
       let message = `Your payment of ${confirmedAmountStr} for ${payment.enrollment.child.fullName} (${payment.enrollment.className}) at ${payment.enrollment.school.name} has been confirmed.`;
       if (isCompleted) {
         message += ' All payments for this semester are now completed.';
@@ -736,10 +755,12 @@ export class SchoolPaymentsService {
     schoolId: string,
     actor: AuditActor,
   ) {
-    const enrollment = await this.prisma.withTenant(schoolId).childEnrollment.findFirst({
-      where: { id: enrollmentId },
-      include: { school: true, child: { include: { parent: true } } },
-    });
+    const enrollment = await this.prisma
+      .withTenant(schoolId)
+      .childEnrollment.findFirst({
+        where: { id: enrollmentId },
+        include: { school: true, child: { include: { parent: true } } },
+      });
 
     if (!enrollment) {
       throw new BadRequestException('Enrollment not found');
@@ -853,9 +874,7 @@ export class SchoolPaymentsService {
         where: { id: payment.enrollmentId },
         data: {
           remainingBalance: { increment: payment.amountPaid },
-          paymentStatus: reopened
-            ? PaymentStatus.ACTIVE
-            : before.paymentStatus,
+          paymentStatus: reopened ? PaymentStatus.ACTIVE : before.paymentStatus,
         },
       });
       let restoredBalance = incremented.remainingBalance;

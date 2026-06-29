@@ -9,7 +9,8 @@ export class ReversePaymentDto {
 
   @ApiPropertyOptional({
     example: 'Confirmed in error — funds not actually received.',
-    description: 'Why the confirmation is being reversed (stored in the audit log).',
+    description:
+      'Why the confirmation is being reversed (stored in the audit log).',
   })
   @IsString()
   @IsOptional()

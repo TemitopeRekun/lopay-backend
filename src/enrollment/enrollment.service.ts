@@ -20,7 +20,11 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { EventsGateway } from '../events/events.gateway';
 import { AuditService, AuditActor } from '../audit/audit.service';
 import { Money } from '../common/money';
-import { PaystackService } from '../paystack/paystack.service';
+import { WEEKLY_INSTALLMENTS, MONTHLY_INSTALLMENTS } from '../common/fees';
+import {
+  PaystackService,
+  PaystackWebhookEvent,
+} from '../paystack/paystack.service';
 import { grossUp } from '../common/paystack-fee';
 import { randomUUID } from 'crypto';
 
@@ -104,9 +108,13 @@ export class EnrollmentService {
     }
 
     if (childId) {
-      const child = await this.prisma.child.findUnique({ where: { id: childId } });
+      const child = await this.prisma.child.findUnique({
+        where: { id: childId },
+      });
       if (!child || child.parentId !== parent.id) {
-        throw new BadRequestException('Child not found or does not belong to user');
+        throw new BadRequestException(
+          'Child not found or does not belong to user',
+        );
       }
     } else if (dto.childName) {
       // Reuse an existing child with the same identity rather than creating a
@@ -126,7 +134,9 @@ export class EnrollmentService {
         childId = existingChild.id;
       } else {
         try {
-          const newChild = await this.prisma.child.create({ data: childIdentity });
+          const newChild = await this.prisma.child.create({
+            data: childIdentity,
+          });
           childId = newChild.id;
         } catch (error) {
           if (
@@ -144,7 +154,9 @@ export class EnrollmentService {
         }
       }
     } else {
-      throw new BadRequestException('Either childId or childName must be provided');
+      throw new BadRequestException(
+        'Either childId or childName must be provided',
+      );
     }
 
     // FAILED enrollments may always be retried. PENDING enrollments (an abandoned
@@ -173,7 +185,9 @@ export class EnrollmentService {
       ) {
         pendingEnrollmentId = existingEnrollment.id;
       } else {
-        throw new BadRequestException('Enrollment already exists for this child');
+        throw new BadRequestException(
+          'Enrollment already exists for this child',
+        );
       }
     }
 
@@ -204,7 +218,7 @@ export class EnrollmentService {
     const target = error.meta?.target;
     return Array.isArray(target)
       ? target.includes('idempotencyKey')
-      : String(target ?? '').includes('idempotencyKey');
+      : typeof target === 'string' && target.includes('idempotencyKey');
   }
 
   /** Shape an existing first-payment row into the enrollment API response. */
@@ -247,10 +261,11 @@ export class EnrollmentService {
    *     resume the SAME single-use reference (cannot double-charge). A success is
    *     also reconciled immediately so the enrollment activates.
    */
-  private async resolvePendingFirstPayment(
-    enrollmentId: string,
-  ): Promise<
-    | { resolved: true; response: ReturnType<EnrollmentService['buildResumeResponse']> }
+  private async resolvePendingFirstPayment(enrollmentId: string): Promise<
+    | {
+        resolved: true;
+        response: ReturnType<EnrollmentService['buildResumeResponse']>;
+      }
     | { resolved: false }
   > {
     const payment = await this.prisma.payment.findFirst({
@@ -269,7 +284,9 @@ export class EnrollmentService {
 
     let verified: Awaited<ReturnType<PaystackService['verifyTransaction']>>;
     try {
-      verified = await this.paystack.verifyTransaction(payment.paystackReference);
+      verified = await this.paystack.verifyTransaction(
+        payment.paystackReference,
+      );
     } catch (err) {
       // Can't reach Paystack — never risk a double charge. Resume the same txn.
       this.logger.warn(
@@ -307,7 +324,10 @@ export class EnrollmentService {
     };
   }
 
-  private calculateEnrichment(enrollment: EnrollmentWithRelations, payments: PaymentRecord[]) {
+  private calculateEnrichment(
+    enrollment: EnrollmentWithRelations,
+    payments: PaymentRecord[],
+  ) {
     const confirmedPayments = payments.filter((p) => p.isConfirmed);
     // Arithmetic in kobo; convert to naira only for the returned object.
     const paidAmountKobo = confirmedPayments.reduce(
@@ -334,15 +354,17 @@ export class EnrollmentService {
       }
 
       const plan = enrollment.installmentFrequency;
-      const totalInstallments = plan === 'WEEKLY' ? 12 : 3;
+      const totalInstallments =
+        plan === 'WEEKLY' ? WEEKLY_INSTALLMENTS : MONTHLY_INSTALLMENTS;
       const paidInstallments = confirmedPayments.filter(
         (p) => p.paymentType === PaymentType.INSTALLMENT,
       ).length;
       const remainingInstallments = totalInstallments - paidInstallments;
 
-      nextInstallmentAmountKobo = remainingInstallments > 0
-        ? Math.round(enrollment.remainingBalance / remainingInstallments)
-        : enrollment.remainingBalance;
+      nextInstallmentAmountKobo =
+        remainingInstallments > 0
+          ? Math.round(enrollment.remainingBalance / remainingInstallments)
+          : enrollment.remainingBalance;
     }
 
     // Enrich payments — convert kobo amounts to naira.
@@ -363,7 +385,9 @@ export class EnrollmentService {
       remainingBalance: Money.fromKobo(enrollment.remainingBalance).toNaira(),
       paidAmount: Money.fromKobo(paidAmountKobo).toNaira(),
       nextDueDate: nextDueDate ? nextDueDate.toISOString().split('T')[0] : null,
-      nextInstallmentAmount: Money.fromKobo(nextInstallmentAmountKobo).toNaira(),
+      nextInstallmentAmount: Money.fromKobo(
+        nextInstallmentAmountKobo,
+      ).toNaira(),
     };
   }
 
@@ -380,7 +404,9 @@ export class EnrollmentService {
       this.logger.log(`Parent not found for userId: ${userId}`);
       return [];
     }
-    this.logger.log(`Parent found. ID: ${parent.id}. Children: ${parent.children.length}`);
+    this.logger.log(
+      `Parent found. ID: ${parent.id}. Children: ${parent.children.length}`,
+    );
 
     if (parent.children.length === 0) {
       return [];
@@ -403,7 +429,9 @@ export class EnrollmentService {
       orderBy: { createdAt: 'desc' },
     });
 
-    this.logger.log(`Found ${enrollments.length} enrollments for userId: ${userId}`);
+    this.logger.log(
+      `Found ${enrollments.length} enrollments for userId: ${userId}`,
+    );
 
     return enrollments.map((enrollment) =>
       this.calculateEnrichment(enrollment, enrollment.payments),
@@ -469,7 +497,7 @@ export class EnrollmentService {
     // 3. Calculate Deposit — convert both to kobo; DB stores kobo.
     const depositKobo = Money.fromNaira(dto.firstPaymentPaid).toKobo();
     const calculation = this.paymentService.calculateInitialPayment(
-      classFee.feeAmount,    // already kobo (stored by createClassFee)
+      classFee.feeAmount, // already kobo (stored by createClassFee)
       depositKobo,
     );
 
@@ -477,80 +505,84 @@ export class EnrollmentService {
     let result;
     try {
       result = await this.prisma.$transaction(async (tx) => {
-      let enrollment;
-      if (retryEnrollmentId) {
-        this.logger.log(`Retrying first payment for enrollmentId: ${retryEnrollmentId}`);
-        enrollment = await tx.childEnrollment.update({
-          where: { id: retryEnrollmentId },
+        let enrollment;
+        if (retryEnrollmentId) {
+          this.logger.log(
+            `Retrying first payment for enrollmentId: ${retryEnrollmentId}`,
+          );
+          enrollment = await tx.childEnrollment.update({
+            where: { id: retryEnrollmentId },
+            data: {
+              className: dto.className,
+              totalSchoolFee: calculation.schoolFees, // kobo
+              platformFee: calculation.platformFee, // kobo
+              schoolMinimumFee: calculation.minimumDeposit, // kobo
+              firstPaymentPaid: depositKobo, // kobo
+              remainingBalance: calculation.remainingBalance, // kobo
+              paymentStatus: PaymentStatus.PENDING,
+              installmentFrequency: dto.installmentFrequency,
+              termStartDate: dto.termStartDate,
+              termEndDate: dto.termEndDate,
+            },
+          });
+        } else {
+          this.logger.log(
+            `Creating enrollment for childId: ${childId}, schoolId: ${dto.schoolId}`,
+          );
+          enrollment = await tx.childEnrollment.create({
+            data: {
+              childId,
+              schoolId: dto.schoolId,
+              className: dto.className,
+              totalSchoolFee: calculation.schoolFees, // kobo
+              platformFee: calculation.platformFee, // kobo
+              schoolMinimumFee: calculation.minimumDeposit, // kobo
+              firstPaymentPaid: depositKobo, // kobo
+              remainingBalance: calculation.remainingBalance, // kobo
+              paymentStatus: PaymentStatus.PENDING,
+              installmentFrequency: dto.installmentFrequency,
+              termStartDate: dto.termStartDate,
+              termEndDate: dto.termEndDate,
+            },
+          });
+        }
+
+        const payment = await tx.payment.create({
           data: {
-            className: dto.className,
-            totalSchoolFee: calculation.schoolFees,       // kobo
-            platformFee: calculation.platformFee,          // kobo
-            schoolMinimumFee: calculation.minimumDeposit,  // kobo
-            firstPaymentPaid: depositKobo,                 // kobo
-            remainingBalance: calculation.remainingBalance, // kobo
-            paymentStatus: PaymentStatus.PENDING,
-            installmentFrequency: dto.installmentFrequency,
-            termStartDate: dto.termStartDate,
-            termEndDate: dto.termEndDate,
-          },
-        });
-      } else {
-        this.logger.log(`Creating enrollment for childId: ${childId}, schoolId: ${dto.schoolId}`);
-        enrollment = await tx.childEnrollment.create({
-          data: {
-            childId,
+            enrollmentId: enrollment.id,
             schoolId: dto.schoolId,
-            className: dto.className,
-            totalSchoolFee: calculation.schoolFees,       // kobo
-            platformFee: calculation.platformFee,          // kobo
-            schoolMinimumFee: calculation.minimumDeposit,  // kobo
-            firstPaymentPaid: depositKobo,                 // kobo
-            remainingBalance: calculation.remainingBalance, // kobo
-            paymentStatus: PaymentStatus.PENDING,
-            installmentFrequency: dto.installmentFrequency,
-            termStartDate: dto.termStartDate,
-            termEndDate: dto.termEndDate,
+            amountPaid: depositKobo, // kobo
+            platformAmount: calculation.platformFee, // kobo
+            schoolAmount: calculation.amountToSchool, // kobo
+            receiver: PaymentReceiver.PLATFORM,
+            paymentType: PaymentType.FIRST_PAYMENT,
+            status: PaymentTransactionStatus.PENDING,
+            isConfirmed: false,
+            receiptUrl: dto.receiptUrl,
+            idempotencyKey: dto.idempotencyKey ?? null,
+            paymentDate: new Date(),
           },
         });
-      }
 
-      const payment = await tx.payment.create({
-        data: {
-          enrollmentId: enrollment.id,
-          schoolId: dto.schoolId,
-          amountPaid: depositKobo,                  // kobo
-          platformAmount: calculation.platformFee,   // kobo
-          schoolAmount: calculation.amountToSchool,  // kobo
-          receiver: PaymentReceiver.PLATFORM,
-          paymentType: PaymentType.FIRST_PAYMENT,
-          status: PaymentTransactionStatus.PENDING,
-          isConfirmed: false,
-          receiptUrl: dto.receiptUrl,
-          idempotencyKey: dto.idempotencyKey ?? null,
-          paymentDate: new Date(),
-        },
-      });
+        const school = await tx.school.findUnique({
+          where: { id: dto.schoolId },
+        });
 
-      const school = await tx.school.findUnique({
-        where: { id: dto.schoolId },
-      });
+        // Fetch child name for notification
+        const child = await tx.child.findUnique({
+          where: { id: childId },
+          select: { fullName: true },
+        });
+        const childName = child?.fullName || dto.childName || 'Student';
 
-      // Fetch child name for notification
-      const child = await tx.child.findUnique({
-        where: { id: childId },
-        select: { fullName: true },
-      });
-      const childName = child?.fullName || dto.childName || 'Student';
-
-      return {
-        enrollment,
-        payment,
-        calculation,
-        school,
-        childName,
-        studentName: childName, // Alias for consistency
-      };
+        return {
+          enrollment,
+          payment,
+          calculation,
+          school,
+          childName,
+          studentName: childName, // Alias for consistency
+        };
       });
     } catch (error) {
       // A concurrent request with the same idempotency key won the race —
@@ -619,7 +651,9 @@ export class EnrollmentService {
 
     // Idempotency: replay an in-flight/completed intent rather than double-charging.
     if (dto.idempotencyKey) {
-      const existing = await this.findPaymentByIdempotencyKey(dto.idempotencyKey);
+      const existing = await this.findPaymentByIdempotencyKey(
+        dto.idempotencyKey,
+      );
       if (existing) {
         return {
           idempotent: true,
@@ -638,7 +672,11 @@ export class EnrollmentService {
     // guards first prevents an orphaned Child when the school can't accept online
     // payments or has no active fee for the class.
     const classFee = await this.prisma.classFee.findFirst({
-      where: { schoolId: dto.schoolId, className: dto.className, isActive: true },
+      where: {
+        schoolId: dto.schoolId,
+        className: dto.className,
+        isActive: true,
+      },
     });
     if (!classFee) {
       throw new BadRequestException(
@@ -664,7 +702,8 @@ export class EnrollmentService {
     // it's still live (or already paid), otherwise free the enrollment to retry.
     let reuseEnrollmentId = retryEnrollmentId;
     if (pendingEnrollmentId) {
-      const pending = await this.resolvePendingFirstPayment(pendingEnrollmentId);
+      const pending =
+        await this.resolvePendingFirstPayment(pendingEnrollmentId);
       if (pending.resolved) return pending.response;
       reuseEnrollmentId = pendingEnrollmentId;
     }
@@ -736,7 +775,9 @@ export class EnrollmentService {
       });
     } catch (error) {
       if (dto.idempotencyKey && this.isIdempotencyConflict(error)) {
-        const existing = await this.findPaymentByIdempotencyKey(dto.idempotencyKey);
+        const existing = await this.findPaymentByIdempotencyKey(
+          dto.idempotencyKey,
+        );
         if (existing) {
           return {
             idempotent: true,
@@ -803,7 +844,9 @@ export class EnrollmentService {
       },
     });
     if (!payment) {
-      this.logger.warn(`Paystack reconcile: no payment for reference ${reference}`);
+      this.logger.warn(
+        `Paystack reconcile: no payment for reference ${reference}`,
+      );
       return { reconciled: false, reason: 'unknown_reference' };
     }
     if (payment.status === PaymentTransactionStatus.SUCCESS) {
@@ -927,7 +970,9 @@ export class EnrollmentService {
   async failPaystackPayment(reference: string) {
     const payment = await this.prisma.payment.findUnique({
       where: { paystackReference: reference },
-      include: { enrollment: { include: { child: { include: { parent: true } } } } },
+      include: {
+        enrollment: { include: { child: { include: { parent: true } } } },
+      },
     });
     if (!payment || payment.status !== PaymentTransactionStatus.PENDING) {
       return { updated: false };
@@ -969,7 +1014,7 @@ export class EnrollmentService {
    * idempotent (the status-guarded reconcile/fail handlers above).
    */
   async processPaystackWebhookEvent(
-    event: any,
+    event: PaystackWebhookEvent,
   ): Promise<{ received: boolean; duplicate?: boolean }> {
     const eventType: string = event?.event ?? 'unknown';
     const reference: string | null = event?.data?.reference ?? null;
@@ -1034,7 +1079,7 @@ export class EnrollmentService {
   private async recordPaystackDispute(
     eventType: string,
     reference: string | null,
-    event: any,
+    event: PaystackWebhookEvent,
   ) {
     const payment = reference
       ? await this.prisma.payment.findUnique({
@@ -1082,7 +1127,7 @@ export class EnrollmentService {
     const target = error.meta?.target;
     return Array.isArray(target)
       ? target.includes(field)
-      : String(target ?? '').includes(field);
+      : typeof target === 'string' && target.includes(field);
   }
 
   async submitInstallmentPayment(
@@ -1178,9 +1223,9 @@ export class EnrollmentService {
           data: {
             enrollmentId,
             schoolId: enrollment.schoolId,
-            amountPaid: amountPaidKobo,    // kobo
+            amountPaid: amountPaidKobo, // kobo
             platformAmount: 0,
-            schoolAmount: amountPaidKobo,   // kobo
+            schoolAmount: amountPaidKobo, // kobo
             receiver: PaymentReceiver.SCHOOL,
             paymentType: PaymentType.INSTALLMENT,
             status: PaymentTransactionStatus.PENDING,

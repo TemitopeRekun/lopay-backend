@@ -28,7 +28,8 @@ export function createAuth(prisma: PrismaClient) {
     'http://localhost:5173',
     'http://localhost:5174',
   );
-  if (process.env.BETTER_AUTH_URL) trustedOrigins.push(process.env.BETTER_AUTH_URL);
+  if (process.env.BETTER_AUTH_URL)
+    trustedOrigins.push(process.env.BETTER_AUTH_URL);
 
   return betterAuth({
     basePath: '/api/auth',
@@ -83,9 +84,11 @@ export function createAuth(prisma: PrismaClient) {
     databaseHooks: {
       user: {
         create: {
-          before: async (user: any) => {
+          before: (user: { name?: string; fullName?: string }) => {
             // Mirror Better Auth `name` onto the domain `fullName` column.
-            return { data: { ...user, fullName: user.fullName ?? user.name } };
+            return Promise.resolve({
+              data: { ...user, fullName: user.fullName ?? user.name },
+            });
           },
           // NOTE: the domain `Parent` row is created lazily on first enrollment
           // (EnrollmentService.resolveEnrollmentTarget), NOT here — every sign-up
@@ -98,8 +101,11 @@ export function createAuth(prisma: PrismaClient) {
     plugins: [
       bearer(),
       customSession(async ({ user, session }) => {
+        // Better Auth's base user type doesn't include our `role` column; read it
+        // off a narrowed view rather than `any`.
+        const role = (user as { role?: string }).role;
         let schoolId: string | null = null;
-        if ((user as any).role === 'SCHOOL_OWNER') {
+        if (role === 'SCHOOL_OWNER') {
           const school = await prisma.school.findUnique({
             where: { ownerId: user.id },
             select: { id: true },
@@ -107,7 +113,7 @@ export function createAuth(prisma: PrismaClient) {
           schoolId = school?.id ?? null;
         }
         return {
-          user: { ...user, role: (user as any).role, schoolId },
+          user: { ...user, role, schoolId },
           session,
         };
       }),
