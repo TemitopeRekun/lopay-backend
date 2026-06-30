@@ -92,3 +92,42 @@ it correctly per environment or the SPA cannot reach the API/socket.
 - **`GET /payments/paystack/verify`**: scoped to the caller's own payment
   (parent of the enrolled child, or the school's owner). A foreign reference is
   `403`; an unknown one is `404`.
+
+## Money ledger: reversals & audit interpretation
+
+All money-state changes are owned by `LedgerService` (`src/ledger/`, see
+[ADR 0004](./adr/0004-ledger-service-ownership.md)). Every transition writes an
+`AuditLog` row **inside the same transaction** as the balance change, so the log
+and the balances can never disagree.
+
+### Reversing a confirmed installment
+
+`reversePayment` (school-owner action) is the auditable undo for a **confirmed
+`SUCCESS` installment** (first-payment reversals are intentionally not supported
+here — they change the enrollment lifecycle). It:
+
+1. Flips the payment to `REVERSED` with a guarded write — a double-tap/replay
+   finds `count === 0` and aborts, so the balance is restored **exactly once**.
+2. Atomically **increments** `remainingBalance` by the paid amount, **clamped**
+   so a restored balance can never exceed `totalSchoolFee`.
+3. Reopens a `COMPLETED` enrollment back to `ACTIVE`.
+4. Records `PAYMENT_REVERSED` (with the operator's `reason`, and
+   `metadata.reopened`) and notifies the parent.
+
+If a reversal is requested and none applies, the API returns `400` ("No confirmed
+installment payment found to reverse") — that is the guard, not an error to retry.
+
+### Reading the audit log
+
+```
+docker exec -it lopay-db psql -U lopay -d lopaydb -c \
+  "SELECT action, \"entityId\", \"createdAt\", metadata FROM \"AuditLog\" ORDER BY \"createdAt\" DESC LIMIT 20;"
+```
+
+- `actor` is `null` for **system** actions — currently only the nightly
+  defaulter sweep (`metadata.source = 'scheduled-defaulter-detection'`).
+- `FIRST_PAYMENT_PAID` carries `paystackFeeDelta` (actual − estimated Paystack
+  fee, in kobo). A non-zero value is expected occasionally; investigate
+  **sustained** drift — the platform account bears that fee.
+- `before`/`after` capture the pre/post `status`, `isConfirmed`, and
+  `remainingBalance`, so a balance can be reconstructed by replaying the rows.
