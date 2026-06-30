@@ -97,6 +97,18 @@ export class PrismaService
    *   await db.payment.findMany({ where: { isConfirmed: false } });
    *   // schoolId is injected automatically — no need to add it manually
    *
+   * Scope policy (Milestone 3 — "adopt everywhere or remove": kept, applied by
+   * access pattern). `withTenant` guards the **school-owner tenant** surface,
+   * where a request is bounded to one school the caller owns:
+   *   - DO use it: `SchoolPaymentsService` reads and the school-owner ledger
+   *     transitions (`LedgerService.confirm/reject/reverse/markEnrollmentAsDefaulted`).
+   *   - DON'T use it for SUPER_ADMIN flows (`AdminService`) — admins operate
+   *     across all schools, so a single-tenant filter would be wrong; those
+   *     queries are cross-school by design (or pass an explicit `schoolId`).
+   *   - DON'T use it for parent/Paystack flows (`EnrollmentService`) — those
+   *     are keyed by enrollmentId / paystackReference / (schoolId, className)
+   *     and are already scoped by that key, not by an owner's tenant.
+   *
    * Note: does NOT apply inside $transaction callbacks (tx is a raw
    * TransactionClient). Single-record mutations (update/delete by PK) also
    * bypass the filter intentionally — they are already scoped by the record's
