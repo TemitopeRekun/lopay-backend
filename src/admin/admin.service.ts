@@ -23,6 +23,12 @@ import { PLATFORM_FEE_RATE } from '../common/fees';
 import { errorMessage } from '../common/errors';
 import { paymentCommonFields } from '../common/payment-dto';
 import { PaystackService } from '../paystack/paystack.service';
+import {
+  parsePagination,
+  paginate,
+  type Paginated,
+} from '../common/pagination';
+import { CacheService, CacheKeys } from '../cache/cache.service';
 
 @Injectable()
 export class AdminService {
@@ -36,7 +42,13 @@ export class AdminService {
     private readonly paystack: PaystackService,
     private readonly ledger: LedgerService,
     private readonly onboarding: SchoolOnboardingService,
+    private readonly cache: CacheService,
   ) {}
+
+  // Short TTL for dashboard aggregates — they tolerate seconds of staleness and
+  // are re-derived cheaply; no explicit invalidation needed (M4 scale).
+  private static readonly AGGREGATE_TTL_SECONDS = 30;
+  private static readonly BANKS_TTL_SECONDS = 24 * 60 * 60;
 
   /**
    * Create (or recreate) a Paystack subaccount for a school and persist the code.
@@ -82,9 +94,13 @@ export class AdminService {
     }
   }
 
-  /** Passthrough: Nigerian bank list for the onboarding dropdown. */
+  /** Nigerian bank list for the onboarding dropdown (cached ~24h, shared). */
   async listBanks() {
-    return this.paystack.listBanks();
+    return this.cache.getOrSet(
+      CacheKeys.paystackBanks(),
+      AdminService.BANKS_TTL_SECONDS,
+      () => this.paystack.listBanks(),
+    );
   }
 
   /** Passthrough: resolve an account number → registered account name. */
@@ -137,26 +153,33 @@ export class AdminService {
     };
   }
 
-  /** Get all first payments waiting to be settled */
-  async getPendingFirstPayments(includeReceiptSignedUrls = false) {
-    const payments = await this.prisma.payment.findMany({
-      where: {
-        paymentType: PaymentType.FIRST_PAYMENT,
-        receiver: PaymentReceiver.PLATFORM,
-        isConfirmed: false,
-        status: PaymentTransactionStatus.PENDING,
-      },
-      include: {
-        enrollment: {
-          include: {
-            child: true,
-            school: true,
-          },
-        },
-      },
-    });
+  /** Get first payments waiting to be settled (paginated). */
+  async getPendingFirstPayments(
+    includeReceiptSignedUrls = false,
+    page?: string | number,
+    limit?: string | number,
+  ): Promise<Paginated<unknown>> {
+    const { page: p, limit: l, skip } = parsePagination(page, limit);
+    const where = {
+      paymentType: PaymentType.FIRST_PAYMENT,
+      receiver: PaymentReceiver.PLATFORM,
+      isConfirmed: false,
+      status: PaymentTransactionStatus.PENDING,
+    } satisfies Prisma.PaymentWhereInput;
 
-    const results = await Promise.all(
+    const [payments, total] = await Promise.all([
+      this.prisma.payment.findMany({
+        where,
+        include: { enrollment: { include: { child: true, school: true } } },
+        orderBy: { paymentDate: 'desc' },
+        skip,
+        take: l,
+      }),
+      this.prisma.payment.count({ where }),
+    ]);
+
+    // Signing fans out at most `l` (<= MAX_PAGE_SIZE) URLs — bounded to this page.
+    const items = await Promise.all(
       payments.map(async (p) => {
         let receiptSignedUrl: string | null = null;
         if (includeReceiptSignedUrls && p.receiptUrl) {
@@ -185,7 +208,7 @@ export class AdminService {
       }),
     );
 
-    return results;
+    return paginate(items, total, p, l);
   }
 
   /** Thin caller — settle logic lives in LedgerService (Milestone 3). */
@@ -193,25 +216,30 @@ export class AdminService {
     return this.ledger.settleFirstPayment(paymentId, actor);
   }
 
-  /** Get all pending installment payments across all schools (read-only) */
-  async getPendingInstallments() {
-    const payments = await this.prisma.payment.findMany({
-      where: {
-        paymentType: PaymentType.INSTALLMENT,
-        isConfirmed: false,
-        status: PaymentTransactionStatus.PENDING,
-      },
-      include: {
-        enrollment: {
-          include: {
-            child: true,
-            school: true,
-          },
-        },
-      },
-    });
+  /** Get pending installment payments across all schools (paginated, read-only). */
+  async getPendingInstallments(
+    page?: string | number,
+    limit?: string | number,
+  ): Promise<Paginated<unknown>> {
+    const { page: p, limit: l, skip } = parsePagination(page, limit);
+    const where = {
+      paymentType: PaymentType.INSTALLMENT,
+      isConfirmed: false,
+      status: PaymentTransactionStatus.PENDING,
+    } satisfies Prisma.PaymentWhereInput;
 
-    return payments.map((p) => ({
+    const [payments, total] = await Promise.all([
+      this.prisma.payment.findMany({
+        where,
+        include: { enrollment: { include: { child: true, school: true } } },
+        orderBy: { paymentDate: 'desc' },
+        skip,
+        take: l,
+      }),
+      this.prisma.payment.count({ where }),
+    ]);
+
+    const items = payments.map((p) => ({
       ...p,
       date: p.paymentDate,
       amount: Money.fromKobo(p.amountPaid).toNaira(),
@@ -221,6 +249,8 @@ export class AdminService {
       className: p.enrollment?.className,
       schoolName: p.enrollment?.school?.name,
     }));
+
+    return paginate(items, total, p, l);
   }
 
   /** Thin caller — reject logic lives in LedgerService (Milestone 3). */
@@ -228,14 +258,15 @@ export class AdminService {
     return this.ledger.rejectFirstPayment(paymentId, actor);
   }
 
-  /** Get students/enrollments for a specific school (admin view) */
+  /** Get students/enrollments for a specific school (admin view, paginated). */
   async getSchoolStudents(
     schoolId: string,
     className?: string,
     search?: string,
-    page = 1,
-    limit = 50,
+    page?: string | number,
+    limit?: string | number,
   ) {
+    const { page: p, limit: l, skip } = parsePagination(page, limit);
     const whereClause: Prisma.ChildEnrollmentWhereInput = { schoolId };
     if (className) {
       whereClause.className = className;
@@ -260,8 +291,8 @@ export class AdminService {
           child: { include: { parent: { include: { user: true } } } },
           payments: { orderBy: { paymentDate: 'desc' } },
         },
-        skip: (page - 1) * limit,
-        take: limit,
+        skip,
+        take: l,
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.childEnrollment.count({ where: whereClause }),
@@ -306,50 +337,54 @@ export class AdminService {
       };
     });
 
-    return { items, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return paginate(items, total, p, l);
   }
 
-  /** Platform revenue summary */
+  /** Platform revenue summary (cached, short TTL). */
   async getPlatformRevenue() {
-    const result = await this.prisma.payment.aggregate({
-      where: {
-        receiver: PaymentReceiver.PLATFORM,
-        isConfirmed: true,
+    return this.cache.getOrSet(
+      CacheKeys.adminRevenue(),
+      AdminService.AGGREGATE_TTL_SECONDS,
+      async () => {
+        const result = await this.prisma.payment.aggregate({
+          where: { receiver: PaymentReceiver.PLATFORM, isConfirmed: true },
+          _sum: { platformAmount: true },
+        });
+        return {
+          totalRevenue: Money.fromKobo(
+            result._sum.platformAmount ?? 0,
+          ).toNaira(),
+        };
       },
-      _sum: {
-        platformAmount: true,
-      },
-    });
-
-    return {
-      totalRevenue: Money.fromKobo(result._sum.platformAmount ?? 0).toNaira(),
-    };
+    );
   }
 
-  /** Global transactions for admin dashboard */
+  /** Global transactions for the admin dashboard (paginated). */
   async getTransactions(
     includeReceiptSignedUrls = false,
     receiptType: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT' = 'ALL',
-  ) {
-    const whereClause: Prisma.PaymentWhereInput = {};
+    page?: string | number,
+    limit?: string | number,
+  ): Promise<Paginated<unknown>> {
+    const { page: p, limit: l, skip } = parsePagination(page, limit);
+    const where: Prisma.PaymentWhereInput = {};
     if (receiptType !== 'ALL') {
-      whereClause.paymentType = receiptType as Prisma.EnumPaymentTypeFilter;
+      where.paymentType = receiptType as Prisma.EnumPaymentTypeFilter;
     }
 
-    const payments = await this.prisma.payment.findMany({
-      where: whereClause,
-      include: {
-        enrollment: {
-          include: {
-            child: true,
-            school: true,
-          },
-        },
-      },
-      orderBy: { paymentDate: 'desc' },
-    });
+    const [payments, total] = await Promise.all([
+      this.prisma.payment.findMany({
+        where,
+        include: { enrollment: { include: { child: true, school: true } } },
+        orderBy: { paymentDate: 'desc' },
+        skip,
+        take: l,
+      }),
+      this.prisma.payment.count({ where }),
+    ]);
 
-    const results = await Promise.all(
+    // Sign at most one page of receipts — the fan-out is bounded by `l`.
+    const items = await Promise.all(
       payments.map(async (p) => {
         let receiptSignedUrl: string | null = null;
         if (includeReceiptSignedUrls && p.receiptUrl) {
@@ -362,25 +397,56 @@ export class AdminService {
             receiptSignedUrl = null;
           }
         }
-
-        return {
-          ...p,
-          ...paymentCommonFields(p),
-          date: p.paymentDate,
-          type: p.paymentType,
-          childName: p.enrollment?.child?.fullName,
-          platformFeeAmount: Money.fromKobo(p.platformAmount).toNaira(),
-          platformFeePercentage: PLATFORM_FEE_RATE,
-          receiptSignedUrl,
-        };
+        return { ...this.mapTransaction(p), receiptSignedUrl };
       }),
     );
 
-    return results;
+    return paginate(items, total, p, l);
   }
 
-  /** Global student summary for admin dashboard */
+  /** Shape a payment row into the admin transaction view (no signed URL). */
+  private mapTransaction(
+    p: Prisma.PaymentGetPayload<{
+      include: { enrollment: { include: { child: true; school: true } } };
+    }>,
+  ) {
+    return {
+      ...p,
+      ...paymentCommonFields(p),
+      date: p.paymentDate,
+      type: p.paymentType,
+      childName: p.enrollment?.child?.fullName,
+      platformFeeAmount: Money.fromKobo(p.platformAmount).toNaira(),
+      platformFeePercentage: PLATFORM_FEE_RATE,
+    };
+  }
+
+  /**
+   * The N most-recent transactions for the dashboard. A dedicated `take`-bounded
+   * query — never materialises the full table the way slicing getTransactions did.
+   */
+  private async recentTransactions(take: number) {
+    const payments = await this.prisma.payment.findMany({
+      include: { enrollment: { include: { child: true, school: true } } },
+      orderBy: { paymentDate: 'desc' },
+      take,
+    });
+    return payments.map((p) => ({
+      ...this.mapTransaction(p),
+      receiptSignedUrl: null,
+    }));
+  }
+
+  /** Global student summary for admin dashboard (cached, short TTL). */
   async getStudentsSummary() {
+    return this.cache.getOrSet(
+      CacheKeys.adminStudentsSummary(),
+      AdminService.AGGREGATE_TTL_SECONDS,
+      () => this.computeStudentsSummary(),
+    );
+  }
+
+  private async computeStudentsSummary() {
     const [
       totalStudents,
       activeStudents,
@@ -428,8 +494,16 @@ export class AdminService {
     };
   }
 
-  /** Optional: per-school summary */
+  /** Per-school summary (cached, short TTL). */
   async getSchoolsSummary() {
+    return this.cache.getOrSet(
+      CacheKeys.adminSchoolsSummary(),
+      AdminService.AGGREGATE_TTL_SECONDS,
+      () => this.computeSchoolsSummary(),
+    );
+  }
+
+  private async computeSchoolsSummary() {
     const schools = await this.prisma.school.findMany({
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
@@ -476,7 +550,7 @@ export class AdminService {
     const [revenue, studentsSummary, recentTransactions] = await Promise.all([
       this.getPlatformRevenue(),
       this.getStudentsSummary(),
-      this.getTransactions(false, 'ALL'),
+      this.recentTransactions(10),
     ]);
 
     const now = new Date();
@@ -515,7 +589,7 @@ export class AdminService {
       activeStudents: studentsSummary.activeStudents,
       pendingApprovals: studentsSummary.pendingFirstPayments,
       totalOutstandingBalance: studentsSummary.totalOutstandingBalance,
-      recentTransactions: recentTransactions.slice(0, 10),
+      recentTransactions,
       revenueSeries: months.map(({ label, value }) => ({ label, value })),
     };
   }

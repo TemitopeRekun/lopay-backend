@@ -131,3 +131,85 @@ docker exec -it lopay-db psql -U lopay -d lopaydb -c \
   **sustained** drift — the platform account bears that fee.
 - `before`/`after` capture the pre/post `status`, `isConfirmed`, and
   `remainingBalance`, so a balance can be reconstructed by replaying the rows.
+
+---
+
+## Scale & performance (Milestone 4)
+
+Everything below is **additive and gated** — with none of the new env vars set,
+the app runs exactly as before on a single instance.
+
+### Multi-instance toggle: `REDIS_URL`
+
+Set `REDIS_URL` to run safely on N instances. It is read once at boot
+(`RedisModule`) and provides ONE shared connection to:
+
+| Feature | Without `REDIS_URL` (default) | With `REDIS_URL` |
+|---|---|---|
+| Request throttler (`@nestjs/throttler`, 500/min) | in-memory, **per instance** | shared counters across instances |
+| Auth brute-force limiter (`express-rate-limit`, 20/min) | in-memory, **per instance** | shared (`auth-rl:` keys) |
+| Cache (class fees, bank list, dashboard aggregates) | in-process Map + TTL | shared Redis keys |
+| Socket.IO fan-out | single instance | `@socket.io/redis-adapter` (pre-existing) |
+
+> ⚠️ Before scaling past one instance you **must** set `REDIS_URL`. With
+> per-instance in-memory limiters, an attacker's effective auth-attempt budget is
+> `20 × instanceCount`/min, and throttle counts don't add up.
+
+### Connection-pool sizing: `DATABASE_POOL_MAX`
+
+Each instance opens a pg pool capped at `DATABASE_POOL_MAX` (default **10**).
+Keep `instances × DATABASE_POOL_MAX` comfortably under Postgres'
+`max_connections` (≈100 on small managed tiers), leaving headroom for migrations
+and admin sessions.
+
+**PgBouncer (recommended at scale):** front Postgres with PgBouncer in
+*transaction* pooling mode, point `DATABASE_URL` at it, and append
+`?pgbouncer=true&connection_limit=1`; then set `DATABASE_POOL_MAX` low (1–5) per
+instance. PgBouncer multiplexes many app connections onto few server ones.
+
+**Read replicas (analytics):** the heavy admin aggregates (`/admin/overview`,
+`/admin/students/summary`, `/admin/schools/summary`) are read-only and cached
+~30s. When a replica is available, route those reads to it (a second
+`PrismaClient` bound to a `DATABASE_REPLICA_URL`) so dashboard load can't contend
+with the transactional write path. Not wired yet — planned follow-up.
+
+### Cache TTLs & invalidation
+
+| Data | Key | TTL | Invalidation |
+|---|---|---|---|
+| Class fees (per school) | `cache:classfees:<schoolId>` | 5 min | **explicit** `del` on `createClassFee` |
+| Paystack bank list | `cache:paystack:banks` | 24 h | TTL only |
+| Platform revenue | `cache:admin:revenue` | 30 s | TTL only |
+| Students summary | `cache:admin:students-summary` | 30 s | TTL only |
+| Schools summary | `cache:admin:schools-summary` | 30 s | TTL only |
+
+Aggregates use short TTLs instead of explicit invalidation — they tolerate a few
+seconds of staleness and are cheap to recompute. To force-clear after a data fix,
+`DEL` the key (or `FLUSHDB` a dedicated cache DB).
+
+### Pagination (admin lists)
+
+All admin list endpoints return `{ items, total, page, limit, totalPages }` and
+**cap `limit` at 200** (default 50) via `common/pagination.ts` — no HTTP caller
+can pull the whole table. Receipt signed-URLs are generated only for the current
+page. `GET /admin/overview` uses a dedicated `take:10` recent-transactions query
+(it no longer materialises every payment to slice ten). The SPA pages these lists
+(`components/Pagination.tsx`).
+
+### Paystack circuit breaker
+
+`PaystackService` wraps its HTTP call in an `opossum` breaker (`name: 'paystack'`,
+50% error threshold over ≥5 calls, 30s reset). When Paystack is failing, the
+circuit OPENs and calls fail fast with **503** instead of piling up. 4xx business
+errors (e.g. a bad account number) are excluded via `errorFilter` and never trip
+it. Watch for the `Paystack circuit OPEN` log line.
+
+### Applying the M4 index migration
+
+`migration 20260630000001_add_scale_indexes` adds five additive indexes (no data
+change). `prisma migrate deploy` applies them in a transaction with a brief lock —
+fine for current table sizes. For very large `Payment` tables, build them
+`CONCURRENTLY` out-of-band first (outside a transaction), then mark the migration
+applied with `prisma migrate resolve --applied 20260630000001_add_scale_indexes`.
+The hot `ORDER BY paymentDate DESC` path is covered by `Payment_paymentDate_idx`
+(proven by the EXPLAIN assertion in `test/admin-pagination.e2e-spec.ts`).

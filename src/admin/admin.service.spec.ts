@@ -8,6 +8,7 @@ import { AuditService } from '../audit/audit.service';
 import { PaystackService } from '../paystack/paystack.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { SchoolOnboardingService } from '../school-onboarding/school-onboarding.service';
+import { CacheService } from '../cache/cache.service';
 
 describe('AdminService', () => {
   let service: AdminService;
@@ -28,6 +29,17 @@ describe('AdminService', () => {
         { provide: PaystackService, useValue: paystack },
         { provide: LedgerService, useValue: {} },
         { provide: SchoolOnboardingService, useValue: {} },
+        {
+          // Passthrough cache: always run the loader (no caching in unit tests).
+          provide: CacheService,
+          useValue: {
+            getOrSet: (_k: string, _ttl: number, loader: () => unknown) =>
+              loader(),
+            get: jest.fn(),
+            set: jest.fn(),
+            del: jest.fn(),
+          },
+        },
       ],
     }).compile();
     service = module.get<AdminService>(AdminService);

@@ -22,10 +22,13 @@ import { LedgerService } from '../ledger/ledger.service';
 import { SchoolOnboardingService } from '../school-onboarding/school-onboarding.service';
 import { Money } from '../common/money';
 import { paymentCommonFields } from '../common/payment-dto';
+import { CacheService, CacheKeys } from '../cache/cache.service';
 
 @Injectable()
 export class SchoolPaymentsService {
   private readonly logger = new Logger(SchoolPaymentsService.name);
+  // Class fees change rarely; cache longer and invalidate explicitly on write.
+  private static readonly CLASS_FEES_TTL_SECONDS = 5 * 60;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -35,6 +38,7 @@ export class SchoolPaymentsService {
     private readonly audit: AuditService,
     private readonly ledger: LedgerService,
     private readonly onboarding: SchoolOnboardingService,
+    private readonly cache: CacheService,
   ) {}
 
   /** Thin caller — provisioning saga lives in SchoolOnboardingService (Milestone 3). */
@@ -212,6 +216,9 @@ export class SchoolPaymentsService {
     const db = this.prisma.withTenant(schoolId);
     const existingFee = await db.classFee.findFirst({ where: { className } });
 
+    // Invalidate the cached fee list for this school — the next read repopulates.
+    await this.cache.del(CacheKeys.classFees(schoolId));
+
     if (existingFee) {
       return this.prisma.classFee.update({
         where: { id: existingFee.id },
@@ -225,14 +232,20 @@ export class SchoolPaymentsService {
   }
 
   async getClassFees(schoolId: string) {
-    const fees = await this.prisma.withTenant(schoolId).classFee.findMany({
-      where: { isActive: true },
-      orderBy: { className: 'asc' },
-    });
-    return fees.map((f) => ({
-      ...f,
-      feeAmount: Money.fromKobo(f.feeAmount).toNaira(),
-    }));
+    return this.cache.getOrSet(
+      CacheKeys.classFees(schoolId),
+      SchoolPaymentsService.CLASS_FEES_TTL_SECONDS,
+      async () => {
+        const fees = await this.prisma.withTenant(schoolId).classFee.findMany({
+          where: { isActive: true },
+          orderBy: { className: 'asc' },
+        });
+        return fees.map((f) => ({
+          ...f,
+          feeAmount: Money.fromKobo(f.feeAmount).toNaira(),
+        }));
+      },
+    );
   }
 
   async getDashboardStats(schoolId: string) {

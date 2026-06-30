@@ -25,6 +25,7 @@ import { DocumentsService } from '../src/documents/documents.service';
 import { EventsGateway } from '../src/events/events.gateway';
 import { AuditService } from '../src/audit/audit.service';
 import { PaystackService } from '../src/paystack/paystack.service';
+import { CacheService } from '../src/cache/cache.service';
 import { AuthService } from '@thallesp/nestjs-better-auth';
 import {
   InstallmentFrequency,
@@ -75,6 +76,8 @@ describe('Security boundaries (real DB)', () => {
           provide: PaystackService,
           useValue: { verifyTransaction: jest.fn() },
         },
+        // In-memory cache (REDIS_CLIENT = null); SchoolPaymentsService now needs it.
+        { provide: CacheService, useValue: new CacheService(null) },
         { provide: AuthService, useValue: {} },
       ],
     }).compile();

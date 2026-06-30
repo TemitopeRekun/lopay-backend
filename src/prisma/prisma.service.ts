@@ -21,10 +21,26 @@ export class PrismaService
     const nodeEnv = config.get<string>('NODE_ENV') ?? 'development';
     const pool = new Pool({
       connectionString,
+      // Cap connections per instance so N app instances stay within Postgres'
+      // max_connections (Scale, M4). Default 10; size via DATABASE_POOL_MAX. When
+      // fronted by PgBouncer (transaction pooling), set this to a small number and
+      // add `?pgbouncer=true&connection_limit=1` to DATABASE_URL — see the runbook.
+      ...PrismaService.buildPoolSizing(config),
       ...PrismaService.buildSslConfig(nodeEnv, config),
     });
     const adapter = new PrismaPg(pool);
     super({ adapter });
+  }
+
+  /** Per-instance pg pool ceiling. `max` bounds concurrent DB connections so a
+   * horizontally-scaled deployment can't exhaust Postgres' connection slots. */
+  private static buildPoolSizing(
+    config: ConfigService,
+  ): Pick<PoolConfig, 'max'> {
+    const raw = config.get<string>('DATABASE_POOL_MAX');
+    const parsed = raw === undefined ? NaN : Number(raw);
+    const max = Number.isInteger(parsed) && parsed > 0 ? parsed : 10;
+    return { max };
   }
 
   /**

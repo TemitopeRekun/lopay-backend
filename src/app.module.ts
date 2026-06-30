@@ -1,15 +1,20 @@
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
 import { ScheduleModule } from '@nestjs/schedule';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware';
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { AuthModule as BetterAuthModule } from '@thallesp/nestjs-better-auth';
 import rateLimit from 'express-rate-limit';
+import { RedisStore } from 'rate-limit-redis';
 import type { Request, Response, NextFunction } from 'express';
+import type Redis from 'ioredis';
 import { createAuth } from './auth/auth.config';
 import { PrismaService } from './prisma/prisma.service';
 import { ConfigModule } from '@nestjs/config';
+import { RedisModule, REDIS_CLIENT } from './redis/redis.module';
+import { CacheModule } from './cache/cache.module';
 import * as Joi from 'joi';
 import { UsersModule } from './users/users.module';
 import { SchoolsModule } from './schools/schools.module';
@@ -37,6 +42,8 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
           .default('development'),
         PORT: Joi.number().default(3001),
         DATABASE_URL: Joi.string().uri().required(),
+        // Per-instance pg pool ceiling (M4 scale). Optional; defaults to 10.
+        DATABASE_POOL_MAX: Joi.number().integer().min(1).max(100).optional(),
         // Better Auth (replaces Firebase + the old backend JWT)
         // Reject obvious placeholders so a deploy can't boot with template values.
         BETTER_AUTH_SECRET: Joi.string()
@@ -90,22 +97,40 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
         abortEarly: true,
       },
     }),
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60000,
-        limit: 500,
-      },
-    ]),
+    // Global request throttler. When REDIS_URL is set, counters live in the shared
+    // Redis so the limit holds ACROSS instances; otherwise the default in-memory
+    // store is used (correct for single-instance dev). (M4 scale)
+    ThrottlerModule.forRootAsync({
+      inject: [REDIS_CLIENT],
+      useFactory: (redis: Redis | null) => ({
+        throttlers: [{ ttl: 60000, limit: 500 }],
+        storage: redis ? new ThrottlerStorageRedisService(redis) : undefined,
+      }),
+    }),
     BetterAuthModule.forRootAsync({
       isGlobal: true,
       disableGlobalAuthGuard: true,
-      inject: [PrismaService],
-      useFactory: (prisma: PrismaService) => {
+      inject: [PrismaService, REDIS_CLIENT],
+      useFactory: (prisma: PrismaService, redis: Redis | null) => {
+        // Auth brute-force limiter. Shared Redis store when available so the
+        // 20/min cap is enforced across all instances (a per-instance in-memory
+        // limiter would let an attacker multiply attempts by the instance count).
         const limiter = rateLimit({
           windowMs: 60_000,
           limit: 20,
           standardHeaders: true,
           legacyHeaders: false,
+          ...(redis
+            ? {
+                store: new RedisStore({
+                  prefix: 'auth-rl:',
+                  sendCommand: (...args: string[]) =>
+                    redis.call(args[0], ...args.slice(1)) as Promise<
+                      string | number
+                    >,
+                }),
+              }
+            : {}),
         });
         return {
           auth: createAuth(prisma),
@@ -116,6 +141,8 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
         };
       },
     }),
+    RedisModule,
+    CacheModule,
     FirebaseModule,
     UsersModule,
     SchoolsModule,
