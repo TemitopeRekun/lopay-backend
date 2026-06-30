@@ -1,6 +1,5 @@
 import {
   Injectable,
-  BadRequestException,
   ForbiddenException,
   Logger,
   NotFoundException,
@@ -14,15 +13,14 @@ import {
   PaymentType,
   Prisma,
 } from '../generated/prisma/client';
-import { AuthService } from '@thallesp/nestjs-better-auth';
 import { CreateSchoolDto } from '../admin/dto/create.school.dto';
 import { UpdateSchoolDto } from './dto/update.school.dto';
 import { DocumentsService } from '../documents/documents.service';
 import { EventsGateway } from '../events/events.gateway';
 import { AuditService, AuditActor } from '../audit/audit.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { SchoolOnboardingService } from '../school-onboarding/school-onboarding.service';
 import { Money } from '../common/money';
-import { errorMessage } from '../common/errors';
 import { paymentCommonFields } from '../common/payment-dto';
 
 @Injectable()
@@ -35,77 +33,23 @@ export class SchoolPaymentsService {
     private readonly documentsService: DocumentsService,
     private readonly events: EventsGateway,
     private readonly audit: AuditService,
-    private readonly authService: AuthService,
     private readonly ledger: LedgerService,
+    private readonly onboarding: SchoolOnboardingService,
   ) {}
 
+  /** Thin caller — provisioning saga lives in SchoolOnboardingService (Milestone 3). */
   async createSchool(dto: CreateSchoolDto) {
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: dto.ownerEmail },
-    });
-    if (existingUser) {
-      throw new BadRequestException(
-        'User with this email already exists in the database',
-      );
-    }
-
-    // 1. Create the owner via Better Auth (User + credential account).
-    let ownerUserId: string;
-    try {
-      const signUp = await this.authService.api.signUpEmail({
-        body: {
-          email: dto.ownerEmail,
-          password: dto.ownerPassword,
-          name: dto.ownerName,
-        },
-      });
-      ownerUserId = signUp.user.id;
-      // role is not a sign-up input (security); elevate to SCHOOL_OWNER server-side.
-      await this.prisma.user.update({
-        where: { id: ownerUserId },
-        data: { role: UserRole.SCHOOL_OWNER },
-      });
-    } catch (error: unknown) {
-      throw new BadRequestException(
-        `Could not create owner account: ${errorMessage(error)}`,
-      );
-    }
-
-    // 2. Create the School row; roll back the orphan auth user on failure.
-    try {
-      const school = await this.prisma.school.create({
-        data: {
-          name: dto.schoolName,
-          email: dto.ownerEmail,
-          address: dto.address,
-          phone: dto.phone,
-          bankName: dto.bankName ?? '',
-          bankCode: dto.bankCode,
-          accountName: dto.accountName ?? '',
-          accountNumber: dto.accountNumber ?? '',
-          ownerId: ownerUserId,
-        },
-      });
-      const user = await this.prisma.user.findUniqueOrThrow({
-        where: { id: ownerUserId },
-      });
-
-      return {
-        school,
-        user: {
-          id: user.id,
-          email: user.email,
-          role: user.role,
-          fullName: user.fullName,
-        },
-        message: 'School and School Owner created successfully',
-      };
-    } catch (error) {
-      await this.prisma.user
-        .delete({ where: { id: ownerUserId } })
-        .catch(() => undefined);
-      throw error;
-    }
+    const { school, user } = await this.onboarding.provisionSchoolAndOwner(dto);
+    return {
+      school,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        fullName: user.fullName,
+      },
+      message: 'School and School Owner created successfully',
+    };
   }
 
   async updateSchool(id: string, dto: UpdateSchoolDto) {

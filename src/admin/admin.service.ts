@@ -9,16 +9,15 @@ import {
   PaymentReceiver,
   PaymentStatus,
   PaymentTransactionStatus,
-  UserRole,
   Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { AuthService } from '@thallesp/nestjs-better-auth';
 import { CreateSchoolDto } from './dto/create.school.dto';
 import { DocumentsService } from '../documents/documents.service';
 import { AuditService, AuditActor } from '../audit/audit.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { SchoolOnboardingService } from '../school-onboarding/school-onboarding.service';
 import { Money } from '../common/money';
 import { PLATFORM_FEE_RATE } from '../common/fees';
 import { errorMessage } from '../common/errors';
@@ -35,8 +34,8 @@ export class AdminService {
     private readonly documentsService: DocumentsService,
     private readonly audit: AuditService,
     private readonly paystack: PaystackService,
-    private readonly authService: AuthService,
     private readonly ledger: LedgerService,
+    private readonly onboarding: SchoolOnboardingService,
   ) {}
 
   /**
@@ -113,84 +112,23 @@ export class AdminService {
 
   /** Onboard a new school and create the school owner account */
   async onboardSchool(dto: CreateSchoolDto) {
-    // Fail fast if the owner already has an account.
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: dto.ownerEmail },
-    });
-    if (existingUser) {
-      throw new BadRequestException(
-        'User with this email already exists in the database',
-      );
-    }
+    // Shared provisioning saga (owner + school, with owner rollback on failure).
+    const { school, user } = await this.onboarding.provisionSchoolAndOwner(dto);
 
-    // 1. Create the owner via Better Auth (creates the User + credential Account).
-    let ownerUserId: string;
-    try {
-      const signUp = await this.authService.api.signUpEmail({
-        body: {
-          email: dto.ownerEmail,
-          password: dto.ownerPassword,
-          name: dto.ownerName,
-        },
-      });
-      ownerUserId = signUp.user.id;
-      // role is not a sign-up input (security); elevate to SCHOOL_OWNER server-side.
-      await this.prisma.user.update({
-        where: { id: ownerUserId },
-        data: { role: UserRole.SCHOOL_OWNER },
-      });
-    } catch (error: unknown) {
-      this.logger.error(
-        `Owner account creation failed: ${errorMessage(error)}`,
-      );
-      throw new BadRequestException(
-        `Could not create owner account: ${errorMessage(error)}`,
-      );
-    }
-
-    // 2. Create the School row linked to the new owner. Better Auth created the
-    // User outside this transaction, so compensate by deleting it on failure.
-    let created;
-    try {
-      const school = await this.prisma.school.create({
-        data: {
-          name: dto.schoolName,
-          email: dto.ownerEmail,
-          address: dto.address,
-          phone: dto.phone,
-          bankName: dto.bankName,
-          bankCode: dto.bankCode,
-          accountName: dto.accountName,
-          accountNumber: dto.accountNumber,
-          ownerId: ownerUserId,
-        },
-      });
-      const user = await this.prisma.user.findUniqueOrThrow({
-        where: { id: ownerUserId },
-      });
-      created = { school, user };
-    } catch (error) {
-      // Roll back the orphaned auth user (cascades to session/account).
-      await this.prisma.user
-        .delete({ where: { id: ownerUserId } })
-        .catch(() => undefined);
-      throw error;
-    }
-
-    // 4. Provision the Paystack subaccount (external call, post-transaction).
+    // Provision the Paystack subaccount (external call, post-transaction).
     // Best-effort: onboarding succeeds even if this fails; retry via admin endpoint.
-    const subaccount = await this.provisionSubaccount(created.school);
+    const subaccount = await this.provisionSubaccount(school);
 
     return {
       school: {
-        ...created.school,
+        ...school,
         paystackSubaccountActive: subaccount.active,
       },
       user: {
-        id: created.user.id,
-        email: created.user.email,
-        role: created.user.role,
-        fullName: created.user.fullName,
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        fullName: user.fullName,
       },
       paystack: subaccount,
       message: subaccount.active
