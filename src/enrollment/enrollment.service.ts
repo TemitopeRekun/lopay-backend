@@ -465,6 +465,52 @@ export class EnrollmentService {
     return this.calculateEnrichment(enrollment, enrollment.payments);
   }
 
+  /** Look up the active fee config for a class, or fail with a clear 400. */
+  private async resolveActiveClassFee(schoolId: string, className: string) {
+    const classFee = await this.prisma.classFee.findFirst({
+      where: { schoolId, className, isActive: true },
+    });
+    if (!classFee) {
+      throw new BadRequestException(
+        `No fee configuration found for class ${className} in this school`,
+      );
+    }
+    return classFee;
+  }
+
+  /** Load a school and assert it can accept online (Paystack) payments. */
+  private async assertSchoolAcceptsOnlinePayments(schoolId: string) {
+    const school = await this.prisma.school.findUnique({
+      where: { id: schoolId },
+    });
+    if (!school) throw new NotFoundException('School not found');
+    if (!school.paystackSubaccountActive || !school.paystackSubaccountCode) {
+      throw new BadRequestException(
+        'This school is not set up to accept online payments yet.',
+      );
+    }
+    // The guard above proves the subaccount code is present; carry that to callers.
+    return school as typeof school & { paystackSubaccountCode: string };
+  }
+
+  /** Shape the "replay an existing Paystack intent" response (no new charge). */
+  private buildIdempotentInitiationResponse(existing: {
+    paystackReference: string | null;
+    paystackAccessCode: string | null;
+    amountCharged: number | null;
+    status: PaymentTransactionStatus;
+  }) {
+    return {
+      idempotent: true as const,
+      reference: existing.paystackReference,
+      accessCode: existing.paystackAccessCode,
+      amountCharged: existing.amountCharged
+        ? Money.fromKobo(existing.amountCharged).toNaira()
+        : null,
+      status: existing.status,
+    };
+  }
+
   async enrollChild(dto: CreateEnrollmentDto, userId: string) {
     // 0. Idempotency: if we've already processed this exact submission, replay
     // the original outcome instead of creating a second enrollment/payment.
@@ -484,19 +530,10 @@ export class EnrollmentService {
     );
 
     // 2. Get Fees
-    const classFee = await this.prisma.classFee.findFirst({
-      where: {
-        schoolId: dto.schoolId,
-        className: dto.className,
-        isActive: true,
-      },
-    });
-
-    if (!classFee) {
-      throw new BadRequestException(
-        `No fee configuration found for class ${dto.className} in this school`,
-      );
-    }
+    const classFee = await this.resolveActiveClassFee(
+      dto.schoolId,
+      dto.className,
+    );
 
     // 3. Calculate Deposit — convert both to kobo; DB stores kobo.
     const depositKobo = Money.fromNaira(dto.firstPaymentPaid).toKobo();
@@ -600,28 +637,48 @@ export class EnrollmentService {
       throw error;
     }
 
-    // 5. Notify School Owner (Post-Transaction)
-    if (result.school?.ownerId) {
+    // 5. Notify the school owner + platform admins, then push the live update.
+    await this.announceManualEnrollmentInitiated(
+      {
+        schoolOwnerId: result.school?.ownerId,
+        schoolName: result.school?.name,
+      },
+      result.childName,
+      dto,
+    );
+
+    return result;
+  }
+
+  /** Post-transaction fan-out for a manual first payment: owner + admins + realtime. */
+  private async announceManualEnrollmentInitiated(
+    school: { schoolOwnerId?: string | null; schoolName?: string | null },
+    childName: string,
+    dto: CreateEnrollmentDto,
+  ) {
+    const amountStr = Money.fromNaira(dto.firstPaymentPaid).formatNaira();
+
+    // Notify School Owner
+    if (school.schoolOwnerId) {
       await this.notificationsService.create({
-        userId: result.school.ownerId,
+        userId: school.schoolOwnerId,
         title: 'New Enrollment Initiated',
-        message: `New Student: ${result.childName} | Class: ${dto.className} | Amount Paid: ${Money.fromNaira(dto.firstPaymentPaid).formatNaira()} | Status: Pending Admin Transfer.`,
+        message: `New Student: ${childName} | Class: ${dto.className} | Amount Paid: ${amountStr} | Status: Pending Admin Transfer.`,
         link: '/school/pending-payments',
       });
     }
 
-    // 6. Notify Super Admin (Platform)
+    // Notify Super Admins (Platform)
     const admins = await this.prisma.user.findMany({
       where: { role: UserRole.SUPER_ADMIN },
       select: { id: true },
     });
-
     await Promise.all(
       admins.map((admin) =>
         this.notificationsService.create({
           userId: admin.id,
           title: 'New First Payment Received',
-          message: `Payment of ${Money.fromNaira(dto.firstPaymentPaid).formatNaira()} received for ${result.childName} at ${result.school?.name}. Please process 25% payout to school.`,
+          message: `Payment of ${amountStr} received for ${childName} at ${school.schoolName}. Please process 25% payout to school.`,
           link: '/admin/payments',
         }),
       ),
@@ -637,8 +694,6 @@ export class EnrollmentService {
       schoolId: dto.schoolId,
       notifyAdmins: true,
     });
-
-    return result;
   }
 
   /**
@@ -659,15 +714,7 @@ export class EnrollmentService {
         dto.idempotencyKey,
       );
       if (existing) {
-        return {
-          idempotent: true,
-          reference: existing.paystackReference,
-          accessCode: existing.paystackAccessCode,
-          amountCharged: existing.amountCharged
-            ? Money.fromKobo(existing.amountCharged).toNaira()
-            : null,
-          status: existing.status,
-        };
+        return this.buildIdempotentInitiationResponse(existing);
       }
     }
 
@@ -675,28 +722,12 @@ export class EnrollmentService {
     // resolveEnrollmentTarget lazily creates Parent/Child rows, so running these
     // guards first prevents an orphaned Child when the school can't accept online
     // payments or has no active fee for the class.
-    const classFee = await this.prisma.classFee.findFirst({
-      where: {
-        schoolId: dto.schoolId,
-        className: dto.className,
-        isActive: true,
-      },
-    });
-    if (!classFee) {
-      throw new BadRequestException(
-        `No fee configuration found for class ${dto.className} in this school`,
-      );
-    }
+    const classFee = await this.resolveActiveClassFee(
+      dto.schoolId,
+      dto.className,
+    );
 
-    const school = await this.prisma.school.findUnique({
-      where: { id: dto.schoolId },
-    });
-    if (!school) throw new NotFoundException('School not found');
-    if (!school.paystackSubaccountActive || !school.paystackSubaccountCode) {
-      throw new BadRequestException(
-        'This school is not set up to accept online payments yet.',
-      );
-    }
+    const school = await this.assertSchoolAcceptsOnlinePayments(dto.schoolId);
 
     const { childId, retryEnrollmentId, pendingEnrollmentId } =
       await this.resolveEnrollmentTarget(dto, userId, true);
@@ -783,15 +814,7 @@ export class EnrollmentService {
           dto.idempotencyKey,
         );
         if (existing) {
-          return {
-            idempotent: true,
-            reference: existing.paystackReference,
-            accessCode: existing.paystackAccessCode,
-            amountCharged: existing.amountCharged
-              ? Money.fromKobo(existing.amountCharged).toNaira()
-              : null,
-            status: existing.status,
-          };
+          return this.buildIdempotentInitiationResponse(existing);
         }
       }
       throw error;
