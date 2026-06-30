@@ -16,6 +16,8 @@ import { randomUUID } from 'crypto';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { EnrollmentService } from '../src/enrollment/enrollment.service';
+import { LedgerService } from '../src/ledger/ledger.service';
+import { SchoolOnboardingService } from '../src/school-onboarding/school-onboarding.service';
 import { PaymentService } from '../src/payments/payment.service';
 import { SchoolPaymentsService } from '../src/schools/schools.service';
 import { NotificationsService } from '../src/notifications/notifications.service';
@@ -56,6 +58,8 @@ describe('Security boundaries (real DB)', () => {
         PaymentService,
         EnrollmentService,
         SchoolPaymentsService,
+        LedgerService,
+        SchoolOnboardingService,
         { provide: DocumentsService, useValue: {} },
         { provide: NotificationsService, useValue: { create: jest.fn() } },
         {

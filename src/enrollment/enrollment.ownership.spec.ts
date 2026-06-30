@@ -18,6 +18,7 @@ describe('EnrollmentService.assertReferenceOwnedBy', () => {
     {} as never,
     {} as never,
     {} as never,
+    {} as never, // ledger (unused by assertReferenceOwnedBy)
   );
 
   const parent: AuthUser = {

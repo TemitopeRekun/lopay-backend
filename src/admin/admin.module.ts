@@ -5,11 +5,20 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { AuditModule } from '../audit/audit.module';
 import { PaystackModule } from '../paystack/paystack.module';
+import { LedgerModule } from '../ledger/ledger.module';
+import { SchoolOnboardingModule } from '../school-onboarding/school-onboarding.module';
 
 // Better Auth's AuthService is provided globally (AuthModule.forRootAsync isGlobal),
 // so no auth module import is needed here.
 @Module({
-  imports: [NotificationsModule, DocumentsModule, AuditModule, PaystackModule],
+  imports: [
+    NotificationsModule,
+    DocumentsModule,
+    AuditModule,
+    PaystackModule,
+    LedgerModule,
+    SchoolOnboardingModule,
+  ],
   controllers: [AdminController],
   providers: [AdminService],
 })

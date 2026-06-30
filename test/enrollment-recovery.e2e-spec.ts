@@ -14,6 +14,7 @@ import { ConfigModule } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { EnrollmentService } from '../src/enrollment/enrollment.service';
+import { LedgerService } from '../src/ledger/ledger.service';
 import { PaymentService } from '../src/payments/payment.service';
 import { NotificationsService } from '../src/notifications/notifications.service';
 import { EventsGateway } from '../src/events/events.gateway';
@@ -31,6 +32,7 @@ import {
 describe('Enrollment & installment integration (real DB)', () => {
   let prisma: PrismaService;
   let enrollment: EnrollmentService;
+  let ledger: LedgerService;
   let paystackStub: {
     initializeTransaction: jest.Mock;
     verifyTransaction: jest.Mock;
@@ -58,6 +60,7 @@ describe('Enrollment & installment integration (real DB)', () => {
         PrismaService,
         PaymentService,
         EnrollmentService,
+        LedgerService,
         { provide: DocumentsService, useValue: {} },
         { provide: NotificationsService, useValue: { create: jest.fn() } },
         {
@@ -75,6 +78,7 @@ describe('Enrollment & installment integration (real DB)', () => {
 
     prisma = moduleRef.get(PrismaService);
     enrollment = moduleRef.get(EnrollmentService);
+    ledger = moduleRef.get(LedgerService);
     await prisma.$connect();
   });
 
@@ -376,6 +380,90 @@ describe('Enrollment & installment integration (real DB)', () => {
           data: { parentId, fullName: 'Twin', className: 'Basic 1' },
         }),
       ).rejects.toMatchObject({ code: 'P2002' });
+    });
+  });
+
+  // Full money lifecycle through the extracted LedgerService (Milestone 3),
+  // against the real DB so the atomic balance inc/dec + guarded writes are
+  // exercised end-to-end: confirm -> balance down -> reverse -> balance restored
+  // -> re-confirm -> balance down again.
+  describe('ledger lifecycle: confirm -> reverse -> re-confirm (real DB)', () => {
+    const ownerActor = () => ({
+      userId: ownerUserId,
+      role: UserRole.SCHOOL_OWNER,
+    });
+
+    // Helper: submit an installment and return the resulting PENDING payment id.
+    const submitPendingInstallment = async (
+      enrollmentId: string,
+      naira: number,
+    ) => {
+      await enrollment.submitInstallmentPayment(enrollmentId, naira, {
+        userId: parentUserId,
+        role: UserRole.PARENT,
+        schoolId: null,
+      });
+      const pending = await prisma.payment.findFirstOrThrow({
+        where: {
+          enrollmentId,
+          paymentType: PaymentType.INSTALLMENT,
+          status: PaymentTransactionStatus.PENDING,
+        },
+        orderBy: { paymentDate: 'desc' },
+      });
+      return pending.id;
+    };
+
+    const balanceOf = async (enrollmentId: string) =>
+      (
+        await prisma.childEnrollment.findUniqueOrThrow({
+          where: { id: enrollmentId },
+        })
+      ).remainingBalance;
+
+    it('decrements on confirm, restores on reverse, and decrements again on re-confirm', async () => {
+      const enrollmentId = await seedActiveEnrollment(50_000); // ₦500 balance
+      const paymentId = await submitPendingInstallment(enrollmentId, 200); // ₦200
+
+      // Submitting reserves but does not yet move the recorded balance.
+      expect(await balanceOf(enrollmentId)).toBe(50_000);
+
+      // 1. Confirm -> balance drops by ₦200 (20_000 kobo).
+      await ledger.confirmPayment(paymentId, schoolId, ownerActor());
+      expect(await balanceOf(enrollmentId)).toBe(30_000);
+      const confirmed = await prisma.payment.findUniqueOrThrow({
+        where: { id: paymentId },
+      });
+      expect(confirmed.isConfirmed).toBe(true);
+      expect(confirmed.status).toBe(PaymentTransactionStatus.SUCCESS);
+
+      // 2. Reverse -> balance restored to ₦500; payment marked REVERSED.
+      await ledger.reversePayment(paymentId, schoolId, ownerActor(), 'test');
+      expect(await balanceOf(enrollmentId)).toBe(50_000);
+      const reversed = await prisma.payment.findUniqueOrThrow({
+        where: { id: paymentId },
+      });
+      expect(reversed.isConfirmed).toBe(false);
+      expect(reversed.status).toBe(PaymentTransactionStatus.REVERSED);
+
+      // 3. Re-confirm the same (now-unconfirmed) installment -> balance drops again.
+      await ledger.confirmPayment(paymentId, schoolId, ownerActor());
+      expect(await balanceOf(enrollmentId)).toBe(30_000);
+    });
+
+    it('rejects a double-reverse (guarded write — balance restored exactly once)', async () => {
+      const enrollmentId = await seedActiveEnrollment(50_000);
+      const paymentId = await submitPendingInstallment(enrollmentId, 200);
+      await ledger.confirmPayment(paymentId, schoolId, ownerActor());
+
+      await ledger.reversePayment(paymentId, schoolId, ownerActor());
+      expect(await balanceOf(enrollmentId)).toBe(50_000);
+
+      // A second reverse finds no confirmed installment and must not inflate.
+      await expect(
+        ledger.reversePayment(paymentId, schoolId, ownerActor()),
+      ).rejects.toThrow(/No confirmed installment payment found to reverse/i);
+      expect(await balanceOf(enrollmentId)).toBe(50_000);
     });
   });
 });

@@ -7,6 +7,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { EventsModule } from '../events/events.module';
 import { AuditModule } from '../audit/audit.module';
+import { LedgerModule } from '../ledger/ledger.module';
+import { SchoolOnboardingModule } from '../school-onboarding/school-onboarding.module';
 
 @Module({
   imports: [
@@ -15,6 +17,8 @@ import { AuditModule } from '../audit/audit.module';
     DocumentsModule,
     EventsModule,
     AuditModule,
+    LedgerModule,
+    SchoolOnboardingModule,
   ],
   controllers: [SchoolPaymentsController, SchoolsManagementController],
   providers: [SchoolPaymentsService],

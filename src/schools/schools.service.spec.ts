@@ -26,7 +26,8 @@ describe('SchoolPaymentsService', () => {
     {} as never,
     {} as never,
     {} as never,
-    {} as never,
+    {} as never, // ledger (unused by getPublicSchools/deleteSchool)
+    {} as never, // onboarding (unused by getPublicSchools/deleteSchool)
   );
 
   beforeEach(() => jest.clearAllMocks());

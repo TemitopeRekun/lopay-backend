@@ -9,16 +9,15 @@ import {
   PaymentReceiver,
   PaymentStatus,
   PaymentTransactionStatus,
-  UserRole,
-  AuditAction,
   Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { AuthService } from '@thallesp/nestjs-better-auth';
 import { CreateSchoolDto } from './dto/create.school.dto';
 import { DocumentsService } from '../documents/documents.service';
 import { AuditService, AuditActor } from '../audit/audit.service';
+import { LedgerService } from '../ledger/ledger.service';
+import { SchoolOnboardingService } from '../school-onboarding/school-onboarding.service';
 import { Money } from '../common/money';
 import { PLATFORM_FEE_RATE } from '../common/fees';
 import { errorMessage } from '../common/errors';
@@ -35,7 +34,8 @@ export class AdminService {
     private readonly documentsService: DocumentsService,
     private readonly audit: AuditService,
     private readonly paystack: PaystackService,
-    private readonly authService: AuthService,
+    private readonly ledger: LedgerService,
+    private readonly onboarding: SchoolOnboardingService,
   ) {}
 
   /**
@@ -112,84 +112,23 @@ export class AdminService {
 
   /** Onboard a new school and create the school owner account */
   async onboardSchool(dto: CreateSchoolDto) {
-    // Fail fast if the owner already has an account.
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: dto.ownerEmail },
-    });
-    if (existingUser) {
-      throw new BadRequestException(
-        'User with this email already exists in the database',
-      );
-    }
+    // Shared provisioning saga (owner + school, with owner rollback on failure).
+    const { school, user } = await this.onboarding.provisionSchoolAndOwner(dto);
 
-    // 1. Create the owner via Better Auth (creates the User + credential Account).
-    let ownerUserId: string;
-    try {
-      const signUp = await this.authService.api.signUpEmail({
-        body: {
-          email: dto.ownerEmail,
-          password: dto.ownerPassword,
-          name: dto.ownerName,
-        },
-      });
-      ownerUserId = signUp.user.id;
-      // role is not a sign-up input (security); elevate to SCHOOL_OWNER server-side.
-      await this.prisma.user.update({
-        where: { id: ownerUserId },
-        data: { role: UserRole.SCHOOL_OWNER },
-      });
-    } catch (error: unknown) {
-      this.logger.error(
-        `Owner account creation failed: ${errorMessage(error)}`,
-      );
-      throw new BadRequestException(
-        `Could not create owner account: ${errorMessage(error)}`,
-      );
-    }
-
-    // 2. Create the School row linked to the new owner. Better Auth created the
-    // User outside this transaction, so compensate by deleting it on failure.
-    let created;
-    try {
-      const school = await this.prisma.school.create({
-        data: {
-          name: dto.schoolName,
-          email: dto.ownerEmail,
-          address: dto.address,
-          phone: dto.phone,
-          bankName: dto.bankName,
-          bankCode: dto.bankCode,
-          accountName: dto.accountName,
-          accountNumber: dto.accountNumber,
-          ownerId: ownerUserId,
-        },
-      });
-      const user = await this.prisma.user.findUniqueOrThrow({
-        where: { id: ownerUserId },
-      });
-      created = { school, user };
-    } catch (error) {
-      // Roll back the orphaned auth user (cascades to session/account).
-      await this.prisma.user
-        .delete({ where: { id: ownerUserId } })
-        .catch(() => undefined);
-      throw error;
-    }
-
-    // 4. Provision the Paystack subaccount (external call, post-transaction).
+    // Provision the Paystack subaccount (external call, post-transaction).
     // Best-effort: onboarding succeeds even if this fails; retry via admin endpoint.
-    const subaccount = await this.provisionSubaccount(created.school);
+    const subaccount = await this.provisionSubaccount(school);
 
     return {
       school: {
-        ...created.school,
+        ...school,
         paystackSubaccountActive: subaccount.active,
       },
       user: {
-        id: created.user.id,
-        email: created.user.email,
-        role: created.user.role,
-        fullName: created.user.fullName,
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        fullName: user.fullName,
       },
       paystack: subaccount,
       message: subaccount.active
@@ -249,97 +188,9 @@ export class AdminService {
     return results;
   }
 
-  /** Settle school share and activate enrollment */
+  /** Thin caller — settle logic lives in LedgerService (Milestone 3). */
   async settleFirstPayment(paymentId: string, actor: AuditActor) {
-    const payment = await this.prisma.payment.findFirst({
-      where: {
-        id: paymentId,
-        paymentType: PaymentType.FIRST_PAYMENT,
-        receiver: PaymentReceiver.PLATFORM,
-        isConfirmed: false,
-      },
-      include: {
-        enrollment: {
-          include: {
-            school: true,
-            child: {
-              include: { parent: true },
-            },
-          },
-        },
-      },
-    });
-
-    if (!payment) {
-      throw new NotFoundException('Payment not found or already settled');
-    }
-
-    const { enrollment } = payment;
-
-    const settled = await this.prisma.$transaction(async (tx) => {
-      // 1️⃣ Mark payment as confirmed (guarded — only an unconfirmed payment
-      // flips, so a concurrent settle/reject/confirm can't double-process).
-      const res = await tx.payment.updateMany({
-        where: { id: payment.id, isConfirmed: false },
-        data: { isConfirmed: true, status: PaymentTransactionStatus.SUCCESS },
-      });
-      if (res.count === 0) return false;
-
-      // 2️⃣ Activate enrollment
-      await tx.childEnrollment.update({
-        where: { id: payment.enrollmentId },
-        data: { paymentStatus: PaymentStatus.ACTIVE },
-      });
-
-      // 2b. Audit (atomic with the settlement)
-      await this.audit.record(
-        {
-          action: AuditAction.FIRST_PAYMENT_SETTLED,
-          entityType: 'Payment',
-          entityId: payment.id,
-          actor,
-          schoolId: enrollment.schoolId,
-          before: {
-            isConfirmed: false,
-            paymentStatus: enrollment.paymentStatus,
-          },
-          after: { isConfirmed: true, paymentStatus: PaymentStatus.ACTIVE },
-          metadata: { enrollmentId: enrollment.id, amount: payment.amountPaid },
-        },
-        tx,
-      );
-
-      // 3️⃣ Notify School Owner
-      await tx.notification.create({
-        data: {
-          userId: enrollment.school.ownerId,
-          title: 'First Payment Settled',
-          message:
-            'The platform has settled the first payment. Enrollment is now active.',
-          link: `/school/enrollments/${enrollment.id}`,
-        },
-      });
-
-      // 4️⃣ Notify Parent
-      await tx.notification.create({
-        data: {
-          userId: enrollment.child.parent.userId,
-          title: 'Enrollment Confirmed',
-          message: `Your first payment of ${Money.fromKobo(payment.amountPaid).formatNaira()} has been confirmed. Enrollment is active.`,
-          link: `/parent/enrollments/${enrollment.id}`,
-        },
-      });
-      return true;
-    });
-
-    if (!settled) {
-      throw new NotFoundException('Payment not found or already settled');
-    }
-
-    return {
-      message: 'Payment settled and enrollment activated successfully',
-      paymentId: payment.id,
-    };
+    return this.ledger.settleFirstPayment(paymentId, actor);
   }
 
   /** Get all pending installment payments across all schools (read-only) */
@@ -372,106 +223,9 @@ export class AdminService {
     }));
   }
 
-  /** Reject a pending first payment and mark enrollment as failed */
+  /** Thin caller — reject logic lives in LedgerService (Milestone 3). */
   async rejectFirstPayment(paymentId: string, actor: AuditActor) {
-    const payment = await this.prisma.payment.findFirst({
-      where: {
-        id: paymentId,
-        paymentType: PaymentType.FIRST_PAYMENT,
-        receiver: PaymentReceiver.PLATFORM,
-        isConfirmed: false,
-      },
-      include: {
-        enrollment: {
-          include: {
-            school: true,
-            child: {
-              include: { parent: true },
-            },
-          },
-        },
-      },
-    });
-
-    if (!payment) {
-      throw new NotFoundException(
-        'First payment not found or already processed',
-      );
-    }
-
-    const { enrollment } = payment;
-
-    const rejectedOk = await this.prisma.$transaction(async (tx) => {
-      // 1️⃣ Mark payment as failed (guarded — only an unprocessed payment flips).
-      const res = await tx.payment.updateMany({
-        where: { id: payment.id, isConfirmed: false },
-        data: {
-          status: PaymentTransactionStatus.FAILED,
-        },
-      });
-      if (res.count === 0) return false;
-
-      // 2️⃣ Mark enrollment as FAILED (no balance changes)
-      await tx.childEnrollment.update({
-        where: { id: payment.enrollmentId },
-        data: { paymentStatus: PaymentStatus.FAILED },
-      });
-
-      // 2b. Audit (atomic with the rejection)
-      await this.audit.record(
-        {
-          action: AuditAction.FIRST_PAYMENT_REJECTED,
-          entityType: 'Payment',
-          entityId: payment.id,
-          actor,
-          schoolId: enrollment.schoolId,
-          before: {
-            isConfirmed: false,
-            paymentStatus: enrollment.paymentStatus,
-          },
-          after: {
-            status: PaymentTransactionStatus.FAILED,
-            paymentStatus: PaymentStatus.FAILED,
-          },
-          metadata: { enrollmentId: enrollment.id, amount: payment.amountPaid },
-        },
-        tx,
-      );
-
-      // 3️⃣ Notify School Owner (optional visibility)
-      await tx.notification.create({
-        data: {
-          userId: enrollment.school.ownerId,
-          title: 'First Payment Rejected',
-          message:
-            'The platform has rejected the first payment for this enrollment. Please review the receipt or contact the parent.',
-          link: `/school/enrollments/${enrollment.id}`,
-        },
-      });
-
-      // 4️⃣ Notify Parent
-      await tx.notification.create({
-        data: {
-          userId: enrollment.child.parent.userId,
-          title: 'First Payment Rejected',
-          message:
-            'Your first payment could not be verified. Please pay again and upload a clearer receipt.',
-          link: `/parent/enrollments/${enrollment.id}`,
-        },
-      });
-      return true;
-    });
-
-    if (!rejectedOk) {
-      throw new NotFoundException(
-        'First payment not found or already processed',
-      );
-    }
-
-    return {
-      message: 'First payment rejected and enrollment marked as failed',
-      paymentId: payment.id,
-    };
+    return this.ledger.rejectFirstPayment(paymentId, actor);
   }
 
   /** Get students/enrollments for a specific school (admin view) */

@@ -21,6 +21,7 @@ import { PaymentService } from '../payments/payment.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EventsGateway } from '../events/events.gateway';
 import { AuditService, AuditActor } from '../audit/audit.service';
+import { LedgerService } from '../ledger/ledger.service';
 import { Money } from '../common/money';
 import { WEEKLY_INSTALLMENTS, MONTHLY_INSTALLMENTS } from '../common/fees';
 import {
@@ -51,6 +52,7 @@ export class EnrollmentService {
     private readonly events: EventsGateway,
     private readonly audit: AuditService,
     private readonly paystack: PaystackService,
+    private readonly ledger: LedgerService,
   ) {}
 
   /**
@@ -463,6 +465,52 @@ export class EnrollmentService {
     return this.calculateEnrichment(enrollment, enrollment.payments);
   }
 
+  /** Look up the active fee config for a class, or fail with a clear 400. */
+  private async resolveActiveClassFee(schoolId: string, className: string) {
+    const classFee = await this.prisma.classFee.findFirst({
+      where: { schoolId, className, isActive: true },
+    });
+    if (!classFee) {
+      throw new BadRequestException(
+        `No fee configuration found for class ${className} in this school`,
+      );
+    }
+    return classFee;
+  }
+
+  /** Load a school and assert it can accept online (Paystack) payments. */
+  private async assertSchoolAcceptsOnlinePayments(schoolId: string) {
+    const school = await this.prisma.school.findUnique({
+      where: { id: schoolId },
+    });
+    if (!school) throw new NotFoundException('School not found');
+    if (!school.paystackSubaccountActive || !school.paystackSubaccountCode) {
+      throw new BadRequestException(
+        'This school is not set up to accept online payments yet.',
+      );
+    }
+    // The guard above proves the subaccount code is present; carry that to callers.
+    return school as typeof school & { paystackSubaccountCode: string };
+  }
+
+  /** Shape the "replay an existing Paystack intent" response (no new charge). */
+  private buildIdempotentInitiationResponse(existing: {
+    paystackReference: string | null;
+    paystackAccessCode: string | null;
+    amountCharged: number | null;
+    status: PaymentTransactionStatus;
+  }) {
+    return {
+      idempotent: true as const,
+      reference: existing.paystackReference,
+      accessCode: existing.paystackAccessCode,
+      amountCharged: existing.amountCharged
+        ? Money.fromKobo(existing.amountCharged).toNaira()
+        : null,
+      status: existing.status,
+    };
+  }
+
   async enrollChild(dto: CreateEnrollmentDto, userId: string) {
     // 0. Idempotency: if we've already processed this exact submission, replay
     // the original outcome instead of creating a second enrollment/payment.
@@ -482,19 +530,10 @@ export class EnrollmentService {
     );
 
     // 2. Get Fees
-    const classFee = await this.prisma.classFee.findFirst({
-      where: {
-        schoolId: dto.schoolId,
-        className: dto.className,
-        isActive: true,
-      },
-    });
-
-    if (!classFee) {
-      throw new BadRequestException(
-        `No fee configuration found for class ${dto.className} in this school`,
-      );
-    }
+    const classFee = await this.resolveActiveClassFee(
+      dto.schoolId,
+      dto.className,
+    );
 
     // 3. Calculate Deposit — convert both to kobo; DB stores kobo.
     const depositKobo = Money.fromNaira(dto.firstPaymentPaid).toKobo();
@@ -598,28 +637,48 @@ export class EnrollmentService {
       throw error;
     }
 
-    // 5. Notify School Owner (Post-Transaction)
-    if (result.school?.ownerId) {
+    // 5. Notify the school owner + platform admins, then push the live update.
+    await this.announceManualEnrollmentInitiated(
+      {
+        schoolOwnerId: result.school?.ownerId,
+        schoolName: result.school?.name,
+      },
+      result.childName,
+      dto,
+    );
+
+    return result;
+  }
+
+  /** Post-transaction fan-out for a manual first payment: owner + admins + realtime. */
+  private async announceManualEnrollmentInitiated(
+    school: { schoolOwnerId?: string | null; schoolName?: string | null },
+    childName: string,
+    dto: CreateEnrollmentDto,
+  ) {
+    const amountStr = Money.fromNaira(dto.firstPaymentPaid).formatNaira();
+
+    // Notify School Owner
+    if (school.schoolOwnerId) {
       await this.notificationsService.create({
-        userId: result.school.ownerId,
+        userId: school.schoolOwnerId,
         title: 'New Enrollment Initiated',
-        message: `New Student: ${result.childName} | Class: ${dto.className} | Amount Paid: ${Money.fromNaira(dto.firstPaymentPaid).formatNaira()} | Status: Pending Admin Transfer.`,
+        message: `New Student: ${childName} | Class: ${dto.className} | Amount Paid: ${amountStr} | Status: Pending Admin Transfer.`,
         link: '/school/pending-payments',
       });
     }
 
-    // 6. Notify Super Admin (Platform)
+    // Notify Super Admins (Platform)
     const admins = await this.prisma.user.findMany({
       where: { role: UserRole.SUPER_ADMIN },
       select: { id: true },
     });
-
     await Promise.all(
       admins.map((admin) =>
         this.notificationsService.create({
           userId: admin.id,
           title: 'New First Payment Received',
-          message: `Payment of ${Money.fromNaira(dto.firstPaymentPaid).formatNaira()} received for ${result.childName} at ${result.school?.name}. Please process 25% payout to school.`,
+          message: `Payment of ${amountStr} received for ${childName} at ${school.schoolName}. Please process 25% payout to school.`,
           link: '/admin/payments',
         }),
       ),
@@ -635,8 +694,6 @@ export class EnrollmentService {
       schoolId: dto.schoolId,
       notifyAdmins: true,
     });
-
-    return result;
   }
 
   /**
@@ -657,15 +714,7 @@ export class EnrollmentService {
         dto.idempotencyKey,
       );
       if (existing) {
-        return {
-          idempotent: true,
-          reference: existing.paystackReference,
-          accessCode: existing.paystackAccessCode,
-          amountCharged: existing.amountCharged
-            ? Money.fromKobo(existing.amountCharged).toNaira()
-            : null,
-          status: existing.status,
-        };
+        return this.buildIdempotentInitiationResponse(existing);
       }
     }
 
@@ -673,28 +722,12 @@ export class EnrollmentService {
     // resolveEnrollmentTarget lazily creates Parent/Child rows, so running these
     // guards first prevents an orphaned Child when the school can't accept online
     // payments or has no active fee for the class.
-    const classFee = await this.prisma.classFee.findFirst({
-      where: {
-        schoolId: dto.schoolId,
-        className: dto.className,
-        isActive: true,
-      },
-    });
-    if (!classFee) {
-      throw new BadRequestException(
-        `No fee configuration found for class ${dto.className} in this school`,
-      );
-    }
+    const classFee = await this.resolveActiveClassFee(
+      dto.schoolId,
+      dto.className,
+    );
 
-    const school = await this.prisma.school.findUnique({
-      where: { id: dto.schoolId },
-    });
-    if (!school) throw new NotFoundException('School not found');
-    if (!school.paystackSubaccountActive || !school.paystackSubaccountCode) {
-      throw new BadRequestException(
-        'This school is not set up to accept online payments yet.',
-      );
-    }
+    const school = await this.assertSchoolAcceptsOnlinePayments(dto.schoolId);
 
     const { childId, retryEnrollmentId, pendingEnrollmentId } =
       await this.resolveEnrollmentTarget(dto, userId, true);
@@ -781,15 +814,7 @@ export class EnrollmentService {
           dto.idempotencyKey,
         );
         if (existing) {
-          return {
-            idempotent: true,
-            reference: existing.paystackReference,
-            accessCode: existing.paystackAccessCode,
-            amountCharged: existing.amountCharged
-              ? Money.fromKobo(existing.amountCharged).toNaira()
-              : null,
-            status: existing.status,
-          };
+          return this.buildIdempotentInitiationResponse(existing);
         }
       }
       throw error;
@@ -868,181 +893,22 @@ export class EnrollmentService {
     }
   }
 
+  /** Thin caller — reconcile logic lives in LedgerService (Milestone 3). */
   async reconcilePaystackPayment(
     reference: string,
     actualFeeKobo: number | null,
     actor: AuditActor | null,
   ) {
-    const payment = await this.prisma.payment.findUnique({
-      where: { paystackReference: reference },
-      include: {
-        enrollment: {
-          include: { school: true, child: { include: { parent: true } } },
-        },
-      },
-    });
-    if (!payment) {
-      this.logger.warn(
-        `Paystack reconcile: no payment for reference ${reference}`,
-      );
-      return { reconciled: false, reason: 'unknown_reference' };
-    }
-    if (payment.status === PaymentTransactionStatus.SUCCESS) {
-      return { reconciled: true, alreadyProcessed: true };
-    }
-
-    const { enrollment } = payment;
-    const newBalance = enrollment.remainingBalance; // already net of this deposit at initiation
-    const isCompleted = newBalance <= 0;
-
-    // Concurrency: the webhook and the verify-on-return endpoint both call this.
-    // Guard the SUCCESS flip with a conditional write so only the first one wins;
-    // a second concurrent call finds count === 0 and is a clean no-op (no double
-    // activation, no duplicate audit row, no duplicate notification).
-    const processed = await this.prisma.$transaction(async (tx) => {
-      const flipped = await tx.payment.updateMany({
-        where: { id: payment.id, status: PaymentTransactionStatus.PENDING },
-        data: {
-          status: PaymentTransactionStatus.SUCCESS,
-          isConfirmed: true,
-          // estimate stays in paystackFee; the authoritative fee is recorded below.
-          actualPaystackFee: actualFeeKobo ?? null,
-          paymentDate: new Date(),
-        },
-      });
-      if (flipped.count === 0) {
-        return false; // already reconciled by a concurrent caller
-      }
-
-      await tx.childEnrollment.update({
-        where: { id: enrollment.id },
-        data: {
-          paymentStatus: isCompleted
-            ? PaymentStatus.COMPLETED
-            : PaymentStatus.ACTIVE,
-        },
-      });
-
-      // Reconcile the estimated Paystack fee against the actual one Paystack
-      // charged the platform account, so the book vs. bank discrepancy is
-      // auditable rather than silently absorbed (the platform bears the fee).
-      const estimateFee = payment.paystackFee ?? 0;
-      const actualFee = actualFeeKobo ?? estimateFee;
-      const feeDelta = actualFee - estimateFee;
-
-      await this.audit.record(
-        {
-          action: AuditAction.FIRST_PAYMENT_PAID,
-          entityType: 'Payment',
-          entityId: payment.id,
-          actor,
-          schoolId: payment.schoolId,
-          before: { status: payment.status, isConfirmed: payment.isConfirmed },
-          after: {
-            status: PaymentTransactionStatus.SUCCESS,
-            isConfirmed: true,
-            enrollmentStatus: isCompleted
-              ? PaymentStatus.COMPLETED
-              : PaymentStatus.ACTIVE,
-          },
-          metadata: {
-            reference,
-            amountCharged: payment.amountCharged,
-            platformAmount: payment.platformAmount,
-            schoolAmount: payment.schoolAmount,
-            estimatedPaystackFee: estimateFee,
-            actualPaystackFee: actualFee,
-            // Non-zero means the platform main account netted platformFee ± this
-            // amount (Paystack bears the fee off that account). Surfaced for
-            // reconciliation; investigate sustained drift.
-            paystackFeeDelta: feeDelta,
-          },
-        },
-        tx,
-      );
-
-      if (feeDelta !== 0) {
-        this.logger.warn(
-          `Paystack fee delta ${feeDelta} kobo on ${reference} (estimate ${estimateFee}, actual ${actualFee})`,
-        );
-      }
-
-      return true;
-    });
-
-    if (!processed) {
-      return { reconciled: true, alreadyProcessed: true };
-    }
-
-    // Notify parent + school owner (post-transaction).
-    await this.notificationsService.create({
-      userId: enrollment.child.parent.userId,
-      title: isCompleted ? 'Payment Completed' : 'First Payment Confirmed',
-      message: `Your payment of ${Money.fromKobo(payment.amountPaid).formatNaira()} for ${enrollment.child.fullName} at ${enrollment.school.name} has been confirmed.${isCompleted ? ' All fees are now fully paid.' : ' Enrollment is now active.'}`,
-      link: '/history',
-    });
-    if (enrollment.school.ownerId) {
-      await this.notificationsService.create({
-        userId: enrollment.school.ownerId,
-        title: 'First Payment Received',
-        message: `${Money.fromKobo(payment.schoolAmount).formatNaira()} settled to your account for ${enrollment.child.fullName} (${enrollment.className}).`,
-        link: '/school/enrollments',
-      });
-    }
-
-    this.events.emitEnrollmentsChanged({
-      parentUserId: enrollment.child.parent.userId,
-      schoolId: payment.schoolId,
-      notifyAdmins: true,
-    });
-    this.events.emitPaymentsChanged({
-      parentUserId: enrollment.child.parent.userId,
-      schoolId: payment.schoolId,
-      notifyAdmins: true,
-    });
-
-    return { reconciled: true, completed: isCompleted };
+    return this.ledger.reconcilePaystackPayment(
+      reference,
+      actualFeeKobo,
+      actor,
+    );
   }
 
-  /** Mark a Paystack first payment FAILED (charge.failed). Allows retry. */
+  /** Thin caller — fail logic lives in LedgerService (Milestone 3). */
   async failPaystackPayment(reference: string) {
-    const payment = await this.prisma.payment.findUnique({
-      where: { paystackReference: reference },
-      include: {
-        enrollment: { include: { child: { include: { parent: true } } } },
-      },
-    });
-    if (!payment || payment.status !== PaymentTransactionStatus.PENDING) {
-      return { updated: false };
-    }
-
-    // Guard the FAILED flip: only a still-PENDING payment may fail. A replayed
-    // charge.failed (or one racing a charge.success) finds count === 0 and is a
-    // no-op, so it can't flip an already-succeeded payment.
-    const flipped = await this.prisma.$transaction(async (tx) => {
-      const res = await tx.payment.updateMany({
-        where: { id: payment.id, status: PaymentTransactionStatus.PENDING },
-        data: { status: PaymentTransactionStatus.FAILED },
-      });
-      if (res.count === 0) return false;
-      await tx.childEnrollment.update({
-        where: { id: payment.enrollmentId },
-        data: { paymentStatus: PaymentStatus.FAILED },
-      });
-      return true;
-    });
-
-    if (!flipped) return { updated: false };
-
-    if (payment.enrollment?.child?.parent?.userId) {
-      await this.notificationsService.create({
-        userId: payment.enrollment.child.parent.userId,
-        title: 'Payment Failed',
-        message: 'Your first payment did not go through. Please try again.',
-        link: '/history',
-      });
-    }
-    return { updated: true };
+    return this.ledger.failPaystackPayment(reference);
   }
 
   /**
@@ -1312,115 +1178,12 @@ export class EnrollmentService {
     };
   }
 
+  /** Thin caller — confirm logic lives in LedgerService (Milestone 3). */
   async confirmFirstPayment(
     enrollmentId: string,
     schoolId: string,
     actor: AuditActor,
   ) {
-    const { parentUserId } = await this.prisma.$transaction(async (tx) => {
-      // 1. Verify Enrollment
-      const enrollment = await tx.childEnrollment.findUnique({
-        where: { id: enrollmentId },
-        include: {
-          child: { include: { parent: { include: { user: true } } } },
-          school: true,
-        },
-      });
-
-      if (!enrollment) {
-        throw new BadRequestException('Enrollment not found');
-      }
-
-      if (enrollment.schoolId !== schoolId) {
-        throw new BadRequestException(
-          'Enrollment does not belong to this school',
-        );
-      }
-
-      if (enrollment.paymentStatus !== PaymentStatus.PENDING) {
-        throw new BadRequestException('Enrollment is not in pending status');
-      }
-
-      // 2. Find Pending First Payment
-      const payment = await tx.payment.findFirst({
-        where: {
-          enrollmentId: enrollmentId,
-          paymentType: PaymentType.FIRST_PAYMENT,
-          isConfirmed: false,
-        },
-      });
-
-      if (!payment) {
-        throw new BadRequestException('No pending first payment found');
-      }
-
-      // 3. Update Payment (guarded — only an unconfirmed payment flips, so a
-      // concurrent confirm/settle/reconcile can't double-activate or double-audit).
-      const confirmed = await tx.payment.updateMany({
-        where: { id: payment.id, isConfirmed: false },
-        data: {
-          isConfirmed: true,
-          status: PaymentTransactionStatus.SUCCESS,
-          paymentDate: new Date(),
-        },
-      });
-      if (confirmed.count === 0) {
-        throw new BadRequestException('First payment already processed');
-      }
-
-      // 4. Activate Enrollment (guarded on the PENDING precondition)
-      await tx.childEnrollment.updateMany({
-        where: { id: enrollmentId, paymentStatus: PaymentStatus.PENDING },
-        data: { paymentStatus: PaymentStatus.ACTIVE },
-      });
-
-      // 4b. Audit (atomic with the confirmation/activation)
-      await this.audit.record(
-        {
-          action: AuditAction.FIRST_PAYMENT_CONFIRMED,
-          entityType: 'Payment',
-          entityId: payment.id,
-          actor,
-          schoolId,
-          before: {
-            paymentStatus: PaymentStatus.PENDING,
-            isConfirmed: payment.isConfirmed,
-          },
-          after: {
-            paymentStatus: PaymentStatus.ACTIVE,
-            isConfirmed: true,
-          },
-          metadata: { enrollmentId, amount: payment.amountPaid },
-        },
-        tx,
-      );
-
-      // 5. Notify Parent
-      await this.notificationsService.create({
-        userId: enrollment.child.parent.userId,
-        title: 'Enrollment Confirmed',
-        message: `Your enrollment for ${enrollment.child.fullName} (${enrollment.className}) at ${enrollment.school.name} has been confirmed.`,
-      });
-
-      return {
-        message: 'First payment confirmed and enrollment activated',
-        parentUserId: enrollment.child.parent.userId,
-      };
-    });
-
-    // Enrollment just went ACTIVE — push to the parent (their dashboard),
-    // school dashboard, and admins.
-    this.events.emitEnrollmentsChanged({
-      parentUserId,
-      schoolId,
-      notifyAdmins: true,
-    });
-    this.events.emitPaymentsChanged({
-      parentUserId,
-      schoolId,
-      notifyAdmins: true,
-    });
-
-    return { message: 'First payment confirmed and enrollment activated' };
+    return this.ledger.confirmFirstPayment(enrollmentId, schoolId, actor);
   }
 }

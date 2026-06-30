@@ -6,7 +6,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { DocumentsService } from '../documents/documents.service';
 import { AuditService } from '../audit/audit.service';
 import { PaystackService } from '../paystack/paystack.service';
-import { AuthService } from '@thallesp/nestjs-better-auth';
+import { LedgerService } from '../ledger/ledger.service';
+import { SchoolOnboardingService } from '../school-onboarding/school-onboarding.service';
 
 describe('AdminService', () => {
   let service: AdminService;
@@ -25,7 +26,8 @@ describe('AdminService', () => {
         { provide: DocumentsService, useValue: {} },
         { provide: AuditService, useValue: {} },
         { provide: PaystackService, useValue: paystack },
-        { provide: AuthService, useValue: {} },
+        { provide: LedgerService, useValue: {} },
+        { provide: SchoolOnboardingService, useValue: {} },
       ],
     }).compile();
     service = module.get<AdminService>(AdminService);
