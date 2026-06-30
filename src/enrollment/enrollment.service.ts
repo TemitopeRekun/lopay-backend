@@ -1155,115 +1155,12 @@ export class EnrollmentService {
     };
   }
 
+  /** Thin caller — confirm logic lives in LedgerService (Milestone 3). */
   async confirmFirstPayment(
     enrollmentId: string,
     schoolId: string,
     actor: AuditActor,
   ) {
-    const { parentUserId } = await this.prisma.$transaction(async (tx) => {
-      // 1. Verify Enrollment
-      const enrollment = await tx.childEnrollment.findUnique({
-        where: { id: enrollmentId },
-        include: {
-          child: { include: { parent: { include: { user: true } } } },
-          school: true,
-        },
-      });
-
-      if (!enrollment) {
-        throw new BadRequestException('Enrollment not found');
-      }
-
-      if (enrollment.schoolId !== schoolId) {
-        throw new BadRequestException(
-          'Enrollment does not belong to this school',
-        );
-      }
-
-      if (enrollment.paymentStatus !== PaymentStatus.PENDING) {
-        throw new BadRequestException('Enrollment is not in pending status');
-      }
-
-      // 2. Find Pending First Payment
-      const payment = await tx.payment.findFirst({
-        where: {
-          enrollmentId: enrollmentId,
-          paymentType: PaymentType.FIRST_PAYMENT,
-          isConfirmed: false,
-        },
-      });
-
-      if (!payment) {
-        throw new BadRequestException('No pending first payment found');
-      }
-
-      // 3. Update Payment (guarded — only an unconfirmed payment flips, so a
-      // concurrent confirm/settle/reconcile can't double-activate or double-audit).
-      const confirmed = await tx.payment.updateMany({
-        where: { id: payment.id, isConfirmed: false },
-        data: {
-          isConfirmed: true,
-          status: PaymentTransactionStatus.SUCCESS,
-          paymentDate: new Date(),
-        },
-      });
-      if (confirmed.count === 0) {
-        throw new BadRequestException('First payment already processed');
-      }
-
-      // 4. Activate Enrollment (guarded on the PENDING precondition)
-      await tx.childEnrollment.updateMany({
-        where: { id: enrollmentId, paymentStatus: PaymentStatus.PENDING },
-        data: { paymentStatus: PaymentStatus.ACTIVE },
-      });
-
-      // 4b. Audit (atomic with the confirmation/activation)
-      await this.audit.record(
-        {
-          action: AuditAction.FIRST_PAYMENT_CONFIRMED,
-          entityType: 'Payment',
-          entityId: payment.id,
-          actor,
-          schoolId,
-          before: {
-            paymentStatus: PaymentStatus.PENDING,
-            isConfirmed: payment.isConfirmed,
-          },
-          after: {
-            paymentStatus: PaymentStatus.ACTIVE,
-            isConfirmed: true,
-          },
-          metadata: { enrollmentId, amount: payment.amountPaid },
-        },
-        tx,
-      );
-
-      // 5. Notify Parent
-      await this.notificationsService.create({
-        userId: enrollment.child.parent.userId,
-        title: 'Enrollment Confirmed',
-        message: `Your enrollment for ${enrollment.child.fullName} (${enrollment.className}) at ${enrollment.school.name} has been confirmed.`,
-      });
-
-      return {
-        message: 'First payment confirmed and enrollment activated',
-        parentUserId: enrollment.child.parent.userId,
-      };
-    });
-
-    // Enrollment just went ACTIVE — push to the parent (their dashboard),
-    // school dashboard, and admins.
-    this.events.emitEnrollmentsChanged({
-      parentUserId,
-      schoolId,
-      notifyAdmins: true,
-    });
-    this.events.emitPaymentsChanged({
-      parentUserId,
-      schoolId,
-      notifyAdmins: true,
-    });
-
-    return { message: 'First payment confirmed and enrollment activated' };
+    return this.ledger.confirmFirstPayment(enrollmentId, schoolId, actor);
   }
 }

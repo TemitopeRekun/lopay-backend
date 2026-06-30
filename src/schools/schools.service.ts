@@ -12,7 +12,6 @@ import {
   UserRole,
   PaymentTransactionStatus,
   PaymentType,
-  AuditAction,
   Prisma,
 } from '../generated/prisma/client';
 import { AuthService } from '@thallesp/nestjs-better-auth';
@@ -574,61 +573,13 @@ export class SchoolPaymentsService {
     return this.ledger.rejectPayment(paymentId, schoolId, actor);
   }
 
+  /** Thin caller — defaulting logic lives in LedgerService (Milestone 3). */
   async markEnrollmentAsDefaulted(
     enrollmentId: string,
     schoolId: string,
     actor: AuditActor,
   ) {
-    const enrollment = await this.prisma
-      .withTenant(schoolId)
-      .childEnrollment.findFirst({
-        where: { id: enrollmentId },
-        include: { school: true, child: { include: { parent: true } } },
-      });
-
-    if (!enrollment) {
-      throw new BadRequestException('Enrollment not found');
-    }
-
-    const result = await this.prisma.$transaction(async (tx) => {
-      // 1. Mark as Defaulted
-      const updatedEnrollment = await tx.childEnrollment.update({
-        where: { id: enrollmentId },
-        data: { paymentStatus: PaymentStatus.DEFAULTED },
-      });
-
-      // 1b. Audit (atomic with the status change)
-      await this.audit.record(
-        {
-          action: AuditAction.ENROLLMENT_DEFAULTED,
-          entityType: 'ChildEnrollment',
-          entityId: enrollmentId,
-          actor,
-          schoolId,
-          before: { paymentStatus: enrollment.paymentStatus },
-          after: { paymentStatus: PaymentStatus.DEFAULTED },
-          metadata: { remainingBalance: enrollment.remainingBalance },
-        },
-        tx,
-      );
-
-      // 2. Notify Parent
-      await this.notificationsService.create({
-        userId: enrollment.child.parent.userId,
-        title: 'Payment Defaulted',
-        message: `Your enrollment for ${enrollment.child.fullName} (${enrollment.className}) at ${enrollment.school.name} has been marked as defaulted. Please contact the school.`,
-      });
-
-      return updatedEnrollment;
-    });
-
-    this.events.emitEnrollmentsChanged({
-      parentUserId: enrollment.child.parent.userId,
-      schoolId,
-      notifyAdmins: true,
-    });
-
-    return result;
+    return this.ledger.markEnrollmentAsDefaulted(enrollmentId, schoolId, actor);
   }
 
   /**

@@ -782,4 +782,177 @@ export class LedgerService {
     }
     return { updated: true };
   }
+
+  // ========================= enrollment lifecycle =========================
+
+  /** Confirm a manual (non-Paystack) first payment and activate the enrollment. */
+  async confirmFirstPayment(
+    enrollmentId: string,
+    schoolId: string,
+    actor: AuditActor,
+  ) {
+    const { parentUserId } = await this.prisma.$transaction(async (tx) => {
+      // 1. Verify Enrollment
+      const enrollment = await tx.childEnrollment.findUnique({
+        where: { id: enrollmentId },
+        include: {
+          child: { include: { parent: { include: { user: true } } } },
+          school: true,
+        },
+      });
+
+      if (!enrollment) {
+        throw new BadRequestException('Enrollment not found');
+      }
+
+      if (enrollment.schoolId !== schoolId) {
+        throw new BadRequestException(
+          'Enrollment does not belong to this school',
+        );
+      }
+
+      if (enrollment.paymentStatus !== PaymentStatus.PENDING) {
+        throw new BadRequestException('Enrollment is not in pending status');
+      }
+
+      // 2. Find Pending First Payment
+      const payment = await tx.payment.findFirst({
+        where: {
+          enrollmentId: enrollmentId,
+          paymentType: PaymentType.FIRST_PAYMENT,
+          isConfirmed: false,
+        },
+      });
+
+      if (!payment) {
+        throw new BadRequestException('No pending first payment found');
+      }
+
+      // 3. Update Payment (guarded — only an unconfirmed payment flips, so a
+      // concurrent confirm/settle/reconcile can't double-activate or double-audit).
+      const confirmed = await tx.payment.updateMany({
+        where: { id: payment.id, isConfirmed: false },
+        data: {
+          isConfirmed: true,
+          status: PaymentTransactionStatus.SUCCESS,
+          paymentDate: new Date(),
+        },
+      });
+      if (confirmed.count === 0) {
+        throw new BadRequestException('First payment already processed');
+      }
+
+      // 4. Activate Enrollment (guarded on the PENDING precondition)
+      await tx.childEnrollment.updateMany({
+        where: { id: enrollmentId, paymentStatus: PaymentStatus.PENDING },
+        data: { paymentStatus: PaymentStatus.ACTIVE },
+      });
+
+      // 4b. Audit (atomic with the confirmation/activation)
+      await this.audit.record(
+        {
+          action: AuditAction.FIRST_PAYMENT_CONFIRMED,
+          entityType: 'Payment',
+          entityId: payment.id,
+          actor,
+          schoolId,
+          before: {
+            paymentStatus: PaymentStatus.PENDING,
+            isConfirmed: payment.isConfirmed,
+          },
+          after: {
+            paymentStatus: PaymentStatus.ACTIVE,
+            isConfirmed: true,
+          },
+          metadata: { enrollmentId, amount: payment.amountPaid },
+        },
+        tx,
+      );
+
+      // 5. Notify Parent
+      await this.notificationsService.create({
+        userId: enrollment.child.parent.userId,
+        title: 'Enrollment Confirmed',
+        message: `Your enrollment for ${enrollment.child.fullName} (${enrollment.className}) at ${enrollment.school.name} has been confirmed.`,
+      });
+
+      return {
+        message: 'First payment confirmed and enrollment activated',
+        parentUserId: enrollment.child.parent.userId,
+      };
+    });
+
+    // Enrollment just went ACTIVE — push to the parent (their dashboard),
+    // school dashboard, and admins.
+    this.events.emitEnrollmentsChanged({
+      parentUserId,
+      schoolId,
+      notifyAdmins: true,
+    });
+    this.events.emitPaymentsChanged({
+      parentUserId,
+      schoolId,
+      notifyAdmins: true,
+    });
+
+    return { message: 'First payment confirmed and enrollment activated' };
+  }
+
+  /** Mark an enrollment DEFAULTED (manual, school-initiated). */
+  async markEnrollmentAsDefaulted(
+    enrollmentId: string,
+    schoolId: string,
+    actor: AuditActor,
+  ) {
+    const enrollment = await this.prisma
+      .withTenant(schoolId)
+      .childEnrollment.findFirst({
+        where: { id: enrollmentId },
+        include: { school: true, child: { include: { parent: true } } },
+      });
+
+    if (!enrollment) {
+      throw new BadRequestException('Enrollment not found');
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 1. Mark as Defaulted
+      const updatedEnrollment = await tx.childEnrollment.update({
+        where: { id: enrollmentId },
+        data: { paymentStatus: PaymentStatus.DEFAULTED },
+      });
+
+      // 1b. Audit (atomic with the status change)
+      await this.audit.record(
+        {
+          action: AuditAction.ENROLLMENT_DEFAULTED,
+          entityType: 'ChildEnrollment',
+          entityId: enrollmentId,
+          actor,
+          schoolId,
+          before: { paymentStatus: enrollment.paymentStatus },
+          after: { paymentStatus: PaymentStatus.DEFAULTED },
+          metadata: { remainingBalance: enrollment.remainingBalance },
+        },
+        tx,
+      );
+
+      // 2. Notify Parent
+      await this.notificationsService.create({
+        userId: enrollment.child.parent.userId,
+        title: 'Payment Defaulted',
+        message: `Your enrollment for ${enrollment.child.fullName} (${enrollment.className}) at ${enrollment.school.name} has been marked as defaulted. Please contact the school.`,
+      });
+
+      return updatedEnrollment;
+    });
+
+    this.events.emitEnrollmentsChanged({
+      parentUserId: enrollment.child.parent.userId,
+      schoolId,
+      notifyAdmins: true,
+    });
+
+    return result;
+  }
 }

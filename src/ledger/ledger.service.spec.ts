@@ -20,8 +20,17 @@ import {
  */
 describe('LedgerService (characterization)', () => {
   let tx: {
-    payment: { updateMany: jest.Mock; findUniqueOrThrow: jest.Mock };
-    childEnrollment: { findUniqueOrThrow: jest.Mock; update: jest.Mock };
+    payment: {
+      updateMany: jest.Mock;
+      findUniqueOrThrow: jest.Mock;
+      findFirst?: jest.Mock;
+    };
+    childEnrollment: {
+      findUniqueOrThrow: jest.Mock;
+      update: jest.Mock;
+      findUnique?: jest.Mock;
+      updateMany?: jest.Mock;
+    };
     notification: { create: jest.Mock };
   };
   let prisma: {
@@ -29,7 +38,10 @@ describe('LedgerService (characterization)', () => {
     payment: { findFirst: jest.Mock; findUnique: jest.Mock };
     $transaction: jest.Mock;
   };
-  let tenant: { payment: { findFirst: jest.Mock } };
+  let tenant: {
+    payment: { findFirst: jest.Mock };
+    childEnrollment?: { findFirst: jest.Mock };
+  };
   let notifications: { create: jest.Mock };
   let events: {
     emitPaymentsChanged: jest.Mock;
@@ -625,6 +637,178 @@ describe('LedgerService (characterization)', () => {
         const result = await service.failPaystackPayment('ref-1');
 
         expect(result).toEqual({ updated: false });
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  // ===================== enrollment lifecycle =====================
+  describe('enrollment lifecycle (confirmFirstPayment / markEnrollmentAsDefaulted)', () => {
+    describe('confirmFirstPayment', () => {
+      function makeEnrollment(overrides: Record<string, unknown> = {}) {
+        return {
+          id: 'enr-1',
+          schoolId: SCHOOL_ID,
+          paymentStatus: PaymentStatus.PENDING,
+          className: 'JSS1',
+          school: { name: 'Acme School' },
+          child: {
+            fullName: 'Ada Lovelace',
+            parent: { userId: 'parent-1', user: { id: 'u-1' } },
+          },
+          ...overrides,
+        };
+      }
+
+      it('confirms the pending first payment, activates the enrollment, audits + emits', async () => {
+        tx.childEnrollment.findUnique = jest
+          .fn()
+          .mockResolvedValueOnce(makeEnrollment());
+        tx.payment.findFirst = jest.fn().mockResolvedValueOnce({
+          id: 'pay-1',
+          isConfirmed: false,
+          amountPaid: 80_000,
+        });
+        tx.childEnrollment.updateMany = jest
+          .fn()
+          .mockResolvedValue({ count: 1 });
+
+        const result = await service.confirmFirstPayment(
+          'enr-1',
+          SCHOOL_ID,
+          actor,
+        );
+
+        expect(tx.payment.updateMany).toHaveBeenCalledWith({
+          where: { id: 'pay-1', isConfirmed: false },
+          data: expect.objectContaining({
+            isConfirmed: true,
+            status: PaymentTransactionStatus.SUCCESS,
+          }),
+        });
+        expect(tx.childEnrollment.updateMany).toHaveBeenCalledWith({
+          where: { id: 'enr-1', paymentStatus: PaymentStatus.PENDING },
+          data: { paymentStatus: PaymentStatus.ACTIVE },
+        });
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: AuditAction.FIRST_PAYMENT_CONFIRMED,
+          }),
+          tx,
+        );
+        expect(events.emitEnrollmentsChanged).toHaveBeenCalledWith({
+          parentUserId: 'parent-1',
+          schoolId: SCHOOL_ID,
+          notifyAdmins: true,
+        });
+        expect(result).toEqual({
+          message: 'First payment confirmed and enrollment activated',
+        });
+      });
+
+      it('rejects an enrollment that belongs to another school (tenant guard)', async () => {
+        tx.childEnrollment.findUnique = jest
+          .fn()
+          .mockResolvedValueOnce(makeEnrollment({ schoolId: 'other-school' }));
+        tx.payment.findFirst = jest.fn();
+
+        await expect(
+          service.confirmFirstPayment('enr-1', SCHOOL_ID, actor),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(tx.payment.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('rejects when the enrollment is not PENDING', async () => {
+        tx.childEnrollment.findUnique = jest
+          .fn()
+          .mockResolvedValueOnce(
+            makeEnrollment({ paymentStatus: PaymentStatus.ACTIVE }),
+          );
+        tx.payment.findFirst = jest.fn();
+
+        await expect(
+          service.confirmFirstPayment('enr-1', SCHOOL_ID, actor),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      });
+
+      it('is idempotent: a concurrent confirm (count===0) throws, no activation', async () => {
+        tx.childEnrollment.findUnique = jest
+          .fn()
+          .mockResolvedValueOnce(makeEnrollment());
+        tx.payment.findFirst = jest.fn().mockResolvedValueOnce({
+          id: 'pay-1',
+          isConfirmed: false,
+          amountPaid: 80_000,
+        });
+        tx.payment.updateMany.mockResolvedValueOnce({ count: 0 });
+        tx.childEnrollment.updateMany = jest.fn();
+
+        await expect(
+          service.confirmFirstPayment('enr-1', SCHOOL_ID, actor),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(tx.childEnrollment.updateMany).not.toHaveBeenCalled();
+        expect(audit.record).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('markEnrollmentAsDefaulted', () => {
+      function makeEnrollment(overrides: Record<string, unknown> = {}) {
+        return {
+          id: 'enr-1',
+          remainingBalance: 30_000,
+          paymentStatus: PaymentStatus.ACTIVE,
+          className: 'JSS1',
+          school: { name: 'Acme School' },
+          child: { fullName: 'Ada Lovelace', parent: { userId: 'parent-1' } },
+          ...overrides,
+        };
+      }
+
+      it('marks DEFAULTED (tenant-scoped), audits, notifies, and emits', async () => {
+        tenant.childEnrollment = {
+          findFirst: jest.fn().mockResolvedValueOnce(makeEnrollment()),
+        } as never;
+        tx.childEnrollment.update.mockResolvedValueOnce({
+          id: 'enr-1',
+          paymentStatus: PaymentStatus.DEFAULTED,
+        });
+
+        const result = await service.markEnrollmentAsDefaulted(
+          'enr-1',
+          SCHOOL_ID,
+          actor,
+        );
+
+        expect(prisma.withTenant).toHaveBeenCalledWith(SCHOOL_ID);
+        expect(tx.childEnrollment.update).toHaveBeenCalledWith({
+          where: { id: 'enr-1' },
+          data: { paymentStatus: PaymentStatus.DEFAULTED },
+        });
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: AuditAction.ENROLLMENT_DEFAULTED,
+            metadata: expect.objectContaining({ remainingBalance: 30_000 }),
+          }),
+          tx,
+        );
+        expect(events.emitEnrollmentsChanged).toHaveBeenCalledWith({
+          parentUserId: 'parent-1',
+          schoolId: SCHOOL_ID,
+          notifyAdmins: true,
+        });
+        expect(result).toEqual(
+          expect.objectContaining({ paymentStatus: PaymentStatus.DEFAULTED }),
+        );
+      });
+
+      it('throws when the enrollment is not found in the tenant scope', async () => {
+        tenant.childEnrollment = {
+          findFirst: jest.fn().mockResolvedValueOnce(null),
+        } as never;
+
+        await expect(
+          service.markEnrollmentAsDefaulted('missing', SCHOOL_ID, actor),
+        ).rejects.toBeInstanceOf(BadRequestException);
         expect(prisma.$transaction).not.toHaveBeenCalled();
       });
     });
