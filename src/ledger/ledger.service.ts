@@ -955,4 +955,67 @@ export class LedgerService {
 
     return result;
   }
+
+  /**
+   * Default a single overdue enrollment from the scheduled sweep (system action,
+   * `actor: null`). Per-row guarded flip so an enrollment paid/completed since
+   * the sweep snapshot is neither wrongly defaulted nor notified twice. Returns
+   * whether this row actually flipped (so the caller can log/skip).
+   */
+  async markEnrollmentDefaultedBySweep(enrollment: {
+    id: string;
+    schoolId: string;
+    remainingBalance: number;
+    child: { fullName: string; parent: { userId: string } };
+    school: { name: string };
+  }): Promise<boolean> {
+    const flipped = await this.prisma.$transaction(async (tx) => {
+      const res = await tx.childEnrollment.updateMany({
+        where: {
+          id: enrollment.id,
+          paymentStatus: PaymentStatus.ACTIVE,
+          remainingBalance: { gt: 0 },
+        },
+        data: { paymentStatus: PaymentStatus.DEFAULTED },
+      });
+      if (res.count === 0) return false;
+
+      // Audit (atomic). actor is null — this is a system action.
+      await this.audit.record(
+        {
+          action: AuditAction.ENROLLMENT_DEFAULTED,
+          entityType: 'ChildEnrollment',
+          entityId: enrollment.id,
+          actor: null,
+          schoolId: enrollment.schoolId,
+          before: { paymentStatus: PaymentStatus.ACTIVE },
+          after: { paymentStatus: PaymentStatus.DEFAULTED },
+          metadata: {
+            remainingBalance: enrollment.remainingBalance,
+            source: 'scheduled-defaulter-detection',
+          },
+        },
+        tx,
+      );
+
+      await tx.notification.create({
+        data: {
+          userId: enrollment.child.parent.userId,
+          title: 'Payment Defaulted',
+          message: `Your enrollment for ${enrollment.child.fullName} at ${enrollment.school.name} has been marked as defaulted due to outstanding balance of ${Money.fromKobo(enrollment.remainingBalance).formatNaira()}.`,
+          link: '/history',
+        },
+      });
+      return true;
+    });
+
+    if (!flipped) return false;
+
+    this.events.emitEnrollmentsChanged({
+      parentUserId: enrollment.child.parent.userId,
+      schoolId: enrollment.schoolId,
+      notifyAdmins: true,
+    });
+    return true;
+  }
 }

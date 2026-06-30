@@ -812,5 +812,67 @@ describe('LedgerService (characterization)', () => {
         expect(prisma.$transaction).not.toHaveBeenCalled();
       });
     });
+
+    describe('markEnrollmentDefaultedBySweep (system batch)', () => {
+      function makeSweepRow(overrides: Record<string, unknown> = {}) {
+        return {
+          id: 'enr-1',
+          schoolId: SCHOOL_ID,
+          remainingBalance: 30_000,
+          child: { fullName: 'Ada Lovelace', parent: { userId: 'parent-1' } },
+          school: { name: 'Acme School' },
+          ...overrides,
+        };
+      }
+
+      it('guards on ACTIVE+balance>0, records a null-actor system audit, notifies in-tx, emits, returns true', async () => {
+        tx.childEnrollment.updateMany = jest
+          .fn()
+          .mockResolvedValueOnce({ count: 1 });
+
+        const flipped =
+          await service.markEnrollmentDefaultedBySweep(makeSweepRow());
+
+        expect(tx.childEnrollment.updateMany).toHaveBeenCalledWith({
+          where: {
+            id: 'enr-1',
+            paymentStatus: PaymentStatus.ACTIVE,
+            remainingBalance: { gt: 0 },
+          },
+          data: { paymentStatus: PaymentStatus.DEFAULTED },
+        });
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: AuditAction.ENROLLMENT_DEFAULTED,
+            actor: null,
+            metadata: expect.objectContaining({
+              source: 'scheduled-defaulter-detection',
+            }),
+          }),
+          tx,
+        );
+        expect(tx.notification.create).toHaveBeenCalledTimes(1);
+        expect(events.emitEnrollmentsChanged).toHaveBeenCalledWith({
+          parentUserId: 'parent-1',
+          schoolId: SCHOOL_ID,
+          notifyAdmins: true,
+        });
+        expect(flipped).toBe(true);
+      });
+
+      it('returns false without audit/notify/emit when the row already changed (count===0)', async () => {
+        tx.childEnrollment.updateMany = jest
+          .fn()
+          .mockResolvedValueOnce({ count: 0 });
+
+        const flipped =
+          await service.markEnrollmentDefaultedBySweep(makeSweepRow());
+
+        expect(flipped).toBe(false);
+        expect(audit.record).not.toHaveBeenCalled();
+        expect(tx.notification.create).not.toHaveBeenCalled();
+        expect(events.emitEnrollmentsChanged).not.toHaveBeenCalled();
+      });
+    });
   });
 });
