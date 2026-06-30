@@ -35,22 +35,27 @@ export class AdminController {
     return this.adminService.createSubaccountForSchool(schoolId);
   }
 
-  /** View pending first payments */
+  /** View pending first payments (paginated) */
   @Get('pending-first-payments')
   getPendingFirstPayments(
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
     const include = includeReceiptSignedUrls === 'true';
-    return this.adminService.getPendingFirstPayments(include);
+    return this.adminService.getPendingFirstPayments(include, page, limit);
   }
 
-  /** View all pending installment payments across schools (read-only) */
+  /** View pending installment payments across schools (paginated, read-only) */
   @Get('pending-installments')
-  getPendingInstallments() {
-    return this.adminService.getPendingInstallments();
+  getPendingInstallments(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminService.getPendingInstallments(page, limit);
   }
 
-  /** View students/enrollments for a specific school (read-only) */
+  /** View students/enrollments for a specific school (paginated, read-only) */
   @Get('schools/:schoolId/students')
   getSchoolStudents(
     @Param('schoolId') schoolId: string,
@@ -63,8 +68,8 @@ export class AdminController {
       schoolId,
       className,
       search,
-      page ? parseInt(page, 10) : 1,
-      limit ? Math.min(parseInt(limit, 10), 100) : 50,
+      page,
+      limit,
     );
   }
 
@@ -98,14 +103,21 @@ export class AdminController {
     return this.adminService.getPlatformRevenue();
   }
 
-  /** Global transactions across all schools */
+  /** Global transactions across all schools (paginated) */
   @Get('transactions')
   getTransactions(
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
     @Query('receiptType') receiptType?: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT',
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
     const include = includeReceiptSignedUrls === 'true';
-    return this.adminService.getTransactions(include, receiptType ?? 'ALL');
+    return this.adminService.getTransactions(
+      include,
+      receiptType ?? 'ALL',
+      page,
+      limit,
+    );
   }
 
   /** Global student summary */

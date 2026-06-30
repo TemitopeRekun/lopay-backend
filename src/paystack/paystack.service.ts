@@ -3,7 +3,9 @@ import {
   Logger,
   BadGatewayException,
   InternalServerErrorException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
+import CircuitBreaker from 'opossum';
 import { errorMessage } from '../common/errors';
 
 const PAYSTACK_BASE_URL = 'https://api.paystack.co';
@@ -81,6 +83,18 @@ export class PaystackService {
   private readonly secretKey: string;
   private banksCache: { at: number; banks: PaystackBank[] } | null = null;
 
+  /**
+   * Circuit breaker around the Paystack HTTP call (Milestone 4). When Paystack is
+   * down, repeated transport/5xx failures OPEN the circuit so subsequent calls
+   * fail fast (no thread/socket pile-up behind a dead dependency) until a 30s
+   * cooldown lets a probe through. 4xx business errors are excluded via
+   * `errorFilter` so a bad account number can't trip the breaker.
+   */
+  private readonly breaker: CircuitBreaker<
+    [method: 'GET' | 'POST', path: string, body: unknown],
+    unknown
+  >;
+
   constructor() {
     this.secretKey = process.env.PAYSTACK_SECRET_KEY ?? '';
     if (!this.secretKey) {
@@ -88,6 +102,31 @@ export class PaystackService {
         'PAYSTACK_SECRET_KEY is empty — Paystack calls will fail until it is set.',
       );
     }
+
+    this.breaker = new CircuitBreaker(
+      (method: 'GET' | 'POST', path: string, body: unknown) =>
+        this.doRequest(method, path, body),
+      {
+        name: 'paystack',
+        // Our own per-attempt timeout + retry already bound latency; let the
+        // wrapped call settle rather than racing a second (shorter) timeout.
+        timeout: false,
+        errorThresholdPercentage: 50,
+        volumeThreshold: 5, // need a few calls before a percentage is meaningful
+        resetTimeout: 30_000, // probe again 30s after opening
+        // Don't count expected 4xx client/business errors as breaker failures.
+        errorFilter: (err: unknown) => err instanceof BadGatewayException,
+      },
+    );
+    this.breaker.on('open', () =>
+      this.logger.error('Paystack circuit OPEN — failing fast for ~30s.'),
+    );
+    this.breaker.on('halfOpen', () =>
+      this.logger.warn('Paystack circuit HALF-OPEN — probing.'),
+    );
+    this.breaker.on('close', () =>
+      this.logger.log('Paystack circuit CLOSED — recovered.'),
+    );
   }
 
   /** Create a subaccount for a school. Returns the subaccount_code. */
@@ -190,10 +229,39 @@ export class PaystackService {
   }
 
   /**
-   * Issue a request to Paystack. Unwraps the `{ status, message, data }`
-   * envelope and returns `data`. Retries once on network/5xx errors.
+   * Issue a request to Paystack through the circuit breaker. Unwraps the
+   * `{ status, message, data }` envelope and returns `data`. When the breaker is
+   * OPEN (Paystack is failing) this rejects immediately with 503 instead of
+   * piling up doomed calls.
    */
   private async request<T>(
+    method: 'GET' | 'POST',
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
+    try {
+      return (await this.breaker.fire(method, path, body)) as T;
+    } catch (err) {
+      // opossum rejects with code 'EOPENBREAKER' while the circuit is open.
+      if ((err as { code?: string }).code === 'EOPENBREAKER') {
+        this.logger.warn(
+          `Paystack call short-circuited (open): ${method} ${path}`,
+        );
+        throw new ServiceUnavailableException(
+          'Payment provider temporarily unavailable, please retry shortly',
+        );
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * The actual HTTP call with bounded retry. Retries network/5xx with backoff;
+   * 4xx surfaces immediately as BadGatewayException (a client/business error,
+   * excluded from the breaker), while an exhausted 5xx / transport failure
+   * surfaces as a provider-outage error that DOES count toward the breaker.
+   */
+  private async doRequest<T>(
     method: 'GET' | 'POST',
     path: string,
     body?: unknown,
@@ -228,11 +296,17 @@ export class PaystackService {
         } | null;
 
         if (!res.ok || !json?.status) {
-          // 5xx is retryable; 4xx is a real error — surface immediately.
-          if (res.status >= 500 && attempt < MAX_ATTEMPTS - 1) {
-            lastErr = new Error(`Paystack ${res.status}: ${json?.message}`);
-            continue;
+          if (res.status >= 500) {
+            // Transient server-side outage — retry, then give up (and let the
+            // breaker count it as a failure via the final outage throw below).
+            lastErr = new Error(
+              `Paystack ${res.status}: ${json?.message ?? 'server error'}`,
+            );
+            if (attempt < MAX_ATTEMPTS - 1) continue;
+            break;
           }
+          // 4xx — a real client/business error; surface immediately. Excluded
+          // from the breaker by errorFilter so it can't open the circuit.
           throw new BadGatewayException(
             `Paystack error (${res.status}): ${json?.message ?? 'unknown error'}`,
           );

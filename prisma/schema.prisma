@@ -87,6 +87,7 @@ model User {
   updatedAt DateTime @updatedAt
 
   @@index([deletedAt])
+  @@index([role]) // admin user listings filter by role (M4)
 }
 
 // ─── Better Auth tables ──────────────────────────────────────────────────────
@@ -172,6 +173,7 @@ model School {
   createdAt     DateTime @default(now())
 
   @@index([deletedAt])
+  @@index([name]) // school search/ordering by name (M4)
 }
 
 model ClassFee {
@@ -251,6 +253,10 @@ model Payment {
   @@index([schoolId])
   @@index([schoolId, isConfirmed, status])
   @@index([enrollmentId])
+  // M4 scale indexes:
+  @@index([paymentDate]) // global transaction ordering + 6-month revenue series
+  @@index([status, paystackReference, paymentDate]) // paystack reconciliation sweep
+  @@index([paymentType, receiver, isConfirmed, status]) // admin pending/transaction filters
 }
 
 model ChildEnrollment {
