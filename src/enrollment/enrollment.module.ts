@@ -6,6 +6,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { EventsModule } from '../events/events.module';
 import { AuditModule } from '../audit/audit.module';
 import { PaystackModule } from '../paystack/paystack.module';
+import { LedgerModule } from '../ledger/ledger.module';
 import { PaystackWebhookController } from './paystack-webhook.controller';
 
 @Module({
@@ -15,6 +16,7 @@ import { PaystackWebhookController } from './paystack-webhook.controller';
     EventsModule,
     AuditModule,
     PaystackModule,
+    LedgerModule,
   ],
   providers: [EnrollmentService],
   controllers: [EnrollmentController, PaystackWebhookController],

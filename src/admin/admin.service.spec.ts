@@ -7,6 +7,7 @@ import { DocumentsService } from '../documents/documents.service';
 import { AuditService } from '../audit/audit.service';
 import { PaystackService } from '../paystack/paystack.service';
 import { AuthService } from '@thallesp/nestjs-better-auth';
+import { LedgerService } from '../ledger/ledger.service';
 
 describe('AdminService', () => {
   let service: AdminService;
@@ -26,6 +27,7 @@ describe('AdminService', () => {
         { provide: AuditService, useValue: {} },
         { provide: PaystackService, useValue: paystack },
         { provide: AuthService, useValue: {} },
+        { provide: LedgerService, useValue: {} },
       ],
     }).compile();
     service = module.get<AdminService>(AdminService);

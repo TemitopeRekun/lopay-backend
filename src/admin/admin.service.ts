@@ -10,7 +10,6 @@ import {
   PaymentStatus,
   PaymentTransactionStatus,
   UserRole,
-  AuditAction,
   Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -19,6 +18,7 @@ import { AuthService } from '@thallesp/nestjs-better-auth';
 import { CreateSchoolDto } from './dto/create.school.dto';
 import { DocumentsService } from '../documents/documents.service';
 import { AuditService, AuditActor } from '../audit/audit.service';
+import { LedgerService } from '../ledger/ledger.service';
 import { Money } from '../common/money';
 import { PLATFORM_FEE_RATE } from '../common/fees';
 import { errorMessage } from '../common/errors';
@@ -36,6 +36,7 @@ export class AdminService {
     private readonly audit: AuditService,
     private readonly paystack: PaystackService,
     private readonly authService: AuthService,
+    private readonly ledger: LedgerService,
   ) {}
 
   /**
@@ -249,97 +250,9 @@ export class AdminService {
     return results;
   }
 
-  /** Settle school share and activate enrollment */
+  /** Thin caller — settle logic lives in LedgerService (Milestone 3). */
   async settleFirstPayment(paymentId: string, actor: AuditActor) {
-    const payment = await this.prisma.payment.findFirst({
-      where: {
-        id: paymentId,
-        paymentType: PaymentType.FIRST_PAYMENT,
-        receiver: PaymentReceiver.PLATFORM,
-        isConfirmed: false,
-      },
-      include: {
-        enrollment: {
-          include: {
-            school: true,
-            child: {
-              include: { parent: true },
-            },
-          },
-        },
-      },
-    });
-
-    if (!payment) {
-      throw new NotFoundException('Payment not found or already settled');
-    }
-
-    const { enrollment } = payment;
-
-    const settled = await this.prisma.$transaction(async (tx) => {
-      // 1️⃣ Mark payment as confirmed (guarded — only an unconfirmed payment
-      // flips, so a concurrent settle/reject/confirm can't double-process).
-      const res = await tx.payment.updateMany({
-        where: { id: payment.id, isConfirmed: false },
-        data: { isConfirmed: true, status: PaymentTransactionStatus.SUCCESS },
-      });
-      if (res.count === 0) return false;
-
-      // 2️⃣ Activate enrollment
-      await tx.childEnrollment.update({
-        where: { id: payment.enrollmentId },
-        data: { paymentStatus: PaymentStatus.ACTIVE },
-      });
-
-      // 2b. Audit (atomic with the settlement)
-      await this.audit.record(
-        {
-          action: AuditAction.FIRST_PAYMENT_SETTLED,
-          entityType: 'Payment',
-          entityId: payment.id,
-          actor,
-          schoolId: enrollment.schoolId,
-          before: {
-            isConfirmed: false,
-            paymentStatus: enrollment.paymentStatus,
-          },
-          after: { isConfirmed: true, paymentStatus: PaymentStatus.ACTIVE },
-          metadata: { enrollmentId: enrollment.id, amount: payment.amountPaid },
-        },
-        tx,
-      );
-
-      // 3️⃣ Notify School Owner
-      await tx.notification.create({
-        data: {
-          userId: enrollment.school.ownerId,
-          title: 'First Payment Settled',
-          message:
-            'The platform has settled the first payment. Enrollment is now active.',
-          link: `/school/enrollments/${enrollment.id}`,
-        },
-      });
-
-      // 4️⃣ Notify Parent
-      await tx.notification.create({
-        data: {
-          userId: enrollment.child.parent.userId,
-          title: 'Enrollment Confirmed',
-          message: `Your first payment of ${Money.fromKobo(payment.amountPaid).formatNaira()} has been confirmed. Enrollment is active.`,
-          link: `/parent/enrollments/${enrollment.id}`,
-        },
-      });
-      return true;
-    });
-
-    if (!settled) {
-      throw new NotFoundException('Payment not found or already settled');
-    }
-
-    return {
-      message: 'Payment settled and enrollment activated successfully',
-      paymentId: payment.id,
-    };
+    return this.ledger.settleFirstPayment(paymentId, actor);
   }
 
   /** Get all pending installment payments across all schools (read-only) */
@@ -372,106 +285,9 @@ export class AdminService {
     }));
   }
 
-  /** Reject a pending first payment and mark enrollment as failed */
+  /** Thin caller — reject logic lives in LedgerService (Milestone 3). */
   async rejectFirstPayment(paymentId: string, actor: AuditActor) {
-    const payment = await this.prisma.payment.findFirst({
-      where: {
-        id: paymentId,
-        paymentType: PaymentType.FIRST_PAYMENT,
-        receiver: PaymentReceiver.PLATFORM,
-        isConfirmed: false,
-      },
-      include: {
-        enrollment: {
-          include: {
-            school: true,
-            child: {
-              include: { parent: true },
-            },
-          },
-        },
-      },
-    });
-
-    if (!payment) {
-      throw new NotFoundException(
-        'First payment not found or already processed',
-      );
-    }
-
-    const { enrollment } = payment;
-
-    const rejectedOk = await this.prisma.$transaction(async (tx) => {
-      // 1️⃣ Mark payment as failed (guarded — only an unprocessed payment flips).
-      const res = await tx.payment.updateMany({
-        where: { id: payment.id, isConfirmed: false },
-        data: {
-          status: PaymentTransactionStatus.FAILED,
-        },
-      });
-      if (res.count === 0) return false;
-
-      // 2️⃣ Mark enrollment as FAILED (no balance changes)
-      await tx.childEnrollment.update({
-        where: { id: payment.enrollmentId },
-        data: { paymentStatus: PaymentStatus.FAILED },
-      });
-
-      // 2b. Audit (atomic with the rejection)
-      await this.audit.record(
-        {
-          action: AuditAction.FIRST_PAYMENT_REJECTED,
-          entityType: 'Payment',
-          entityId: payment.id,
-          actor,
-          schoolId: enrollment.schoolId,
-          before: {
-            isConfirmed: false,
-            paymentStatus: enrollment.paymentStatus,
-          },
-          after: {
-            status: PaymentTransactionStatus.FAILED,
-            paymentStatus: PaymentStatus.FAILED,
-          },
-          metadata: { enrollmentId: enrollment.id, amount: payment.amountPaid },
-        },
-        tx,
-      );
-
-      // 3️⃣ Notify School Owner (optional visibility)
-      await tx.notification.create({
-        data: {
-          userId: enrollment.school.ownerId,
-          title: 'First Payment Rejected',
-          message:
-            'The platform has rejected the first payment for this enrollment. Please review the receipt or contact the parent.',
-          link: `/school/enrollments/${enrollment.id}`,
-        },
-      });
-
-      // 4️⃣ Notify Parent
-      await tx.notification.create({
-        data: {
-          userId: enrollment.child.parent.userId,
-          title: 'First Payment Rejected',
-          message:
-            'Your first payment could not be verified. Please pay again and upload a clearer receipt.',
-          link: `/parent/enrollments/${enrollment.id}`,
-        },
-      });
-      return true;
-    });
-
-    if (!rejectedOk) {
-      throw new NotFoundException(
-        'First payment not found or already processed',
-      );
-    }
-
-    return {
-      message: 'First payment rejected and enrollment marked as failed',
-      paymentId: payment.id,
-    };
+    return this.ledger.rejectFirstPayment(paymentId, actor);
   }
 
   /** Get students/enrollments for a specific school (admin view) */
