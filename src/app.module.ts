@@ -15,6 +15,7 @@ import { PrismaService } from './prisma/prisma.service';
 import { ConfigModule } from '@nestjs/config';
 import { RedisModule, REDIS_CLIENT } from './redis/redis.module';
 import { CacheModule } from './cache/cache.module';
+import { MetricsModule } from './common/observability/metrics.module';
 import * as Joi from 'joi';
 import { UsersModule } from './users/users.module';
 import { SchoolsModule } from './schools/schools.module';
@@ -143,6 +144,7 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
     }),
     RedisModule,
     CacheModule,
+    MetricsModule,
     FirebaseModule,
     UsersModule,
     SchoolsModule,

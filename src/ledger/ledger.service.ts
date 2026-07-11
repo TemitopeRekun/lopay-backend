@@ -16,6 +16,7 @@ import {
 import { EventsGateway } from '../events/events.gateway';
 import { AuditService, AuditActor } from '../audit/audit.service';
 import { Money } from '../common/money';
+import { MetricsService } from '../common/observability/metrics.service';
 
 /**
  * The single owner of every money-state transition (Milestone 3).
@@ -39,7 +40,22 @@ export class LedgerService {
     private readonly notificationsService: NotificationsService,
     private readonly events: EventsGateway,
     private readonly audit: AuditService,
+    private readonly metrics: MetricsService,
   ) {}
+
+  /**
+   * Seconds from a payment's submission timestamp to now (for confirm latency).
+   * Returns undefined for a missing/invalid date so a metrics detail can never
+   * throw inside a money path.
+   */
+  private static latencySeconds(
+    submittedAt: Date | null | undefined,
+  ): number | undefined {
+    if (!(submittedAt instanceof Date) || Number.isNaN(submittedAt.getTime())) {
+      return undefined;
+    }
+    return Math.max(0, (Date.now() - submittedAt.getTime()) / 1000);
+  }
 
   // ============================== installments ==============================
 
@@ -172,6 +188,12 @@ export class LedgerService {
       notifyAdmins: true,
     });
 
+    this.metrics.recordPaymentOutcome('confirmed', {
+      type: PaymentType.INSTALLMENT,
+      receiver: payment.receiver,
+      latencySeconds: LedgerService.latencySeconds(payment.paymentDate),
+    });
+
     return result;
   }
 
@@ -263,6 +285,11 @@ export class LedgerService {
       parentUserId: payment.enrollment.child.parent.userId,
       schoolId,
       notifyAdmins: true,
+    });
+
+    this.metrics.recordPaymentOutcome('rejected', {
+      type: payment.paymentType,
+      receiver: payment.receiver,
     });
 
     return result;
@@ -404,6 +431,11 @@ export class LedgerService {
       notifyAdmins: true,
     });
 
+    this.metrics.recordPaymentOutcome('reversed', {
+      type: PaymentType.INSTALLMENT,
+      receiver: payment.receiver,
+    });
+
     return result;
   }
 
@@ -495,6 +527,12 @@ export class LedgerService {
     if (!settled) {
       throw new NotFoundException('Payment not found or already settled');
     }
+
+    this.metrics.recordPaymentOutcome('confirmed', {
+      type: PaymentType.FIRST_PAYMENT,
+      receiver: payment.receiver,
+      latencySeconds: LedgerService.latencySeconds(payment.paymentDate),
+    });
 
     return {
       message: 'Payment settled and enrollment activated successfully',
@@ -597,6 +635,11 @@ export class LedgerService {
         'First payment not found or already processed',
       );
     }
+
+    this.metrics.recordPaymentOutcome('rejected', {
+      type: PaymentType.FIRST_PAYMENT,
+      receiver: payment.receiver,
+    });
 
     return {
       message: 'First payment rejected and enrollment marked as failed',
@@ -739,6 +782,12 @@ export class LedgerService {
       notifyAdmins: true,
     });
 
+    this.metrics.recordPaymentOutcome('confirmed', {
+      type: PaymentType.FIRST_PAYMENT,
+      receiver: payment.receiver,
+      latencySeconds: LedgerService.latencySeconds(payment.paymentDate),
+    });
+
     return { reconciled: true, completed: isCompleted };
   }
 
@@ -780,6 +829,12 @@ export class LedgerService {
         link: '/history',
       });
     }
+
+    this.metrics.recordPaymentOutcome('failed', {
+      type: PaymentType.FIRST_PAYMENT,
+      receiver: payment.receiver,
+    });
+
     return { updated: true };
   }
 
@@ -791,7 +846,7 @@ export class LedgerService {
     schoolId: string,
     actor: AuditActor,
   ) {
-    const { parentUserId } = await this.prisma.$transaction(async (tx) => {
+    const txResult = await this.prisma.$transaction(async (tx) => {
       // 1. Verify Enrollment
       const enrollment = await tx.childEnrollment.findUnique({
         where: { id: enrollmentId },
@@ -879,8 +934,11 @@ export class LedgerService {
       return {
         message: 'First payment confirmed and enrollment activated',
         parentUserId: enrollment.child.parent.userId,
+        submittedAt: payment.paymentDate,
+        receiver: payment.receiver,
       };
     });
+    const { parentUserId, submittedAt, receiver } = txResult;
 
     // Enrollment just went ACTIVE — push to the parent (their dashboard),
     // school dashboard, and admins.
@@ -893,6 +951,12 @@ export class LedgerService {
       parentUserId,
       schoolId,
       notifyAdmins: true,
+    });
+
+    this.metrics.recordPaymentOutcome('confirmed', {
+      type: PaymentType.FIRST_PAYMENT,
+      receiver,
+      latencySeconds: LedgerService.latencySeconds(submittedAt),
     });
 
     return { message: 'First payment confirmed and enrollment activated' };

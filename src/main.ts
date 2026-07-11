@@ -52,7 +52,7 @@ async function bootstrap() {
 
   // Note: the global prefix excludes the Better Auth handler (the module adds
   // /api/auth to the prefix exclude list automatically).
-  app.setGlobalPrefix('api/v1', { exclude: ['health'] });
+  app.setGlobalPrefix('api/v1', { exclude: ['health', 'metrics'] });
   app.useGlobalFilters(new GlobalExceptionFilter());
   app.useGlobalPipes(
     new ValidationPipe({

@@ -48,6 +48,7 @@ describe('LedgerService (characterization)', () => {
     emitEnrollmentsChanged: jest.Mock;
   };
   let audit: { record: jest.Mock };
+  let metrics: { recordPaymentOutcome: jest.Mock };
   let service: LedgerService;
 
   const SCHOOL_ID = 'school-1';
@@ -78,12 +79,14 @@ describe('LedgerService (characterization)', () => {
       emitEnrollmentsChanged: jest.fn(),
     };
     audit = { record: jest.fn().mockResolvedValue(undefined) };
+    metrics = { recordPaymentOutcome: jest.fn() };
 
     service = new LedgerService(
       prisma as never,
       notifications as never,
       events as never,
       audit as never,
+      metrics as never,
     );
   });
 
