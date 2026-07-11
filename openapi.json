@@ -1,0 +1,1668 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/v1/users/me": {
+      "get": {
+        "operationId": "UsersController_getMe",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Users"
+        ]
+      },
+      "patch": {
+        "operationId": "UsersController_updateMe",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "operationId": "UsersController_findAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/api/v1/users/{id}": {
+      "get": {
+        "operationId": "UsersController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Users"
+        ]
+      },
+      "patch": {
+        "operationId": "UsersController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Users"
+        ]
+      },
+      "delete": {
+        "operationId": "UsersController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/api/v1/school-payments/fees": {
+      "post": {
+        "operationId": "SchoolPaymentsController_createClassFee",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateClassFeeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolPayments"
+        ]
+      },
+      "get": {
+        "operationId": "SchoolPaymentsController_getClassFees",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolPayments"
+        ]
+      }
+    },
+    "/api/v1/school-payments/fees/{schoolId}": {
+      "get": {
+        "operationId": "SchoolPaymentsController_getClassFeesForSchool",
+        "parameters": [
+          {
+            "name": "schoolId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolPayments"
+        ]
+      }
+    },
+    "/api/v1/school-payments/bank-details/{schoolId}": {
+      "get": {
+        "operationId": "SchoolPaymentsController_getSchoolBankDetails",
+        "parameters": [
+          {
+            "name": "schoolId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolPayments"
+        ]
+      }
+    },
+    "/api/v1/school-payments/bank-details": {
+      "put": {
+        "operationId": "SchoolPaymentsController_updateSchoolBankDetails",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSchoolDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolPayments"
+        ]
+      }
+    },
+    "/api/v1/school-payments/history": {
+      "get": {
+        "operationId": "SchoolPaymentsController_getHistory",
+        "parameters": [
+          {
+            "name": "includeReceiptSignedUrls",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "receiptType",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "take",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolPayments"
+        ]
+      }
+    },
+    "/api/v1/school-payments/history/all": {
+      "get": {
+        "operationId": "SchoolPaymentsController_getHistoryAll",
+        "parameters": [
+          {
+            "name": "includeReceiptSignedUrls",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "receiptType",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "take",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolPayments"
+        ]
+      }
+    },
+    "/api/v1/school-payments/stats": {
+      "get": {
+        "operationId": "SchoolPaymentsController_getDashboardStats",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolPayments"
+        ]
+      }
+    },
+    "/api/v1/school-payments/students": {
+      "get": {
+        "operationId": "SchoolPaymentsController_getStudents",
+        "parameters": [
+          {
+            "name": "className",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolPayments"
+        ]
+      }
+    },
+    "/api/v1/school-payments/pending": {
+      "get": {
+        "operationId": "SchoolPaymentsController_getPendingPayments",
+        "parameters": [
+          {
+            "name": "includeReceiptSignedUrls",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "receiptType",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolPayments"
+        ]
+      }
+    },
+    "/api/v1/school-payments/confirm": {
+      "post": {
+        "operationId": "SchoolPaymentsController_confirmPayment",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmPaymentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolPayments"
+        ]
+      }
+    },
+    "/api/v1/school-payments/reject": {
+      "post": {
+        "operationId": "SchoolPaymentsController_rejectPayment",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmPaymentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolPayments"
+        ]
+      }
+    },
+    "/api/v1/school-payments/default": {
+      "post": {
+        "operationId": "SchoolPaymentsController_markAsDefaulted",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkDefaultedDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolPayments"
+        ]
+      }
+    },
+    "/api/v1/school-payments/reverse": {
+      "post": {
+        "operationId": "SchoolPaymentsController_reversePayment",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReversePaymentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolPayments"
+        ]
+      }
+    },
+    "/api/v1/schools": {
+      "get": {
+        "operationId": "SchoolsManagementController_findAll",
+        "parameters": [
+          {
+            "name": "search",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolsManagement"
+        ]
+      },
+      "post": {
+        "operationId": "SchoolsManagementController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSchoolDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolsManagement"
+        ]
+      }
+    },
+    "/api/v1/schools/{id}": {
+      "put": {
+        "operationId": "SchoolsManagementController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSchoolDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolsManagement"
+        ]
+      },
+      "delete": {
+        "operationId": "SchoolsManagementController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SchoolsManagement"
+        ]
+      }
+    },
+    "/api/v1/notifications": {
+      "get": {
+        "operationId": "NotificationsController_getUserNotifications",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/read-all": {
+      "patch": {
+        "operationId": "NotificationsController_markAllAsRead",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/{id}/read": {
+      "patch": {
+        "operationId": "NotificationsController_markAsRead",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/api/v1/device-tokens": {
+      "post": {
+        "operationId": "DeviceTokensController_register",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDeviceTokenDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "DeviceTokens"
+        ]
+      },
+      "delete": {
+        "operationId": "DeviceTokensController_unregister",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnregisterDeviceTokenDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "DeviceTokens"
+        ]
+      }
+    },
+    "/api/v1/documents/receipts/upload-url": {
+      "post": {
+        "operationId": "DocumentsController_createReceiptUploadUrl",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReceiptUploadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/receipts/download-url": {
+      "post": {
+        "operationId": "DocumentsController_createReceiptDownloadUrl",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReceiptDownloadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/audit-logs": {
+      "get": {
+        "operationId": "AuditController_list",
+        "parameters": [
+          {
+            "name": "entityType",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entityId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "schoolId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actorUserId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "take",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "skip",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "List audit log entries (newest first)",
+        "tags": [
+          "audit"
+        ]
+      }
+    },
+    "/api/v1/payment/calculate-structure": {
+      "post": {
+        "operationId": "PaymentsController_calculateStructure",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/api/v1/payment/calculate-deposit": {
+      "post": {
+        "operationId": "PaymentsController_calculateDeposit",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/api/v1/payment/calculate-installments": {
+      "post": {
+        "operationId": "PaymentsController_calculateInstallments",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/api/v1/payment/update-balance": {
+      "post": {
+        "operationId": "PaymentsController_updateBalance",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/api/v1/payment/update-status": {
+      "post": {
+        "operationId": "PaymentsController_updateStatus",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/api/v1/transactions": {
+      "get": {
+        "operationId": "TransactionsController_getTransactions",
+        "parameters": [
+          {
+            "name": "includeReceiptSignedUrls",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "receiptType",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Transactions"
+        ]
+      }
+    },
+    "/api/v1/enrollments/my-children": {
+      "get": {
+        "operationId": "EnrollmentController_getMyChildren",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Enrollment"
+        ]
+      }
+    },
+    "/api/v1/enrollments/{id}/history": {
+      "get": {
+        "operationId": "EnrollmentController_getEnrollmentHistory",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Enrollment"
+        ]
+      }
+    },
+    "/api/v1/enrollments/initiate-first-payment": {
+      "post": {
+        "operationId": "EnrollmentController_initiateFirstPayment",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEnrollmentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Enrollment"
+        ]
+      }
+    },
+    "/api/v1/enrollments/pay-installment": {
+      "post": {
+        "operationId": "EnrollmentController_payInstallment",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInstallmentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Enrollment"
+        ]
+      }
+    },
+    "/api/v1/enrollments/confirm-first-payment": {
+      "post": {
+        "operationId": "EnrollmentController_confirmFirstPayment",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmEnrollmentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Enrollment"
+        ]
+      }
+    },
+    "/api/v1/payments/paystack/webhook": {
+      "post": {
+        "operationId": "PaystackWebhookController_webhook",
+        "parameters": [
+          {
+            "name": "x-paystack-signature",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "PaystackWebhook"
+        ]
+      }
+    },
+    "/api/v1/payments/paystack/verify": {
+      "get": {
+        "operationId": "PaystackWebhookController_verify",
+        "parameters": [
+          {
+            "name": "reference",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "PaystackWebhook"
+        ]
+      }
+    },
+    "/api/v1/admin/onboard-school": {
+      "post": {
+        "operationId": "AdminController_onboardSchool",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSchoolDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/paystack/banks": {
+      "get": {
+        "operationId": "AdminController_getBanks",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/paystack/resolve-account": {
+      "post": {
+        "operationId": "AdminController_resolveAccount",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/schools/{schoolId}/paystack-subaccount": {
+      "post": {
+        "operationId": "AdminController_createSubaccount",
+        "parameters": [
+          {
+            "name": "schoolId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/pending-first-payments": {
+      "get": {
+        "operationId": "AdminController_getPendingFirstPayments",
+        "parameters": [
+          {
+            "name": "includeReceiptSignedUrls",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/pending-installments": {
+      "get": {
+        "operationId": "AdminController_getPendingInstallments",
+        "parameters": [
+          {
+            "name": "page",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/schools/{schoolId}/students": {
+      "get": {
+        "operationId": "AdminController_getSchoolStudents",
+        "parameters": [
+          {
+            "name": "schoolId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "className",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/settle-first-payment/{paymentId}": {
+      "post": {
+        "operationId": "AdminController_settleFirstPayment",
+        "parameters": [
+          {
+            "name": "paymentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/reject-first-payment/{paymentId}": {
+      "post": {
+        "operationId": "AdminController_rejectFirstPayment",
+        "parameters": [
+          {
+            "name": "paymentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/revenue": {
+      "get": {
+        "operationId": "AdminController_getRevenue",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/transactions": {
+      "get": {
+        "operationId": "AdminController_getTransactions",
+        "parameters": [
+          {
+            "name": "includeReceiptSignedUrls",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "receiptType",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/students/summary": {
+      "get": {
+        "operationId": "AdminController_getStudentsSummary",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/schools/summary": {
+      "get": {
+        "operationId": "AdminController_getSchoolsSummary",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/overview": {
+      "get": {
+        "operationId": "AdminController_getOverview",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "HealthController_getHealth",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "LoPay API",
+    "description": "The LoPay API documentation for frontend integration",
+    "version": "1.0",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http"
+      }
+    },
+    "schemas": {
+      "UpdateProfileDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateUserDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateClassFeeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateSchoolDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ConfirmPaymentDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "MarkDefaultedDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ReversePaymentDto": {
+        "type": "object",
+        "properties": {
+          "paymentId": {
+            "type": "string",
+            "example": "payment-uuid"
+          },
+          "reason": {
+            "type": "string",
+            "example": "Confirmed in error — funds not actually received.",
+            "description": "Why the confirmation is being reversed (stored in the audit log)."
+          }
+        },
+        "required": [
+          "paymentId"
+        ]
+      },
+      "CreateSchoolDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "RegisterDeviceTokenDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "FCM device token"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "web",
+              "android",
+              "ios"
+            ]
+          }
+        },
+        "required": [
+          "token",
+          "platform"
+        ]
+      },
+      "UnregisterDeviceTokenDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "FCM device token to unregister"
+          }
+        },
+        "required": [
+          "token"
+        ]
+      },
+      "CreateReceiptUploadDto": {
+        "type": "object",
+        "properties": {
+          "fileName": {
+            "type": "string",
+            "example": "receipt.jpg",
+            "description": "Original file name"
+          },
+          "contentType": {
+            "type": "string",
+            "example": "image/jpeg",
+            "description": "MIME type of the file"
+          }
+        },
+        "required": [
+          "fileName"
+        ]
+      },
+      "CreateReceiptDownloadDto": {
+        "type": "object",
+        "properties": {
+          "paymentId": {
+            "type": "string",
+            "example": "payment-uuid"
+          }
+        },
+        "required": [
+          "paymentId"
+        ]
+      },
+      "CreateEnrollmentDto": {
+        "type": "object",
+        "properties": {
+          "childId": {
+            "type": "string",
+            "example": "child-uuid",
+            "description": "ID of existing child"
+          },
+          "childName": {
+            "type": "string",
+            "example": "Little Timmy",
+            "description": "Name of new child (if childId is not provided)"
+          },
+          "schoolId": {
+            "type": "string",
+            "example": "school-uuid"
+          },
+          "className": {
+            "type": "string",
+            "example": "Grade 1"
+          },
+          "installmentFrequency": {
+            "type": "string",
+            "enum": [
+              "WEEKLY",
+              "MONTHLY"
+            ],
+            "example": "MONTHLY"
+          },
+          "firstPaymentPaid": {
+            "type": "number",
+            "example": 5000,
+            "description": "Amount paid for the first payment"
+          },
+          "termStartDate": {
+            "format": "date-time",
+            "type": "string",
+            "example": "2023-09-01T00:00:00Z"
+          },
+          "termEndDate": {
+            "format": "date-time",
+            "type": "string",
+            "example": "2023-12-01T00:00:00Z"
+          },
+          "receiptUrl": {
+            "type": "string",
+            "example": "receipts/user-uuid/uuid_receipt.jpg",
+            "description": "Receipt storage path returned by POST /documents/receipts/upload-url"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "example": "b3f1c2a4-9d8e-4f6a-8c2b-1e2d3f4a5b6c",
+            "description": "Client-generated unique key that makes this submission idempotent. Retries with the same key return the original result instead of creating a duplicate payment."
+          }
+        },
+        "required": [
+          "schoolId",
+          "className",
+          "installmentFrequency",
+          "firstPaymentPaid",
+          "termStartDate",
+          "termEndDate"
+        ]
+      },
+      "CreateInstallmentDto": {
+        "type": "object",
+        "properties": {
+          "enrollmentId": {
+            "type": "string",
+            "example": "enrollment-uuid"
+          },
+          "amountPaid": {
+            "type": "number",
+            "example": 2000,
+            "description": "Amount being paid"
+          },
+          "receiptUrl": {
+            "type": "string",
+            "example": "receipts/user-uuid/uuid_receipt.jpg",
+            "description": "Receipt storage path returned by POST /documents/receipts/upload-url"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "example": "b3f1c2a4-9d8e-4f6a-8c2b-1e2d3f4a5b6c",
+            "description": "Client-generated unique key that makes this submission idempotent. Retries with the same key return the original result instead of creating a duplicate payment."
+          }
+        },
+        "required": [
+          "enrollmentId",
+          "amountPaid"
+        ]
+      },
+      "ConfirmEnrollmentDto": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  }
+}

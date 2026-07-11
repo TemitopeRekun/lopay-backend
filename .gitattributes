@@ -1,0 +1,4 @@
+# Generated OpenAPI contract: pin to LF so the CI staleness check
+# (regenerate + `git diff --exit-code`) is stable across Windows dev and
+# Linux CI regardless of each machine's core.autocrlf setting.
+openapi.json text eol=lf
