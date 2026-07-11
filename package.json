@@ -107,14 +107,17 @@
       "!**/dto/**",
       "!main.ts",
       "!generated/**",
-      "!common/observability/**"
+      "!common/observability/**",
+      "!prisma/prisma.service.ts",
+      "!events/redis-io.adapter.ts",
+      "!auth/auth.config.ts"
     ],
     "coverageThreshold": {
       "global": {
-        "statements": 13,
-        "branches": 9,
-        "functions": 8,
-        "lines": 12
+        "statements": 80,
+        "branches": 80,
+        "functions": 80,
+        "lines": 80
       },
       "src/common/money.ts": {
         "statements": 90,
