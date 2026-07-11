@@ -10,8 +10,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the current authenticated user profile",
         "tags": [
-          "Users"
+          "users"
         ]
       },
       "patch": {
@@ -32,8 +38,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update the current authenticated user profile",
         "tags": [
-          "Users"
+          "users"
         ]
       }
     },
@@ -46,8 +58,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List all users",
         "tags": [
-          "Users"
+          "users"
         ]
       }
     },
@@ -69,8 +87,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a user by id",
         "tags": [
-          "Users"
+          "users"
         ]
       },
       "patch": {
@@ -100,8 +124,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update a user by id",
         "tags": [
-          "Users"
+          "users"
         ]
       },
       "delete": {
@@ -121,8 +151,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a user by id",
         "tags": [
-          "Users"
+          "users"
         ]
       }
     },
@@ -145,8 +181,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create or update a class fee",
         "tags": [
-          "SchoolPayments"
+          "school-payments"
         ]
       },
       "get": {
@@ -157,8 +199,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the authenticated owner's school class fees",
         "tags": [
-          "SchoolPayments"
+          "school-payments"
         ]
       }
     },
@@ -180,8 +228,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the class fees for a specific school",
         "tags": [
-          "SchoolPayments"
+          "school-payments"
         ]
       }
     },
@@ -203,8 +257,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a school's bank details (access-scoped server-side)",
         "tags": [
-          "SchoolPayments"
+          "school-payments"
         ]
       }
     },
@@ -227,8 +287,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update the authenticated owner's school bank details",
         "tags": [
-          "SchoolPayments"
+          "school-payments"
         ]
       }
     },
@@ -266,8 +332,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the school's payment history",
         "tags": [
-          "SchoolPayments"
+          "school-payments"
         ]
       }
     },
@@ -305,8 +377,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the school's full payment history (all statuses)",
         "tags": [
-          "SchoolPayments"
+          "school-payments"
         ]
       }
     },
@@ -319,8 +397,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the school dashboard stats",
         "tags": [
-          "SchoolPayments"
+          "school-payments"
         ]
       }
     },
@@ -366,8 +450,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the school's students (class filter, search, pagination)",
         "tags": [
-          "SchoolPayments"
+          "school-payments"
         ]
       }
     },
@@ -397,8 +487,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the school's pending installment payments",
         "tags": [
-          "SchoolPayments"
+          "school-payments"
         ]
       }
     },
@@ -421,8 +517,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Confirm a single installment payment",
         "tags": [
-          "SchoolPayments"
+          "school-payments"
         ]
       }
     },
@@ -445,8 +547,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reject a single installment payment",
         "tags": [
-          "SchoolPayments"
+          "school-payments"
         ]
       }
     },
@@ -469,8 +577,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mark an enrollment as defaulted",
         "tags": [
-          "SchoolPayments"
+          "school-payments"
         ]
       }
     },
@@ -493,8 +607,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reverse a previously-confirmed installment payment",
         "tags": [
-          "SchoolPayments"
+          "school-payments"
         ]
       }
     },
@@ -516,8 +636,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Public school directory (id + name only)",
         "tags": [
-          "SchoolsManagement"
+          "schools"
         ]
       },
       "post": {
@@ -538,8 +664,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a school",
         "tags": [
-          "SchoolsManagement"
+          "schools"
         ]
       }
     },
@@ -571,8 +703,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update a school by id",
         "tags": [
-          "SchoolsManagement"
+          "schools"
         ]
       },
       "delete": {
@@ -592,8 +730,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a school by id",
         "tags": [
-          "SchoolsManagement"
+          "schools"
         ]
       }
     },
@@ -606,8 +750,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the current user's notifications",
         "tags": [
-          "Notifications"
+          "notifications"
         ]
       }
     },
@@ -620,8 +770,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mark all of the current user's notifications as read",
         "tags": [
-          "Notifications"
+          "notifications"
         ]
       }
     },
@@ -643,8 +799,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mark a single notification as read",
         "tags": [
-          "Notifications"
+          "notifications"
         ]
       }
     },
@@ -667,8 +829,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Register a device push-notification token",
         "tags": [
-          "DeviceTokens"
+          "device-tokens"
         ]
       },
       "delete": {
@@ -689,8 +857,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Unregister a device push-notification token",
         "tags": [
-          "DeviceTokens"
+          "device-tokens"
         ]
       }
     },
@@ -713,8 +887,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a signed URL for uploading a receipt",
         "tags": [
-          "Documents"
+          "documents"
         ]
       }
     },
@@ -737,8 +917,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a signed URL for downloading a receipt",
         "tags": [
-          "Documents"
+          "documents"
         ]
       }
     },
@@ -815,8 +1001,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Calculate the full payment structure",
         "tags": [
-          "Payments"
+          "payments"
         ]
       }
     },
@@ -829,8 +1021,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Calculate the deposit and platform fee",
         "tags": [
-          "Payments"
+          "payments"
         ]
       }
     },
@@ -843,8 +1041,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Calculate the installment schedule",
         "tags": [
-          "Payments"
+          "payments"
         ]
       }
     },
@@ -857,8 +1061,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Compute the remaining balance",
         "tags": [
-          "Payments"
+          "payments"
         ]
       }
     },
@@ -871,8 +1081,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Compute the next payment status",
         "tags": [
-          "Payments"
+          "payments"
         ]
       }
     },
@@ -918,8 +1134,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the current user's transaction history (paginated)",
         "tags": [
-          "Transactions"
+          "transactions"
         ]
       }
     },
@@ -932,8 +1154,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the current parent's enrolled children",
         "tags": [
-          "Enrollment"
+          "enrollments"
         ]
       }
     },
@@ -955,8 +1183,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the payment history for an enrollment",
         "tags": [
-          "Enrollment"
+          "enrollments"
         ]
       }
     },
@@ -979,8 +1213,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Initiate a first payment via Paystack split",
         "tags": [
-          "Enrollment"
+          "enrollments"
         ]
       }
     },
@@ -1003,8 +1243,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Submit an installment payment",
         "tags": [
-          "Enrollment"
+          "enrollments"
         ]
       }
     },
@@ -1027,8 +1273,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Confirm a first payment for an enrollment",
         "tags": [
-          "Enrollment"
+          "enrollments"
         ]
       }
     },
@@ -1050,8 +1302,9 @@
             "description": ""
           }
         },
+        "summary": "Paystack webhook (HMAC-verified) — reconciles first payments",
         "tags": [
-          "PaystackWebhook"
+          "payments"
         ]
       }
     },
@@ -1073,8 +1326,9 @@
             "description": ""
           }
         },
+        "summary": "Verify a Paystack transaction on return and reconcile it",
         "tags": [
-          "PaystackWebhook"
+          "payments"
         ]
       }
     },
@@ -1097,8 +1351,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Onboard a new school",
         "tags": [
-          "Admin"
+          "admin"
         ]
       }
     },
@@ -1111,8 +1371,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List Nigerian banks for the settlement-bank dropdown",
         "tags": [
-          "Admin"
+          "admin"
         ]
       }
     },
@@ -1125,8 +1391,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Resolve an account number + bank code to the registered account name",
         "tags": [
-          "Admin"
+          "admin"
         ]
       }
     },
@@ -1148,8 +1420,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a Paystack subaccount for a school missing one",
         "tags": [
-          "Admin"
+          "admin"
         ]
       }
     },
@@ -1187,8 +1465,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List pending first payments (paginated)",
         "tags": [
-          "Admin"
+          "admin"
         ]
       }
     },
@@ -1218,8 +1502,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List pending installment payments across all schools (paginated)",
         "tags": [
-          "Admin"
+          "admin"
         ]
       }
     },
@@ -1273,8 +1563,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List students/enrollments for a specific school (paginated)",
         "tags": [
-          "Admin"
+          "admin"
         ]
       }
     },
@@ -1296,8 +1592,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Settle a first payment (release the school share)",
         "tags": [
-          "Admin"
+          "admin"
         ]
       }
     },
@@ -1319,8 +1621,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reject a first payment",
         "tags": [
-          "Admin"
+          "admin"
         ]
       }
     },
@@ -1333,8 +1641,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get platform revenue",
         "tags": [
-          "Admin"
+          "admin"
         ]
       }
     },
@@ -1380,8 +1694,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List global transactions across all schools (paginated)",
         "tags": [
-          "Admin"
+          "admin"
         ]
       }
     },
@@ -1394,8 +1714,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get global student summary",
         "tags": [
-          "Admin"
+          "admin"
         ]
       }
     },
@@ -1408,8 +1734,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get per-school summary",
         "tags": [
-          "Admin"
+          "admin"
         ]
       }
     },
@@ -1422,8 +1754,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get admin overview (single-call dashboard payload)",
         "tags": [
-          "Admin"
+          "admin"
         ]
       }
     },
@@ -1436,8 +1774,9 @@
             "description": ""
           }
         },
+        "summary": "Liveness/readiness check (app, DB, storage)",
         "tags": [
-          "Health"
+          "health"
         ]
       }
     }

@@ -1,4 +1,5 @@
 import { Controller, Post, Body } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PaymentService } from './payment.service';
 import { Throttle } from '@nestjs/throttler';
 import type {
@@ -8,6 +9,8 @@ import type {
 } from './payment.service';
 
 // Auth enforced globally by BetterAuthGuard.
+@ApiTags('payments')
+@ApiBearerAuth()
 @Controller('payment')
 @Throttle({ default: { ttl: 60000, limit: 30 } })
 export class PaymentsController {
@@ -15,6 +18,7 @@ export class PaymentsController {
 
   /** Calculate full payment structure (New) */
   @Post('calculate-structure')
+  @ApiOperation({ summary: 'Calculate the full payment structure' })
   calculateStructure(
     @Body()
     body: {
@@ -38,6 +42,7 @@ export class PaymentsController {
 
   /** Calculate deposit and platform fee */
   @Post('calculate-deposit')
+  @ApiOperation({ summary: 'Calculate the deposit and platform fee' })
   calculateDeposit(
     @Body() body: { schoolFees: number; depositPaid: number },
   ): DepositCalculationResult {
@@ -47,6 +52,7 @@ export class PaymentsController {
 
   /** Calculate installments */
   @Post('calculate-installments')
+  @ApiOperation({ summary: 'Calculate the installment schedule' })
   calculateInstallments(
     @Body() body: { remainingBalance: number; plan: 'WEEKLY' | 'MONTHLY' },
   ): InstallmentCalculationResult {
@@ -58,6 +64,7 @@ export class PaymentsController {
 
   /** Update remaining balance */
   @Post('update-balance')
+  @ApiOperation({ summary: 'Compute the remaining balance' })
   updateBalance(
     @Body()
     body: {
@@ -76,6 +83,7 @@ export class PaymentsController {
 
   /** Update status */
   @Post('update-status')
+  @ApiOperation({ summary: 'Compute the next payment status' })
   updateStatus(
     @Body()
     body: {

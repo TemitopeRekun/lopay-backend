@@ -1,4 +1,5 @@
 import { Controller, Get, Inject, Res } from '@nestjs/common';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import type { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
@@ -8,6 +9,7 @@ import { Prisma } from '../generated/prisma/client';
 import type { Storage } from 'firebase-admin/storage';
 import { errorMessage } from '../common/errors';
 
+@ApiTags('health')
 @Controller('health')
 export class HealthController {
   constructor(
@@ -18,6 +20,7 @@ export class HealthController {
 
   @Public()
   @Get()
+  @ApiOperation({ summary: 'Liveness/readiness check (app, DB, storage)' })
   async getHealth(@Res({ passthrough: true }) res: Response) {
     const nodeEnv = this.config.get<string>('NODE_ENV') ?? 'development';
     const appOk = true;
