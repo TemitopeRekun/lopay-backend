@@ -8,7 +8,6 @@ import {
   PaymentType,
   Prisma,
   UserRole,
-  AuditAction,
 } from '../generated/prisma/client';
 import type { CreateEnrollmentDto } from './dto/create.enrollment.dto';
 
@@ -151,6 +150,9 @@ function buildMocks() {
     reconcilePaystackPayment: jest.fn().mockResolvedValue({ reconciled: true }),
     failPaystackPayment: jest.fn().mockResolvedValue({ failed: true }),
     confirmFirstPayment: jest.fn().mockResolvedValue({ confirmed: true }),
+    reversePaystackPaymentByDispute: jest
+      .fn()
+      .mockResolvedValue({ reversed: true }),
   };
 
   const service = new EnrollmentService(
@@ -639,32 +641,38 @@ describe('EnrollmentService (coverage)', () => {
       expect(m.ledger.failPaystackPayment).toHaveBeenCalledWith('ref-2');
     });
 
-    it('records a dispute (audit + admin notifications) for charge.dispute.*', async () => {
+    it('auto-reverses on charge.dispute.* via ledger and notifies admins', async () => {
       m.prisma.payment.findUnique.mockResolvedValueOnce({
         id: 'pay-d',
         schoolId: SCHOOL_ID,
+        amountPaid: 25_000,
       });
       await m.service.processPaystackWebhookEvent({
         event: 'charge.dispute.create',
         data: { id: 7, reference: 'ref-3' },
       } as never);
-      expect(m.audit.record).toHaveBeenCalledWith(
+      expect(m.ledger.reversePaystackPaymentByDispute).toHaveBeenCalledWith(
+        'ref-3',
+        'charge.dispute.create',
+      );
+      expect(m.notifications.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          action: AuditAction.PAYMENT_DISPUTED,
-          entityId: 'pay-d',
+          title: 'Paystack Dispute / Refund',
         }),
       );
-      expect(m.notifications.create).toHaveBeenCalledTimes(1);
     });
 
-    it('records a refund with no reference (payment lookup skipped)', async () => {
+    it('handles refund with no reference (lookup returns null, still notifies admins)', async () => {
+      m.prisma.payment.findUnique.mockResolvedValueOnce(null);
       await m.service.processPaystackWebhookEvent({
         event: 'refund.processed',
         data: { id: 8 }, // no reference
       } as never);
-      expect(m.prisma.payment.findUnique).not.toHaveBeenCalled();
-      expect(m.audit.record).toHaveBeenCalledWith(
-        expect.objectContaining({ entityId: 'unknown' }),
+      expect(m.ledger.reversePaystackPaymentByDispute).not.toHaveBeenCalled();
+      expect(m.notifications.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Paystack Dispute / Refund',
+        }),
       );
     });
 

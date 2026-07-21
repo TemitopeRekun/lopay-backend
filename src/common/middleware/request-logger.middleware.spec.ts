@@ -6,14 +6,10 @@ describe('RequestLoggerMiddleware', () => {
   const header = REQUEST_ID_HEADER.toLowerCase();
   let mw: RequestLoggerMiddleware;
   let logSpy: jest.SpyInstance;
-  let warnSpy: jest.SpyInstance;
-  let errorSpy: jest.SpyInstance;
 
   beforeEach(() => {
     mw = new RequestLoggerMiddleware();
     logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
-    warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
-    errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -33,21 +29,30 @@ describe('RequestLoggerMiddleware', () => {
     finish();
   };
 
-  it('logs a 2xx response at log level (with request id)', () => {
+  it('logs a 2xx response with JSON-structured entry (with request id)', () => {
     run(200, { [header]: 'req-1' });
     expect(logSpy).toHaveBeenCalledTimes(1);
-    expect(logSpy.mock.calls[0][0]).toContain('req-1');
+    const entry = logSpy.mock.calls[0][0];
+    expect(entry).toBeDefined();
+    expect(entry.method).toBe('GET');
+    expect(entry.url).toBe('/x');
+    expect(entry.status).toBe(200);
+    expect(entry.requestId).toBe('req-1');
+    expect(typeof entry.durationMs).toBe('number');
   });
 
-  it('logs a 4xx response at warn level', () => {
+  it('logs a 4xx response with null requestId when no header', () => {
     run(404);
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    // no request id → placeholder dash
-    expect(warnSpy.mock.calls[0][0]).toContain('[-]');
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const entry = logSpy.mock.calls[0][0];
+    expect(entry.status).toBe(404);
+    expect(entry.requestId).toBeNull();
   });
 
-  it('logs a 5xx response at error level', () => {
+  it('logs a 5xx response', () => {
     run(500);
-    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const entry = logSpy.mock.calls[0][0];
+    expect(entry.status).toBe(500);
   });
 });

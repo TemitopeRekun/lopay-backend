@@ -12,7 +12,6 @@ import {
   PaymentReceiver,
   UserRole,
   PaymentTransactionStatus,
-  AuditAction,
   Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -333,10 +332,23 @@ export class EnrollmentService {
     payments: PaymentRecord[],
   ) {
     const confirmedPayments = payments.filter((p) => p.isConfirmed);
-    // Arithmetic in kobo; convert to naira only for the returned object.
     const paidAmountKobo = confirmedPayments.reduce(
       (sum, p) => sum + p.amountPaid,
       0,
+    );
+
+    const pendingInstallmentsKobo = payments
+      .filter(
+        (p) =>
+          p.paymentType === PaymentType.INSTALLMENT &&
+          p.status === PaymentTransactionStatus.PENDING &&
+          !p.isConfirmed,
+      )
+      .reduce((sum, p) => sum + p.amountPaid, 0);
+
+    const availableKobo = Math.max(
+      0,
+      enrollment.remainingBalance - pendingInstallmentsKobo,
     );
 
     let nextDueDate: Date | null = null;
@@ -387,6 +399,7 @@ export class EnrollmentService {
       childName: enrollment.child?.fullName,
       totalFee: Money.fromKobo(enrollment.totalSchoolFee).toNaira(),
       remainingBalance: Money.fromKobo(enrollment.remainingBalance).toNaira(),
+      availableBalance: Money.fromKobo(availableKobo).toNaira(),
       paidAmount: Money.fromKobo(paidAmountKobo).toNaira(),
       nextDueDate: nextDueDate ? nextDueDate.toISOString().split('T')[0] : null,
       nextInstallmentAmount: Money.fromKobo(
@@ -976,33 +989,33 @@ export class EnrollmentService {
 
   /**
    * Record a dispute/chargeback/refund. First-payment money already moved via the
-   * Paystack split, and first payments have no automatic reversal path, so this
-   * is logged to the audit trail and escalated to admins for manual reconciliation
-   * rather than silently acknowledged.
+   * Paystack split — the platform bears the loss immediately. We automatically
+   * reverse the payment, fail the enrollment, restore the balance (so the parent
+   * can re-enroll), log the audit trail, and notify both parent and school owner.
+   * Admins receive a notification to verify the Paystack-side reconciliation.
    */
   private async recordPaystackDispute(
     eventType: string,
     reference: string | null,
-    event: PaystackWebhookEvent,
+    _event: PaystackWebhookEvent,
   ) {
+    if (reference) {
+      const reversed = await this.ledger.reversePaystackPaymentByDispute(
+        reference,
+        eventType,
+      );
+      if (reversed.reversed) {
+        this.logger.log(
+          `Auto-reversed payment ${reference} due to ${eventType}`,
+        );
+      }
+    }
+
     const payment = reference
       ? await this.prisma.payment.findUnique({
           where: { paystackReference: reference },
         })
       : null;
-
-    await this.audit.record({
-      action: AuditAction.PAYMENT_DISPUTED,
-      entityType: 'Payment',
-      entityId: payment?.id ?? reference ?? 'unknown',
-      actor: null,
-      schoolId: payment?.schoolId ?? null,
-      metadata: {
-        eventType,
-        reference,
-        data: (event?.data ?? null) as Prisma.InputJsonValue,
-      },
-    });
 
     const admins = await this.prisma.user.findMany({
       where: { role: UserRole.SUPER_ADMIN },
@@ -1013,7 +1026,7 @@ export class EnrollmentService {
         this.notificationsService.create({
           userId: a.id,
           title: 'Paystack Dispute / Refund',
-          message: `A "${eventType}" event was received${reference ? ` for ${reference}` : ''}. Manual reconciliation may be required.`,
+          message: `A "${eventType}" event was received${reference ? ` for ${reference}` : ''}${payment ? ` (${Money.fromKobo(payment.amountPaid).formatNaira()})` : ''}. The payment has been automatically reversed and the enrollment marked FAILED. Verify Paystack-side reconciliation.`,
           link: '/admin/payments',
         }),
       ),

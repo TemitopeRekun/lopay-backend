@@ -14,6 +14,7 @@ import type { AuthUser } from '../common/types/auth-user';
 import { errorMessage } from '../common/errors';
 import { FIREBASE_STORAGE } from '../firebase/firebase.module';
 import type { Storage } from 'firebase-admin/storage';
+import { withTimeout, withRetry } from '../common/resilience';
 
 const ALLOWED_RECEIPT_CONTENT_TYPES = new Set([
   'image/jpeg',
@@ -82,15 +83,23 @@ export class DocumentsService {
     const contentLengthRange = `0,${this.maxUploadBytes}`;
 
     try {
-      const [signedUrl] = await this.bucket.file(objectPath).getSignedUrl({
-        version: 'v4',
-        action: 'write',
-        expires: Date.now() + this.signedUrlTtlSeconds * 1000,
-        contentType: contentType ?? 'image/jpeg',
-        extensionHeaders: {
-          'x-goog-content-length-range': contentLengthRange,
-        },
-      });
+      const [signedUrl] = await withRetry(
+        () =>
+          withTimeout(
+            this.bucket.file(objectPath).getSignedUrl({
+              version: 'v4',
+              action: 'write',
+              expires: Date.now() + this.signedUrlTtlSeconds * 1000,
+              contentType: contentType ?? 'image/jpeg',
+              extensionHeaders: {
+                'x-goog-content-length-range': contentLengthRange,
+              },
+            }),
+            10_000,
+            'createReceiptUploadUrl',
+          ),
+        { maxAttempts: 2, label: 'createReceiptUploadUrl' },
+      );
 
       return {
         path: objectPath,
@@ -129,6 +138,8 @@ export class DocumentsService {
       throw new NotFoundException('Receipt not available');
     }
 
+    const receiptPath: string = payment.receiptUrl;
+
     const isParent =
       user.role === UserRole.PARENT &&
       payment.enrollment?.child?.parent?.userId === user.userId;
@@ -142,16 +153,22 @@ export class DocumentsService {
     }
 
     try {
-      const [signedUrl] = await this.bucket
-        .file(payment.receiptUrl)
-        .getSignedUrl({
-          version: 'v4',
-          action: 'read',
-          expires: Date.now() + this.signedUrlTtlSeconds * 1000,
-        });
+      const [signedUrl] = await withRetry(
+        () =>
+          withTimeout(
+            this.bucket.file(receiptPath).getSignedUrl({
+              version: 'v4',
+              action: 'read',
+              expires: Date.now() + this.signedUrlTtlSeconds * 1000,
+            }),
+            10_000,
+            'createReceiptDownloadUrl',
+          ),
+        { maxAttempts: 2, label: 'createReceiptDownloadUrl' },
+      );
 
       return {
-        path: payment.receiptUrl,
+        path: receiptPath,
         signedUrl,
         expiresIn: this.signedUrlTtlSeconds,
       };
@@ -167,19 +184,20 @@ export class DocumentsService {
       throw new BadRequestException('Path is required');
     }
 
-    const TIMEOUT_MS = 4000;
-
     try {
-      const [signedUrl] = await Promise.race([
-        this.bucket.file(path).getSignedUrl({
-          version: 'v4',
-          action: 'read',
-          expires: Date.now() + this.signedUrlTtlSeconds * 1000,
-        }),
-        new Promise<string[]>((_, reject) =>
-          setTimeout(() => reject(new Error('timeout')), TIMEOUT_MS),
-        ),
-      ]);
+      const [signedUrl] = await withRetry(
+        () =>
+          withTimeout(
+            this.bucket.file(path).getSignedUrl({
+              version: 'v4',
+              action: 'read',
+              expires: Date.now() + this.signedUrlTtlSeconds * 1000,
+            }),
+            10_000,
+            'createSignedUrlForPath',
+          ),
+        { maxAttempts: 2, label: 'createSignedUrlForPath' },
+      );
 
       return {
         signedUrl,

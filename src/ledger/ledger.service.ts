@@ -840,6 +840,132 @@ export class LedgerService {
 
   // ========================= enrollment lifecycle =========================
 
+  async reversePaystackPaymentByDispute(
+    reference: string,
+    eventType: string,
+  ): Promise<{ reversed: boolean }> {
+    const payment = await this.prisma.payment.findUnique({
+      where: { paystackReference: reference },
+      include: {
+        enrollment: {
+          include: { school: true, child: { include: { parent: true } } },
+        },
+      },
+    });
+    if (
+      !payment ||
+      payment.status === PaymentTransactionStatus.FAILED ||
+      payment.status === PaymentTransactionStatus.REVERSED
+    ) {
+      return { reversed: false };
+    }
+
+    const { enrollment } = payment;
+    const wasActive = enrollment.paymentStatus === PaymentStatus.ACTIVE;
+    const wasCompleted = enrollment.paymentStatus === PaymentStatus.COMPLETED;
+
+    const flipped = await this.prisma.$transaction(async (tx) => {
+      const res = await tx.payment.updateMany({
+        where: {
+          id: payment.id,
+          status: PaymentTransactionStatus.SUCCESS,
+        },
+        data: { status: PaymentTransactionStatus.FAILED, isConfirmed: false },
+      });
+      if (res.count === 0) return false;
+
+      if (wasActive || wasCompleted) {
+        await tx.childEnrollment.update({
+          where: { id: enrollment.id },
+          data: {
+            paymentStatus: PaymentStatus.FAILED,
+            remainingBalance: enrollment.totalSchoolFee,
+          },
+        });
+      } else {
+        await tx.childEnrollment.update({
+          where: { id: enrollment.id },
+          data: { paymentStatus: PaymentStatus.FAILED },
+        });
+      }
+
+      await this.audit.record(
+        {
+          action: AuditAction.PAYMENT_DISPUTED,
+          entityType: 'Payment',
+          entityId: payment.id,
+          actor: null,
+          schoolId: payment.schoolId,
+          before: {
+            status: payment.status,
+            isConfirmed: payment.isConfirmed,
+            enrollmentStatus: enrollment.paymentStatus,
+            remainingBalance: enrollment.remainingBalance,
+          },
+          after: {
+            status: PaymentTransactionStatus.FAILED,
+            isConfirmed: false,
+            enrollmentStatus: PaymentStatus.FAILED,
+            remainingBalance:
+              wasActive || wasCompleted
+                ? enrollment.totalSchoolFee
+                : enrollment.remainingBalance,
+          },
+          metadata: {
+            reference,
+            eventType,
+            amount: payment.amountPaid,
+            wasActive,
+            wasCompleted,
+          },
+        },
+        tx,
+      );
+
+      await tx.notification.create({
+        data: {
+          userId: enrollment.child.parent.userId,
+          title: 'Payment Disputed / Reversed',
+          message: `Your first payment of ${Money.fromKobo(payment.amountPaid).formatNaira()} for ${enrollment.child.fullName} (${enrollment.className}) at ${enrollment.school.name} has been reversed due to a "${eventType}" event. Please contact the school or re-enroll.`,
+          link: '/history',
+        },
+      });
+
+      if (enrollment.school.ownerId) {
+        await tx.notification.create({
+          data: {
+            userId: enrollment.school.ownerId,
+            title: 'Payment Disputed / Reversed',
+            message: `A first payment of ${Money.fromKobo(payment.amountPaid).formatNaira()} for ${enrollment.child.fullName} (${enrollment.className}) has been reversed due to a "${eventType}" event. The enrollment has been marked as FAILED.`,
+            link: `/school/enrollments/${enrollment.id}`,
+          },
+        });
+      }
+
+      return true;
+    });
+
+    if (!flipped) return { reversed: false };
+
+    this.events.emitEnrollmentsChanged({
+      parentUserId: enrollment.child.parent.userId,
+      schoolId: payment.schoolId,
+      notifyAdmins: true,
+    });
+    this.events.emitPaymentsChanged({
+      parentUserId: enrollment.child.parent.userId,
+      schoolId: payment.schoolId,
+      notifyAdmins: true,
+    });
+
+    this.metrics.recordPaymentOutcome('failed', {
+      type: PaymentType.FIRST_PAYMENT,
+      receiver: payment.receiver,
+    });
+
+    return { reversed: true };
+  }
+
   /** Confirm a manual (non-Paystack) first payment and activate the enrollment. */
   async confirmFirstPayment(
     enrollmentId: string,

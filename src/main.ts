@@ -6,17 +6,18 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 import { initSentry } from './common/observability/sentry';
 import { RedisIoAdapter } from './events/redis-io.adapter';
+import { initEncryptionKey } from './common/encryption';
+import { JsonLogger } from './common/logger/json.logger';
 
 async function bootstrap() {
-  // Error tracking (no-op unless SENTRY_DSN is set). Init before app handles traffic.
   initSentry();
-  // bodyParser:false — the Better Auth NestJS module owns body parsing (it must
-  // hand the raw request to the auth handler). It re-adds JSON/urlencoded for all
-  // other routes and, with bodyParser.rawBody:true, attaches req.rawBody (used by
-  // the Paystack webhook for HMAC verification).
+  initEncryptionKey(process.env.ENCRYPTION_KEY);
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false,
   });
+
+  app.useLogger(new JsonLogger());
 
   // Security headers
   app.use(

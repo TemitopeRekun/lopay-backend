@@ -878,4 +878,168 @@ describe('LedgerService (characterization)', () => {
       });
     });
   });
+
+  // ==================== paystack dispute auto-reversal ====================
+  describe('reversePaystackPaymentByDispute', () => {
+    function makeDisputedPayment(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'pay-d1',
+        schoolId: SCHOOL_ID,
+        amountPaid: 75_000,
+        isConfirmed: true,
+        status: PaymentTransactionStatus.SUCCESS,
+        receiver: PaymentReceiver.SCHOOL,
+        enrollment: {
+          id: 'enr-d1',
+          className: 'JSS2',
+          paymentStatus: PaymentStatus.ACTIVE,
+          totalSchoolFee: 200_000,
+          remainingBalance: 125_000,
+          school: { name: 'Acme School', ownerId: 'owner-1' },
+          child: { fullName: 'Ada Lovelace', parent: { userId: 'parent-1' } },
+        },
+        ...overrides,
+      };
+    }
+
+    it('is a no-op ({reversed:false}) when the payment is not found', async () => {
+      prisma.payment.findUnique.mockResolvedValueOnce(null);
+
+      const result = await service.reversePaystackPaymentByDispute(
+        'ref-x',
+        'charge.dispute.create',
+      );
+
+      expect(result).toEqual({ reversed: false });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      PaymentTransactionStatus.FAILED,
+      PaymentTransactionStatus.REVERSED,
+    ])('is a no-op when the payment is already %s', async (status) => {
+      prisma.payment.findUnique.mockResolvedValueOnce(
+        makeDisputedPayment({ status }),
+      );
+
+      const result = await service.reversePaystackPaymentByDispute(
+        'ref-x',
+        'refund.processed',
+      );
+
+      expect(result).toEqual({ reversed: false });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('reverses an ACTIVE enrollment: fails the payment, restores the full balance, audits, notifies parent + owner, emits, and records the metric', async () => {
+      prisma.payment.findUnique.mockResolvedValueOnce(makeDisputedPayment());
+
+      const result = await service.reversePaystackPaymentByDispute(
+        'ref-1',
+        'charge.dispute.create',
+      );
+
+      expect(result).toEqual({ reversed: true });
+      expect(tx.payment.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'pay-d1', status: PaymentTransactionStatus.SUCCESS },
+          data: { status: PaymentTransactionStatus.FAILED, isConfirmed: false },
+        }),
+      );
+      expect(tx.childEnrollment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'enr-d1' },
+          data: {
+            paymentStatus: PaymentStatus.FAILED,
+            remainingBalance: 200_000,
+          },
+        }),
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: AuditAction.PAYMENT_DISPUTED }),
+        tx,
+      );
+      // parent + school owner
+      expect(tx.notification.create).toHaveBeenCalledTimes(2);
+      expect(events.emitEnrollmentsChanged).toHaveBeenCalled();
+      expect(events.emitPaymentsChanged).toHaveBeenCalled();
+      expect(metrics.recordPaymentOutcome).toHaveBeenCalledWith('failed', {
+        type: PaymentType.FIRST_PAYMENT,
+        receiver: PaymentReceiver.SCHOOL,
+      });
+    });
+
+    it('restores the full balance for a COMPLETED enrollment too', async () => {
+      prisma.payment.findUnique.mockResolvedValueOnce(
+        makeDisputedPayment({
+          enrollment: {
+            id: 'enr-d1',
+            className: 'JSS2',
+            paymentStatus: PaymentStatus.COMPLETED,
+            totalSchoolFee: 200_000,
+            remainingBalance: 0,
+            school: { name: 'Acme School', ownerId: 'owner-1' },
+            child: { fullName: 'Ada', parent: { userId: 'parent-1' } },
+          },
+        }),
+      );
+
+      const result = await service.reversePaystackPaymentByDispute(
+        'ref-1',
+        'refund.processed',
+      );
+
+      expect(result).toEqual({ reversed: true });
+      expect(tx.childEnrollment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ remainingBalance: 200_000 }),
+        }),
+      );
+    });
+
+    it('does NOT restore the balance for a non-active/completed enrollment and skips the owner notification when there is no owner', async () => {
+      prisma.payment.findUnique.mockResolvedValueOnce(
+        makeDisputedPayment({
+          enrollment: {
+            id: 'enr-d1',
+            className: 'JSS2',
+            paymentStatus: PaymentStatus.PENDING,
+            totalSchoolFee: 200_000,
+            remainingBalance: 125_000,
+            school: { name: 'Acme School', ownerId: null },
+            child: { fullName: 'Ada', parent: { userId: 'parent-1' } },
+          },
+        }),
+      );
+
+      const result = await service.reversePaystackPaymentByDispute(
+        'ref-1',
+        'charge.dispute.create',
+      );
+
+      expect(result).toEqual({ reversed: true });
+      expect(tx.childEnrollment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'enr-d1' },
+          data: { paymentStatus: PaymentStatus.FAILED },
+        }),
+      );
+      // parent only — no owner
+      expect(tx.notification.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns {reversed:false} without emitting when the guarded update matches no row (count===0)', async () => {
+      prisma.payment.findUnique.mockResolvedValueOnce(makeDisputedPayment());
+      tx.payment.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      const result = await service.reversePaystackPaymentByDispute(
+        'ref-1',
+        'charge.dispute.create',
+      );
+
+      expect(result).toEqual({ reversed: false });
+      expect(events.emitEnrollmentsChanged).not.toHaveBeenCalled();
+      expect(metrics.recordPaymentOutcome).not.toHaveBeenCalled();
+    });
+  });
 });

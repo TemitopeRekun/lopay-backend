@@ -93,6 +93,13 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
         SENTRY_DSN: Joi.string().uri().optional(),
         SENTRY_TRACES_SAMPLE_RATE: Joi.number().min(0).max(1).optional(),
         REDIS_URL: Joi.string().optional(),
+        // PII encryption at rest. Optional in dev (plaintext fallback), required
+        // in production. Must be exactly 64 hex chars (32 bytes).
+        ENCRYPTION_KEY: Joi.when('NODE_ENV', {
+          is: 'production',
+          then: Joi.string().length(64).hex().required(),
+          otherwise: Joi.string().length(64).hex().optional(),
+        }),
       }),
       validationOptions: {
         abortEarly: true,
