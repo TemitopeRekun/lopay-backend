@@ -45,6 +45,10 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
         DATABASE_URL: Joi.string().uri().required(),
         // Per-instance pg pool ceiling (M4 scale). Optional; defaults to 10.
         DATABASE_POOL_MAX: Joi.number().integer().min(1).max(100).optional(),
+        // Set to 'disable' to skip TLS on the DB connection — only for a
+        // same-host/private-network Postgres (e.g. Docker on an isolated bridge).
+        // Unset in managed-DB deploys so the verified-TLS path stays on.
+        DATABASE_SSL: Joi.string().valid('disable', 'false', 'off').optional(),
         // Better Auth (replaces Firebase + the old backend JWT)
         // Reject obvious placeholders so a deploy can't boot with template values.
         BETTER_AUTH_SECRET: Joi.string()
@@ -93,6 +97,9 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
         SENTRY_DSN: Joi.string().uri().optional(),
         SENTRY_TRACES_SAMPLE_RATE: Joi.number().min(0).max(1).optional(),
         REDIS_URL: Joi.string().optional(),
+        // Reverse-proxy hop count for Express `trust proxy` (e.g. 1 behind Caddy).
+        // Unset -> the app trusts no proxy (direct exposure).
+        TRUST_PROXY: Joi.string().optional(),
         // PII encryption at rest. Optional in dev (plaintext fallback), required
         // in production. Must be exactly 64 hex chars (32 bytes).
         ENCRYPTION_KEY: Joi.when('NODE_ENV', {

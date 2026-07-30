@@ -129,6 +129,15 @@ export class PrismaService
     config: ConfigService,
   ): Pick<PoolConfig, 'ssl'> {
     if (nodeEnv !== 'production') return {};
+    // Explicit opt-out for a same-host/private-network Postgres (e.g. a Docker
+    // container on an isolated bridge, or a Unix-socket/localhost DB) where the
+    // connection never crosses an untrusted medium, so TLS adds no security and
+    // the server may not offer it at all. Managed-DB deploys leave this unset and
+    // keep the verified-TLS path below.
+    const sslMode = config.get<string>('DATABASE_SSL');
+    if (sslMode && ['disable', 'false', 'off'].includes(sslMode.toLowerCase())) {
+      return {};
+    }
     const ca = config.get<string>('DATABASE_CA_CERT');
     if (ca && ca.trim()) {
       return { ssl: { ca, rejectUnauthorized: true } };

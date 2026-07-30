@@ -19,6 +19,16 @@ async function bootstrap() {
 
   app.useLogger(new JsonLogger());
 
+  // Behind a reverse proxy (e.g. Caddy on the Oracle VM), trust the X-Forwarded-*
+  // headers so the rate limiters and logs see the real client IP instead of the
+  // proxy's. TRUST_PROXY is the hop count (1 = one proxy). Unset -> off, so a
+  // directly-exposed deploy is unaffected.
+  const trustProxy = process.env.TRUST_PROXY;
+  if (trustProxy && trustProxy.trim()) {
+    const hops = Number(trustProxy);
+    app.set('trust proxy', Number.isNaN(hops) ? trustProxy : hops);
+  }
+
   // Security headers
   app.use(
     (
