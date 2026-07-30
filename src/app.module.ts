@@ -45,10 +45,12 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
         DATABASE_URL: Joi.string().uri().required(),
         // Per-instance pg pool ceiling (M4 scale). Optional; defaults to 10.
         DATABASE_POOL_MAX: Joi.number().integer().min(1).max(100).optional(),
-        // Set to 'disable' to skip TLS on the DB connection — only for a
-        // same-host/private-network Postgres (e.g. Docker on an isolated bridge).
-        // Unset in managed-DB deploys so the verified-TLS path stays on.
-        DATABASE_SSL: Joi.string().valid('disable', 'false', 'off').optional(),
+        // DB TLS control. 'disable' skips TLS (same-host/private-network Postgres);
+        // 'require' forces TLS even outside production (e.g. a staging/dev app
+        // pointed at Supabase/Neon). Unset = TLS on in production, off otherwise.
+        DATABASE_SSL: Joi.string()
+          .valid('disable', 'false', 'off', 'require', 'true', 'on')
+          .optional(),
         // Better Auth (replaces Firebase + the old backend JWT)
         // Reject obvious placeholders so a deploy can't boot with template values.
         BETTER_AUTH_SECRET: Joi.string()

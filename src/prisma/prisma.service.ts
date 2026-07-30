@@ -128,14 +128,20 @@ export class PrismaService
     nodeEnv: string,
     config: ConfigService,
   ): Pick<PoolConfig, 'ssl'> {
-    if (nodeEnv !== 'production') return {};
-    // Explicit opt-out for a same-host/private-network Postgres (e.g. a Docker
-    // container on an isolated bridge, or a Unix-socket/localhost DB) where the
-    // connection never crosses an untrusted medium, so TLS adds no security and
-    // the server may not offer it at all. Managed-DB deploys leave this unset and
-    // keep the verified-TLS path below.
-    const sslMode = config.get<string>('DATABASE_SSL');
-    if (sslMode && ['disable', 'false', 'off'].includes(sslMode.toLowerCase())) {
+    // TLS decision, in order:
+    //   DATABASE_SSL=disable -> never use TLS (same-host/private-network DB, e.g.
+    //     a Docker container on an isolated bridge, or a localhost/socket DB).
+    //   production           -> TLS on by default.
+    //   DATABASE_SSL=require -> TLS on even outside production, for a non-prod app
+    //     pointed at a managed DB that needs TLS (e.g. Supabase/Neon in staging).
+    //   otherwise (non-prod) -> no TLS (local Postgres).
+    const sslMode = (config.get<string>('DATABASE_SSL') ?? '').toLowerCase();
+    if (['disable', 'false', 'off'].includes(sslMode)) {
+      return {};
+    }
+    const sslOn =
+      nodeEnv === 'production' || ['require', 'true', 'on'].includes(sslMode);
+    if (!sslOn) {
       return {};
     }
     const ca = config.get<string>('DATABASE_CA_CERT');
