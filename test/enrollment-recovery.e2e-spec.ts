@@ -15,6 +15,7 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { EnrollmentService } from '../src/enrollment/enrollment.service';
 import { LedgerService } from '../src/ledger/ledger.service';
+import { MetricsService } from '../src/common/observability/metrics.service';
 import { PaymentService } from '../src/payments/payment.service';
 import { NotificationsService } from '../src/notifications/notifications.service';
 import { EventsGateway } from '../src/events/events.gateway';
@@ -73,6 +74,13 @@ describe('Enrollment & installment integration (real DB)', () => {
         },
         { provide: AuditService, useValue: { record: jest.fn() } },
         { provide: PaystackService, useValue: paystackStub },
+        {
+          provide: MetricsService,
+          useValue: {
+            recordPaymentOutcome: jest.fn(),
+            setStalledConfirmations: jest.fn(),
+          },
+        },
       ],
     }).compile();
 

@@ -15,6 +15,7 @@ import { PrismaService } from './prisma/prisma.service';
 import { ConfigModule } from '@nestjs/config';
 import { RedisModule, REDIS_CLIENT } from './redis/redis.module';
 import { CacheModule } from './cache/cache.module';
+import { MetricsModule } from './common/observability/metrics.module';
 import * as Joi from 'joi';
 import { UsersModule } from './users/users.module';
 import { SchoolsModule } from './schools/schools.module';
@@ -44,6 +45,12 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
         DATABASE_URL: Joi.string().uri().required(),
         // Per-instance pg pool ceiling (M4 scale). Optional; defaults to 10.
         DATABASE_POOL_MAX: Joi.number().integer().min(1).max(100).optional(),
+        // DB TLS control. 'disable' skips TLS (same-host/private-network Postgres);
+        // 'require' forces TLS even outside production (e.g. a staging/dev app
+        // pointed at Supabase/Neon). Unset = TLS on in production, off otherwise.
+        DATABASE_SSL: Joi.string()
+          .valid('disable', 'false', 'off', 'require', 'true', 'on')
+          .optional(),
         // Better Auth (replaces Firebase + the old backend JWT)
         // Reject obvious placeholders so a deploy can't boot with template values.
         BETTER_AUTH_SECRET: Joi.string()
@@ -92,6 +99,16 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
         SENTRY_DSN: Joi.string().uri().optional(),
         SENTRY_TRACES_SAMPLE_RATE: Joi.number().min(0).max(1).optional(),
         REDIS_URL: Joi.string().optional(),
+        // Reverse-proxy hop count for Express `trust proxy` (e.g. 1 behind Caddy).
+        // Unset -> the app trusts no proxy (direct exposure).
+        TRUST_PROXY: Joi.string().optional(),
+        // PII encryption at rest. Optional in dev (plaintext fallback), required
+        // in production. Must be exactly 64 hex chars (32 bytes).
+        ENCRYPTION_KEY: Joi.when('NODE_ENV', {
+          is: 'production',
+          then: Joi.string().length(64).hex().required(),
+          otherwise: Joi.string().length(64).hex().optional(),
+        }),
       }),
       validationOptions: {
         abortEarly: true,
@@ -143,6 +160,7 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
     }),
     RedisModule,
     CacheModule,
+    MetricsModule,
     FirebaseModule,
     UsersModule,
     SchoolsModule,

@@ -26,6 +26,7 @@ import { EventsGateway } from '../src/events/events.gateway';
 import { AuditService } from '../src/audit/audit.service';
 import { PaystackService } from '../src/paystack/paystack.service';
 import { CacheService } from '../src/cache/cache.service';
+import { MetricsService } from '../src/common/observability/metrics.service';
 import { AuthService } from '@thallesp/nestjs-better-auth';
 import {
   InstallmentFrequency,
@@ -79,6 +80,14 @@ describe('Security boundaries (real DB)', () => {
         // In-memory cache (REDIS_CLIENT = null); SchoolPaymentsService now needs it.
         { provide: CacheService, useValue: new CacheService(null) },
         { provide: AuthService, useValue: {} },
+        // LedgerService now records payment metrics (Milestone 5).
+        {
+          provide: MetricsService,
+          useValue: {
+            recordPaymentOutcome: jest.fn(),
+            setStalledConfirmations: jest.fn(),
+          },
+        },
       ],
     }).compile();
 

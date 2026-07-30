@@ -1,0 +1,22 @@
+# Keep the build context small and never ship host artifacts or secrets.
+# `npm ci` rebuilds node_modules inside the image; the host copy is often the
+# wrong architecture anyway (e.g. Windows/x64 vs the Linux build host).
+node_modules
+dist
+coverage
+.git
+.github
+.vscode
+
+# Secrets — never bake these into an image.
+.env
+.env.*
+!.env.example
+
+# Local-only infra (not needed to build the app image).
+docker-compose.yml
+docker
+
+# Logs / misc
+*.log
+.DS_Store

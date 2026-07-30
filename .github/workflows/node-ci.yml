@@ -33,6 +33,13 @@ jobs:
           cache: 'npm'
       - name: Install
         run: npm ci
+      - name: OpenAPI spec is committed & up to date
+        # Hermetic: generate-swagger.ts runs in Nest preview mode with inert env
+        # fallbacks, so it needs no DB/secrets. Fails the build if openapi.json
+        # drifts from the code — regenerate with `npm run generate:swagger`.
+        run: |
+          npm run generate:swagger
+          git diff --exit-code -- openapi.json
       - name: Lint
         run: npm run lint
       - name: Apply migrations (test DB)

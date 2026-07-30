@@ -31,3 +31,20 @@ export function captureException(
   if (!enabled) return;
   Sentry.captureException(error, context ? { extra: context } : undefined);
 }
+
+/**
+ * Report an operational alert message to Sentry (no-op when disabled). Used for
+ * conditions that are not exceptions but need attention — e.g. the scheduled
+ * "confirmations stalled > 1h" check. Defaults to the `warning` level.
+ */
+export function captureMessage(
+  message: string,
+  level: 'info' | 'warning' | 'error' = 'warning',
+  context?: Record<string, unknown>,
+): void {
+  if (!enabled) return;
+  Sentry.captureMessage(message, {
+    level,
+    ...(context ? { extra: context } : {}),
+  });
+}

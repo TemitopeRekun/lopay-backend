@@ -6,6 +6,7 @@ import {
   Param,
   ForbiddenException,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { EnrollmentService } from './enrollment.service';
 import { CreateEnrollmentDto } from './dto/create.enrollment.dto';
 import { ConfirmEnrollmentDto } from './dto/confirm.enrollment.dto';
@@ -15,6 +16,8 @@ import { UserRole } from '../generated/prisma/client';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { CreateInstallmentDto } from './dto/create.installment.dto';
 
+@ApiTags('enrollments')
+@ApiBearerAuth()
 @Controller('enrollments')
 export class EnrollmentController {
   constructor(private readonly enrollmentService: EnrollmentService) {}
@@ -22,6 +25,7 @@ export class EnrollmentController {
   @SkipThrottle()
   @Get('my-children')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
+  @ApiOperation({ summary: "List the current parent's enrolled children" })
   async getMyChildren(@CurrentUser() user: AuthUser) {
     return this.enrollmentService.getParentEnrollments(user.userId);
   }
@@ -29,6 +33,7 @@ export class EnrollmentController {
   @SkipThrottle()
   @Get(':id/history')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
+  @ApiOperation({ summary: 'Get the payment history for an enrollment' })
   async getEnrollmentHistory(
     @Param('id') id: string,
     @CurrentUser() user: AuthUser,
@@ -47,6 +52,7 @@ export class EnrollmentController {
   @Post('initiate-first-payment')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
   @Throttle({ default: { ttl: 60000, limit: 10 } })
+  @ApiOperation({ summary: 'Initiate a first payment via Paystack split' })
   initiateFirstPayment(
     @Body() dto: CreateEnrollmentDto,
     @CurrentUser() user: AuthUser,
@@ -57,6 +63,7 @@ export class EnrollmentController {
   @Post('pay-installment')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
   @Throttle({ default: { ttl: 60000, limit: 10 } })
+  @ApiOperation({ summary: 'Submit an installment payment' })
   async payInstallment(
     @Body() dto: CreateInstallmentDto,
     @CurrentUser() user: AuthUser,
@@ -73,6 +80,7 @@ export class EnrollmentController {
   @Post('confirm-first-payment')
   @Roles(UserRole.SCHOOL_OWNER)
   @Throttle({ default: { ttl: 60000, limit: 20 } })
+  @ApiOperation({ summary: 'Confirm a first payment for an enrollment' })
   async confirmFirstPayment(
     @Body() dto: ConfirmEnrollmentDto,
     @CurrentUser() user: AuthUser,

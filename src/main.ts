@@ -6,17 +6,28 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 import { initSentry } from './common/observability/sentry';
 import { RedisIoAdapter } from './events/redis-io.adapter';
+import { initEncryptionKey } from './common/encryption';
+import { JsonLogger } from './common/logger/json.logger';
 
 async function bootstrap() {
-  // Error tracking (no-op unless SENTRY_DSN is set). Init before app handles traffic.
   initSentry();
-  // bodyParser:false — the Better Auth NestJS module owns body parsing (it must
-  // hand the raw request to the auth handler). It re-adds JSON/urlencoded for all
-  // other routes and, with bodyParser.rawBody:true, attaches req.rawBody (used by
-  // the Paystack webhook for HMAC verification).
+  initEncryptionKey(process.env.ENCRYPTION_KEY);
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false,
   });
+
+  app.useLogger(new JsonLogger());
+
+  // Behind a reverse proxy (e.g. Caddy on the Oracle VM), trust the X-Forwarded-*
+  // headers so the rate limiters and logs see the real client IP instead of the
+  // proxy's. TRUST_PROXY is the hop count (1 = one proxy). Unset -> off, so a
+  // directly-exposed deploy is unaffected.
+  const trustProxy = process.env.TRUST_PROXY;
+  if (trustProxy && trustProxy.trim()) {
+    const hops = Number(trustProxy);
+    app.set('trust proxy', Number.isNaN(hops) ? trustProxy : hops);
+  }
 
   // Security headers
   app.use(
@@ -52,7 +63,7 @@ async function bootstrap() {
 
   // Note: the global prefix excludes the Better Auth handler (the module adds
   // /api/auth to the prefix exclude list automatically).
-  app.setGlobalPrefix('api/v1', { exclude: ['health'] });
+  app.setGlobalPrefix('api/v1', { exclude: ['health', 'metrics'] });
   app.useGlobalFilters(new GlobalExceptionFilter());
   app.useGlobalPipes(
     new ValidationPipe({

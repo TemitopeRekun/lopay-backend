@@ -8,6 +8,7 @@ import {
   ForbiddenException,
   Query,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { SchoolPaymentsService } from './schools.service';
 import { ConfirmPaymentDto } from './dto/confim.payment.dto';
 import { MarkDefaultedDto } from './dto/mark-defaulted.dto';
@@ -20,6 +21,8 @@ import { SkipThrottle } from '@nestjs/throttler';
 import { CreateClassFeeDto } from './dto/create-class-fee.dto';
 import { UpdateSchoolDto } from './dto/update.school.dto';
 
+@ApiTags('school-payments')
+@ApiBearerAuth()
 @Controller('school-payments')
 export class SchoolPaymentsController {
   constructor(private readonly schoolPaymentsService: SchoolPaymentsService) {}
@@ -27,6 +30,7 @@ export class SchoolPaymentsController {
   /** ✅ Create or Update Class Fee */
   @Post('fees')
   @Roles(UserRole.SCHOOL_OWNER)
+  @ApiOperation({ summary: 'Create or update a class fee' })
   async createClassFee(
     @Body() dto: CreateClassFeeDto,
     @CurrentUser() user: AuthUser,
@@ -44,6 +48,7 @@ export class SchoolPaymentsController {
   /** ✅ Get all Class Fees */
   @Get('fees')
   @Roles(UserRole.SCHOOL_OWNER, UserRole.PARENT) // Parents need to see fees too
+  @ApiOperation({ summary: "Get the authenticated owner's school class fees" })
   async getClassFees(@CurrentUser() user: AuthUser) {
     // If user is a school owner, get their school's fees
     if (user.role === UserRole.SCHOOL_OWNER) {
@@ -76,6 +81,7 @@ export class SchoolPaymentsController {
   @SkipThrottle()
   @Get('fees/:schoolId')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Get the class fees for a specific school' })
   async getClassFeesForSchool(@Param('schoolId') schoolId: string) {
     return this.schoolPaymentsService.getClassFees(schoolId);
   }
@@ -87,6 +93,9 @@ export class SchoolPaymentsController {
    */
   @Get('bank-details/:schoolId')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER, UserRole.SUPER_ADMIN)
+  @ApiOperation({
+    summary: "Get a school's bank details (access-scoped server-side)",
+  })
   async getSchoolBankDetails(
     @Param('schoolId') schoolId: string,
     @CurrentUser() user: AuthUser,
@@ -101,6 +110,9 @@ export class SchoolPaymentsController {
   /** ✅ Update School Bank Details (School Owner Profile) */
   @Put('bank-details')
   @Roles(UserRole.SCHOOL_OWNER)
+  @ApiOperation({
+    summary: "Update the authenticated owner's school bank details",
+  })
   async updateSchoolBankDetails(
     @Body() dto: UpdateSchoolDto,
     @CurrentUser() user: AuthUser,
@@ -118,6 +130,7 @@ export class SchoolPaymentsController {
   @SkipThrottle()
   @Get('history')
   @Roles(UserRole.SCHOOL_OWNER)
+  @ApiOperation({ summary: "Get the school's payment history" })
   async getHistory(
     @CurrentUser() user: AuthUser,
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
@@ -140,6 +153,9 @@ export class SchoolPaymentsController {
   @SkipThrottle()
   @Get('history/all')
   @Roles(UserRole.SCHOOL_OWNER)
+  @ApiOperation({
+    summary: "Get the school's full payment history (all statuses)",
+  })
   async getHistoryAll(
     @CurrentUser() user: AuthUser,
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
@@ -162,6 +178,7 @@ export class SchoolPaymentsController {
   @SkipThrottle()
   @Get('stats')
   @Roles(UserRole.SCHOOL_OWNER)
+  @ApiOperation({ summary: 'Get the school dashboard stats' })
   async getDashboardStats(@CurrentUser() user: AuthUser) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
@@ -173,6 +190,9 @@ export class SchoolPaymentsController {
   @SkipThrottle()
   @Get('students')
   @Roles(UserRole.SCHOOL_OWNER)
+  @ApiOperation({
+    summary: "List the school's students (class filter, search, pagination)",
+  })
   async getStudents(
     @CurrentUser() user: AuthUser,
     @Query('className') className?: string,
@@ -196,6 +216,7 @@ export class SchoolPaymentsController {
   @SkipThrottle()
   @Get('pending')
   @Roles(UserRole.SCHOOL_OWNER)
+  @ApiOperation({ summary: "List the school's pending installment payments" })
   async getPendingPayments(
     @CurrentUser() user: AuthUser,
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
@@ -215,6 +236,7 @@ export class SchoolPaymentsController {
   /** ✅ Confirm a single installment payment */
   @Post('confirm')
   @Roles(UserRole.SCHOOL_OWNER)
+  @ApiOperation({ summary: 'Confirm a single installment payment' })
   async confirmPayment(
     @Body() dto: ConfirmPaymentDto,
     @CurrentUser() user: AuthUser,
@@ -235,6 +257,7 @@ export class SchoolPaymentsController {
   /** ✅ Reject a single installment payment */
   @Post('reject')
   @Roles(UserRole.SCHOOL_OWNER)
+  @ApiOperation({ summary: 'Reject a single installment payment' })
   async rejectPayment(
     @Body() dto: ConfirmPaymentDto, // Reusing DTO as it only needs paymentId
     @CurrentUser() user: AuthUser,
@@ -255,6 +278,7 @@ export class SchoolPaymentsController {
   /** ✅ Mark an enrollment as defaulted */
   @Post('default')
   @Roles(UserRole.SCHOOL_OWNER)
+  @ApiOperation({ summary: 'Mark an enrollment as defaulted' })
   async markAsDefaulted(
     @Body() dto: MarkDefaultedDto,
     @CurrentUser() user: AuthUser,
@@ -272,6 +296,9 @@ export class SchoolPaymentsController {
   /** ✅ Reverse a previously-confirmed installment payment (auditable undo) */
   @Post('reverse')
   @Roles(UserRole.SCHOOL_OWNER)
+  @ApiOperation({
+    summary: 'Reverse a previously-confirmed installment payment',
+  })
   async reversePayment(
     @Body() dto: ReversePaymentDto,
     @CurrentUser() user: AuthUser,

@@ -11,6 +11,7 @@ import {
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { Request } from 'express';
@@ -30,6 +31,7 @@ import {
  * frontend calls on return (handles delayed webhooks). Both run the same
  * idempotent reconciliation in EnrollmentService.
  */
+@ApiTags('payments')
 @Controller('payments/paystack')
 export class PaystackWebhookController {
   private readonly logger = new Logger(PaystackWebhookController.name);
@@ -47,6 +49,9 @@ export class PaystackWebhookController {
   @SkipThrottle()
   @Post('webhook')
   @HttpCode(200)
+  @ApiOperation({
+    summary: 'Paystack webhook (HMAC-verified) — reconciles first payments',
+  })
   async webhook(
     @Req() req: Request,
     @Headers('x-paystack-signature') signature: string,
@@ -128,6 +133,9 @@ export class PaystackWebhookController {
    */
   @Get('verify')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
+  @ApiOperation({
+    summary: 'Verify a Paystack transaction on return and reconcile it',
+  })
   async verify(
     @Query('reference') reference: string,
     @CurrentUser() user: AuthUser,

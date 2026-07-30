@@ -8,6 +8,12 @@ import { PrismaClient } from '../generated/prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { Pool, type PoolConfig } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { isEncryptionEnabled } from '../common/encryption';
+import {
+  encryptPiiInArgs,
+  decryptPiiDeep,
+  isWriteOperation,
+} from '../common/pii-crypto';
 
 @Injectable()
 export class PrismaService
@@ -30,6 +36,71 @@ export class PrismaService
     });
     const adapter = new PrismaPg(pool);
     super({ adapter });
+
+    // PII encryption at rest. A Prisma `$extends` client is a NEW object (it does
+    // not mutate `this`), so to make the extension apply to the injected service —
+    // which the whole app, and Better Auth, call as `prisma.*` — we return a Proxy
+    // that routes the client surface through the extended client. When no key is
+    // configured this is skipped entirely and behaviour is byte-identical.
+    if (isEncryptionEnabled()) {
+      return PrismaService.withPiiEncryption(this);
+    }
+  }
+
+  /** Wrap `base` so every model/query call runs through a PII-encryption
+   * `$extends` client, while the service-specific members (lifecycle hooks,
+   * `withTenant`, `withLeaderLock`) keep resolving to the base instance. */
+  private static withPiiEncryption(base: PrismaService): PrismaService {
+    const extended = base.$extends({
+      name: 'pii-encryption',
+      query: {
+        $allModels: {
+          $allOperations: async ({ operation, args, query }) => {
+            if (isWriteOperation(operation)) {
+              encryptPiiInArgs(operation, args);
+            }
+            const result = (await query(args)) as unknown;
+            return decryptPiiDeep(result);
+          },
+        },
+      },
+    });
+
+    // Members that live on PrismaService (not on the Prisma client) must resolve
+    // to the base; everything else (model delegates, `$transaction`, `$connect`,
+    // `$extends` used by `withTenant`, …) resolves to the extended client.
+    const ownMembers = new Set<string>([
+      'withTenant',
+      'withLeaderLock',
+      'onModuleInit',
+      'onModuleDestroy',
+    ]);
+
+    const extendedIndex = extended as unknown as Record<
+      string | symbol,
+      unknown
+    >;
+
+    return new Proxy(base, {
+      get(target, prop, receiver) {
+        if (typeof prop === 'string' && ownMembers.has(prop)) {
+          const member = Reflect.get(target, prop, target) as unknown;
+          return typeof member === 'function'
+            ? (member as (...a: unknown[]) => unknown).bind(receiver)
+            : member;
+        }
+        const value = extendedIndex[prop];
+        if (value === undefined) {
+          const fallback = Reflect.get(target, prop, target) as unknown;
+          return typeof fallback === 'function'
+            ? (fallback as (...a: unknown[]) => unknown).bind(target)
+            : fallback;
+        }
+        return typeof value === 'function'
+          ? (value as (...a: unknown[]) => unknown).bind(extended)
+          : value;
+      },
+    }) as unknown as PrismaService;
   }
 
   /** Per-instance pg pool ceiling. `max` bounds concurrent DB connections so a
@@ -57,7 +128,22 @@ export class PrismaService
     nodeEnv: string,
     config: ConfigService,
   ): Pick<PoolConfig, 'ssl'> {
-    if (nodeEnv !== 'production') return {};
+    // TLS decision, in order:
+    //   DATABASE_SSL=disable -> never use TLS (same-host/private-network DB, e.g.
+    //     a Docker container on an isolated bridge, or a localhost/socket DB).
+    //   production           -> TLS on by default.
+    //   DATABASE_SSL=require -> TLS on even outside production, for a non-prod app
+    //     pointed at a managed DB that needs TLS (e.g. Supabase/Neon in staging).
+    //   otherwise (non-prod) -> no TLS (local Postgres).
+    const sslMode = (config.get<string>('DATABASE_SSL') ?? '').toLowerCase();
+    if (['disable', 'false', 'off'].includes(sslMode)) {
+      return {};
+    }
+    const sslOn =
+      nodeEnv === 'production' || ['require', 'true', 'on'].includes(sslMode);
+    if (!sslOn) {
+      return {};
+    }
     const ca = config.get<string>('DATABASE_CA_CERT');
     if (ca && ca.trim()) {
       return { ssl: { ca, rejectUnauthorized: true } };

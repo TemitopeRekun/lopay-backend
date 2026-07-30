@@ -213,3 +213,45 @@ fine for current table sizes. For very large `Payment` tables, build them
 applied with `prisma migrate resolve --applied 20260630000001_add_scale_indexes`.
 The hot `ORDER BY paymentDate DESC` path is covered by `Payment_paymentDate_idx`
 (proven by the EXPLAIN assertion in `test/admin-pagination.e2e-spec.ts`).
+
+## Observability (Milestone 5)
+
+### Error tracking: `SENTRY_DSN`
+
+Sentry is initialised at bootstrap and is a **no-op unless `SENTRY_DSN` is set**
+(local/dev and any deploy without a DSN behave as before). Set `SENTRY_DSN` (and
+optionally `SENTRY_TRACES_SAMPLE_RATE`, 0–1) in production. Unhandled 5xx errors
+are reported by `GlobalExceptionFilter` with the request's `X-Request-ID`
+correlation id; operational alerts use `captureMessage` (see below).
+
+### Correlation IDs
+
+Every request gets an `X-Request-ID` (generated if the client didn't send one) —
+echoed in the response header, the HTTP access log, the 5xx log line, error
+response bodies, and the Sentry context. Pass a client-supplied `X-Request-ID`
+through your LB to trace a request end-to-end.
+
+### Metrics: `GET /metrics`
+
+Prometheus text-format endpoint, **public and outside the `/api/v1` prefix**
+(scrape `https://<host>/metrics`). Point a Prometheus/Grafana Agent scrape job at
+it. Exposed series (plus Node process defaults):
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `lopay_payments_total{outcome,type,receiver}` | counter | Money-state transition volume. `outcome` = confirmed/rejected/reversed/failed. **Failure rate** = `failed+rejected` share of the total. |
+| `lopay_payment_confirm_latency_seconds{type}` | histogram | Time from payment submission to confirmation. |
+| `lopay_confirmations_stalled` | gauge | Payments awaiting confirmation past the 1h threshold (set hourly by the stall check). |
+
+Recorded by `LedgerService` (the single owner of money transitions), so every
+money path is counted in exactly one place.
+
+### Alert: confirmations stalled > 1h
+
+`ConfirmationStallService` runs hourly (leader-locked so one instance fires when
+scaled), counts payments that are `PENDING` + unconfirmed + older than 1h, sets
+the `lopay_confirmations_stalled` gauge, and — when the count is non-zero —
+raises a Sentry **warning** (`captureMessage`). Recommended paging rule: alert
+when `lopay_confirmations_stalled > 0` for 2+ consecutive scrapes, or on the
+Sentry message. A rising number means owners/admins aren't actioning pending
+first-payment settlements or installment confirmations.
