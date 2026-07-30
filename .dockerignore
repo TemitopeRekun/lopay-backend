@@ -1,6 +1,6 @@
 # Keep the build context small and never ship host artifacts or secrets.
 # `npm ci` rebuilds node_modules inside the image; the host copy is often the
-# wrong architecture anyway (Windows/x64 vs the arm64 VM).
+# wrong architecture anyway (e.g. Windows/x64 vs the Linux build host).
 node_modules
 dist
 coverage
@@ -13,10 +13,9 @@ coverage
 .env.*
 !.env.example
 
-# Local-only infra + deploy tooling (not needed to build the app image).
+# Local-only infra (not needed to build the app image).
 docker-compose.yml
 docker
-deploy
 
 # Logs / misc
 *.log

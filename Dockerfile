@@ -1,11 +1,9 @@
 # syntax=docker/dockerfile:1
 #
-# Production image for the LoPay NestJS backend.
-#
-# Built and run on the Oracle Cloud A1 (arm64) VM, so `prisma generate` and any
-# engine downloads resolve to the host architecture automatically — no
-# cross-compilation, no binaryTargets juggling. Debian slim (not Alpine) is used
-# because Prisma's engines are happiest with glibc + OpenSSL.
+# Production image for the LoPay NestJS backend. Host-agnostic — used by Render
+# (Docker runtime) and runnable anywhere Docker is available. `prisma generate`
+# runs in the build stage so the client matches the build host. Debian slim (not
+# Alpine) is used because Prisma's engines are happiest with glibc + OpenSSL.
 
 # ---- Stage 1: build ---------------------------------------------------------
 FROM node:22-bookworm-slim AS builder
