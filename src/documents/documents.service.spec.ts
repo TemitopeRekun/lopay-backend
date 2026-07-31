@@ -8,14 +8,36 @@ import { UserRole } from '../generated/prisma/client';
 import type { AuthUser } from '../common/types/auth-user';
 
 const DEFAULT_MAX = 10 * 1024 * 1024;
+const UPLOAD_TTL = 7200;
 
-/** Build a Storage double whose bucket().file().getSignedUrl() is controllable. */
-const makeStorage = (
-  getSignedUrl: jest.Mock = jest.fn().mockResolvedValue(['https://signed']),
-) => {
-  const file = jest.fn().mockReturnValue({ getSignedUrl });
-  const bucket = jest.fn().mockReturnValue({ file });
-  return { storage: { bucket }, bucket, file, getSignedUrl };
+type Overrides = {
+  createSignedUploadUrl?: jest.Mock;
+  createSignedUrl?: jest.Mock;
+};
+
+/** Build a Supabase client double whose from(bucket) storage ops are controllable. */
+const makeSupabase = (over: Overrides = {}) => {
+  const createSignedUploadUrl =
+    over.createSignedUploadUrl ??
+    jest.fn().mockResolvedValue({
+      data: { signedUrl: 'https://signed', token: 'tok', path: 'p' },
+      error: null,
+    });
+  const createSignedUrl =
+    over.createSignedUrl ??
+    jest.fn().mockResolvedValue({
+      data: { signedUrl: 'https://signed-read' },
+      error: null,
+    });
+  const from = jest
+    .fn()
+    .mockReturnValue({ createSignedUploadUrl, createSignedUrl });
+  return {
+    supabase: { storage: { from } },
+    from,
+    createSignedUploadUrl,
+    createSignedUrl,
+  };
 };
 
 const makeConfig = (values: Record<string, string> = {}) => ({
@@ -27,61 +49,62 @@ describe('DocumentsService', () => {
 
   describe('constructor config parsing', () => {
     it('falls back to defaults when env is absent', async () => {
-      const { storage } = makeStorage();
+      const { supabase } = makeSupabase();
       const service = new DocumentsService(
         makeConfig() as never,
         {} as never,
-        storage as never,
+        supabase as never,
       );
-      const res = await service.createReceiptUploadUrl(
+      const up = await service.createReceiptUploadUrl(
         'u1',
-        'file.png',
+        'f.png',
         'image/png',
       );
-      expect(res.expiresIn).toBe(600);
-      expect(res.maxUploadBytes).toBe(DEFAULT_MAX);
+      expect(up.maxUploadBytes).toBe(DEFAULT_MAX);
+      const down = await service.createSignedUrlForPath('receipts/a.png');
+      expect(down.expiresIn).toBe(600);
     });
 
     it('honours finite override values', async () => {
-      const { storage } = makeStorage();
+      const { supabase } = makeSupabase();
       const service = new DocumentsService(
         makeConfig({
-          FIREBASE_SIGNED_URL_TTL_SECONDS: '900',
-          FIREBASE_MAX_UPLOAD_BYTES: '2048',
+          SUPABASE_SIGNED_URL_TTL_SECONDS: '900',
+          SUPABASE_MAX_UPLOAD_BYTES: '2048',
         }) as never,
         {} as never,
-        storage as never,
+        supabase as never,
       );
-      const res = await service.createReceiptUploadUrl('u1', 'file.png');
-      expect(res.expiresIn).toBe(900);
-      expect(res.maxUploadBytes).toBe(2048);
+      const up = await service.createReceiptUploadUrl('u1', 'f.png');
+      expect(up.maxUploadBytes).toBe(2048);
+      const down = await service.createSignedUrlForPath('receipts/a.png');
+      expect(down.expiresIn).toBe(900);
     });
 
     it('keeps defaults for non-finite TTL and non-positive max-bytes overrides', async () => {
-      const { storage } = makeStorage();
+      const { supabase } = makeSupabase();
       const service = new DocumentsService(
         makeConfig({
-          FIREBASE_SIGNED_URL_TTL_SECONDS: 'notnum',
-          FIREBASE_MAX_UPLOAD_BYTES: '-1',
+          SUPABASE_SIGNED_URL_TTL_SECONDS: 'notnum',
+          SUPABASE_MAX_UPLOAD_BYTES: '-1',
         }) as never,
         {} as never,
-        storage as never,
+        supabase as never,
       );
-      const res = await service.createReceiptUploadUrl('u1', 'file.png');
-      expect(res.expiresIn).toBe(600);
-      expect(res.maxUploadBytes).toBe(DEFAULT_MAX);
+      const up = await service.createReceiptUploadUrl('u1', 'f.png');
+      expect(up.maxUploadBytes).toBe(DEFAULT_MAX);
+      const down = await service.createSignedUrlForPath('receipts/a.png');
+      expect(down.expiresIn).toBe(600);
     });
   });
 
   describe('createReceiptUploadUrl', () => {
-    const build = (
-      getSignedUrl = jest.fn().mockResolvedValue(['https://signed']),
-    ) => {
-      const parts = makeStorage(getSignedUrl);
+    const build = (over: Overrides = {}) => {
+      const parts = makeSupabase(over);
       const service = new DocumentsService(
         makeConfig() as never,
         {} as never,
-        parts.storage as never,
+        parts.supabase as never,
       );
       return { service, ...parts };
     };
@@ -100,48 +123,50 @@ describe('DocumentsService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('creates a v4 write URL with the content-length range bound into the signature', async () => {
-      const { service, file, getSignedUrl } = build();
+    it('creates a signed upload URL under receipts/<userId>/, returning token + path', async () => {
+      const { service, from, createSignedUploadUrl } = build();
       const res = await service.createReceiptUploadUrl(
         'u1',
         'my file!.png',
         'image/png',
       );
-      const objectPath = file.mock.calls[0][0] as string;
+      expect(from).toHaveBeenCalledWith('receipts');
+      const objectPath = createSignedUploadUrl.mock.calls[0][0] as string;
       expect(objectPath).toMatch(/^receipts\/u1\/.*_my_file_\.png$/);
-      const opts = getSignedUrl.mock.calls[0][0];
-      expect(opts.action).toBe('write');
-      expect(opts.version).toBe('v4');
-      expect(opts.contentType).toBe('image/png');
-      expect(opts.extensionHeaders['x-goog-content-length-range']).toBe(
-        `0,${DEFAULT_MAX}`,
-      );
       expect(res.signedUrl).toBe('https://signed');
+      expect(res.token).toBe('tok');
       expect(res.path).toBe(objectPath);
-      expect(res.requiredHeaders['x-goog-content-length-range']).toBe(
-        `0,${DEFAULT_MAX}`,
-      );
-    });
-
-    it('defaults contentType to image/jpeg when omitted', async () => {
-      const { service, getSignedUrl } = build();
-      await service.createReceiptUploadUrl('u1', 'file.png');
-      expect(getSignedUrl.mock.calls[0][0].contentType).toBe('image/jpeg');
+      expect(res.expiresIn).toBe(UPLOAD_TTL);
+      expect(res.maxUploadBytes).toBe(DEFAULT_MAX);
     });
 
     it('falls back to "receipt" when the sanitized name is empty', async () => {
-      const { service, file } = build();
+      const { service, createSignedUploadUrl } = build();
       await service.createReceiptUploadUrl('u1', '/');
-      const objectPath = file.mock.calls[0][0] as string;
+      const objectPath = createSignedUploadUrl.mock.calls[0][0] as string;
       expect(objectPath).toMatch(/_receipt$/);
     });
 
-    it('wraps a storage failure in BadRequestException', async () => {
-      const { service } = build(
-        jest.fn().mockRejectedValue(new Error('gcs down')),
+    it('wraps a storage error in BadRequestException', async () => {
+      const { service } = build({
+        createSignedUploadUrl: jest.fn().mockResolvedValue({
+          data: null,
+          error: { message: 'supabase down' },
+        }),
+      });
+      await expect(
+        service.createReceiptUploadUrl('u1', 'f.png'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('throws BadRequest when storage is not configured', async () => {
+      const service = new DocumentsService(
+        makeConfig() as never,
+        {} as never,
+        null as never,
       );
       await expect(
-        service.createReceiptUploadUrl('u1', 'file.png'),
+        service.createReceiptUploadUrl('u1', 'f.png'),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
@@ -157,18 +182,15 @@ describe('DocumentsService', () => {
       ...over,
     });
 
-    const build = (
-      payment: unknown,
-      getSignedUrl = jest.fn().mockResolvedValue(['https://signed-read']),
-    ) => {
-      const parts = makeStorage(getSignedUrl);
+    const build = (payment: unknown, over: Overrides = {}) => {
+      const parts = makeSupabase(over);
       const prisma = {
         payment: { findUnique: jest.fn().mockResolvedValue(payment) },
       };
       const service = new DocumentsService(
         makeConfig() as never,
         prisma as never,
-        parts.storage as never,
+        parts.supabase as never,
       );
       return { service, prisma, ...parts };
     };
@@ -192,9 +214,9 @@ describe('DocumentsService', () => {
     });
 
     it('signs a read URL for the owning parent', async () => {
-      const { service, getSignedUrl } = build(paymentWith());
+      const { service, createSignedUrl } = build(paymentWith());
       const res = await service.createReceiptDownloadUrl('p1', parent);
-      expect(getSignedUrl.mock.calls[0][0].action).toBe('read');
+      expect(createSignedUrl).toHaveBeenCalledWith('receipts/u1/x.png', 600);
       expect(res.signedUrl).toBe('https://signed-read');
       expect(res.path).toBe('receipts/u1/x.png');
     });
@@ -221,11 +243,12 @@ describe('DocumentsService', () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
-    it('wraps a storage failure in BadRequestException', async () => {
-      const { service } = build(
-        paymentWith(),
-        jest.fn().mockRejectedValue(new Error('gcs down')),
-      );
+    it('wraps a storage error in BadRequestException', async () => {
+      const { service } = build(paymentWith(), {
+        createSignedUrl: jest
+          .fn()
+          .mockResolvedValue({ data: null, error: { message: 'boom' } }),
+      });
       await expect(
         service.createReceiptDownloadUrl('p1', admin),
       ).rejects.toBeInstanceOf(BadRequestException);
@@ -233,14 +256,12 @@ describe('DocumentsService', () => {
   });
 
   describe('createSignedUrlForPath', () => {
-    const build = (
-      getSignedUrl = jest.fn().mockResolvedValue(['https://signed-path']),
-    ) => {
-      const parts = makeStorage(getSignedUrl);
+    const build = (over: Overrides = {}) => {
+      const parts = makeSupabase(over);
       const service = new DocumentsService(
         makeConfig() as never,
         {} as never,
-        parts.storage as never,
+        parts.supabase as never,
       );
       return { service, ...parts };
     };
@@ -253,14 +274,18 @@ describe('DocumentsService', () => {
     });
 
     it('returns a signed read URL for a valid path', async () => {
-      const { service, getSignedUrl } = build();
+      const { service, createSignedUrl } = build();
       const res = await service.createSignedUrlForPath('receipts/a.png');
-      expect(getSignedUrl.mock.calls[0][0].action).toBe('read');
-      expect(res).toEqual({ signedUrl: 'https://signed-path', expiresIn: 600 });
+      expect(createSignedUrl).toHaveBeenCalledWith('receipts/a.png', 600);
+      expect(res).toEqual({ signedUrl: 'https://signed-read', expiresIn: 600 });
     });
 
-    it('wraps a storage failure in BadRequestException', async () => {
-      const { service } = build(jest.fn().mockRejectedValue(new Error('boom')));
+    it('wraps a storage error in BadRequestException', async () => {
+      const { service } = build({
+        createSignedUrl: jest
+          .fn()
+          .mockResolvedValue({ data: null, error: { message: 'boom' } }),
+      });
       await expect(
         service.createSignedUrlForPath('receipts/a.png'),
       ).rejects.toBeInstanceOf(BadRequestException);

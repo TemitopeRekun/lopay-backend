@@ -4,9 +4,9 @@ import { ConfigService } from '@nestjs/config';
 import type { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { Public } from '../common/decorators/public.decorator';
-import { FIREBASE_STORAGE } from '../firebase/firebase.module';
+import { SUPABASE_CLIENT } from '../supabase/supabase.module';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { Prisma } from '../generated/prisma/client';
-import type { Storage } from 'firebase-admin/storage';
 import { errorMessage } from '../common/errors';
 
 @ApiTags('health')
@@ -15,7 +15,7 @@ export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    @Inject(FIREBASE_STORAGE) private readonly storage: Storage,
+    @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient | null,
   ) {}
 
   @Public()
@@ -35,21 +35,27 @@ export class HealthController {
       dbError = errorMessage(e, 'db_error');
     }
 
-    const bucketName = this.config.get<string>('FIREBASE_STORAGE_BUCKET') ?? '';
+    const bucketName =
+      this.config.get<string>('SUPABASE_STORAGE_BUCKET') ?? 'receipts';
 
     let storageOk = false;
     let storageError: string | undefined;
-    try {
-      const [exists] = await Promise.race([
-        this.storage.bucket(bucketName).exists(),
-        new Promise<[boolean]>((_, reject) =>
-          setTimeout(() => reject(new Error('timeout')), 2000),
-        ),
-      ]);
-      storageOk = exists;
-    } catch (e: unknown) {
-      storageOk = false;
-      storageError = errorMessage(e, 'storage_error');
+    if (!this.supabase) {
+      storageError = 'not_configured';
+    } else {
+      try {
+        const { data, error } = await Promise.race([
+          this.supabase.storage.getBucket(bucketName),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('timeout')), 2000),
+          ),
+        ]);
+        storageOk = !error && !!data;
+        if (error) storageError = errorMessage(error, 'storage_error');
+      } catch (e: unknown) {
+        storageOk = false;
+        storageError = errorMessage(e, 'storage_error');
+      }
     }
 
     if (!dbOk) {

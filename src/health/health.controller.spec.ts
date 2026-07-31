@@ -3,14 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import type { Response } from 'express';
 import { HealthController } from './health.controller';
 import { PrismaService } from '../prisma/prisma.service';
-import { FIREBASE_STORAGE } from '../firebase/firebase.module';
+import { SUPABASE_CLIENT } from '../supabase/supabase.module';
 
 describe('HealthController', () => {
   let controller: HealthController;
 
   const prisma = { $queryRaw: jest.fn() };
-  const exists = jest.fn();
-  const storage = { bucket: jest.fn(() => ({ exists })) };
+  const getBucket = jest.fn();
+  const supabase = { storage: { getBucket } };
   const config = { get: jest.fn() };
 
   function makeRes() {
@@ -19,27 +19,30 @@ describe('HealthController', () => {
     };
   }
 
+  const build = async (supabaseClient: unknown = supabase) => {
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [HealthController],
+      providers: [
+        { provide: PrismaService, useValue: prisma },
+        { provide: ConfigService, useValue: config },
+        { provide: SUPABASE_CLIENT, useValue: supabaseClient },
+      ],
+    }).compile();
+    return module.get<HealthController>(HealthController);
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
     jest.useFakeTimers();
     // Sensible defaults; individual tests override as needed.
     config.get.mockImplementation((key: string) => {
       if (key === 'NODE_ENV') return 'test';
-      if (key === 'FIREBASE_STORAGE_BUCKET') return 'my-bucket';
+      if (key === 'SUPABASE_STORAGE_BUCKET') return 'my-bucket';
       return undefined;
     });
     prisma.$queryRaw.mockResolvedValue([{ '?column?': 1 }]);
-    exists.mockResolvedValue([true]);
-
-    const module: TestingModule = await Test.createTestingModule({
-      controllers: [HealthController],
-      providers: [
-        { provide: PrismaService, useValue: prisma },
-        { provide: ConfigService, useValue: config },
-        { provide: FIREBASE_STORAGE, useValue: storage },
-      ],
-    }).compile();
-    controller = module.get<HealthController>(HealthController);
+    getBucket.mockResolvedValue({ data: { name: 'my-bucket' }, error: null });
+    controller = await build();
   });
 
   afterEach(() => {
@@ -59,7 +62,7 @@ describe('HealthController', () => {
       error: undefined,
     });
     expect(res.status).not.toHaveBeenCalled();
-    expect(storage.bucket).toHaveBeenCalledWith('my-bucket');
+    expect(getBucket).toHaveBeenCalledWith('my-bucket');
   });
 
   it('returns 503 and degraded when the DB check fails', async () => {
@@ -73,8 +76,11 @@ describe('HealthController', () => {
     expect(res.status).toHaveBeenCalledWith(503);
   });
 
-  it('reports degraded (but not 503) when storage throws', async () => {
-    exists.mockRejectedValue(new Error('storage down'));
+  it('reports degraded (but not 503) when storage returns an error', async () => {
+    getBucket.mockResolvedValue({
+      data: null,
+      error: { message: 'storage down' },
+    });
     const res = makeRes();
 
     const result = await controller.getHealth(res);
@@ -85,8 +91,8 @@ describe('HealthController', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
-  it('reports degraded when the bucket does not exist', async () => {
-    exists.mockResolvedValue([false]);
+  it('reports degraded when the storage call rejects', async () => {
+    getBucket.mockRejectedValue(new Error('boom'));
     const res = makeRes();
 
     const result = await controller.getHealth(res);
@@ -96,14 +102,25 @@ describe('HealthController', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
-  it('falls back to development env and empty bucket when config is unset', async () => {
+  it('reports storage not_configured when Supabase is disabled', async () => {
+    controller = await build(null);
+    const res = makeRes();
+
+    const result = await controller.getHealth(res);
+
+    expect(result.checks.storage.ok).toBe(false);
+    expect(result.checks.storage.error).toBe('not_configured');
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('falls back to development env and the default bucket when config is unset', async () => {
     config.get.mockReturnValue(undefined);
     const res = makeRes();
 
     const result = await controller.getHealth(res);
 
     expect(result.nodeEnv).toBe('development');
-    expect(result.checks.storage.bucket).toBe('');
-    expect(storage.bucket).toHaveBeenCalledWith('');
+    expect(result.checks.storage.bucket).toBe('receipts');
+    expect(getBucket).toHaveBeenCalledWith('receipts');
   });
 });

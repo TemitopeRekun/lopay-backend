@@ -30,6 +30,7 @@ import { BetterAuthGuard } from './auth/better-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { HealthModule } from './health/health.module';
 import { FirebaseModule } from './firebase/firebase.module';
+import { SupabaseModule } from './supabase/supabase.module';
 import { DeviceTokensModule } from './device-tokens/device-tokens.module';
 
 @Module({
@@ -73,6 +74,18 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
           .max(86400)
           .optional(),
         FIREBASE_MAX_UPLOAD_BYTES: Joi.number().integer().min(1024).optional(),
+        // Supabase Storage for receipt upload/download signed URLs. Optional —
+        // when URL/key are unset, receipt storage is disabled and /health reports
+        // storage as degraded (the service still boots).
+        SUPABASE_URL: Joi.string().uri().optional(),
+        SUPABASE_SERVICE_ROLE_KEY: Joi.string().optional(),
+        SUPABASE_STORAGE_BUCKET: Joi.string().optional(),
+        SUPABASE_SIGNED_URL_TTL_SECONDS: Joi.number()
+          .integer()
+          .min(60)
+          .max(86400)
+          .optional(),
+        SUPABASE_MAX_UPLOAD_BYTES: Joi.number().integer().min(1024).optional(),
         ADMIN_EMAIL: Joi.string().email().optional(),
         ADMIN_PASSWORD: Joi.string().min(8).optional(),
         // Required (non-empty) in production so the API can't boot wide-open;
@@ -162,6 +175,7 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
     CacheModule,
     MetricsModule,
     FirebaseModule,
+    SupabaseModule,
     UsersModule,
     SchoolsModule,
     PaymentsModule,
