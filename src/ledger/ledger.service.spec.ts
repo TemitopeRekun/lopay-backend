@@ -46,6 +46,7 @@ describe('LedgerService (characterization)', () => {
   let events: {
     emitPaymentsChanged: jest.Mock;
     emitEnrollmentsChanged: jest.Mock;
+    pushNotification: jest.Mock;
   };
   let audit: { record: jest.Mock };
   let metrics: { recordPaymentOutcome: jest.Mock };
@@ -65,7 +66,9 @@ describe('LedgerService (characterization)', () => {
         findUniqueOrThrow: jest.fn(),
         update: jest.fn().mockResolvedValue({}),
       },
-      notification: { create: jest.fn().mockResolvedValue({}) },
+      notification: {
+        create: jest.fn().mockResolvedValue({ id: 'notif-1' }),
+      },
     };
     tenant = { payment: { findFirst: jest.fn() } };
     prisma = {
@@ -77,6 +80,7 @@ describe('LedgerService (characterization)', () => {
     events = {
       emitPaymentsChanged: jest.fn(),
       emitEnrollmentsChanged: jest.fn(),
+      pushNotification: jest.fn(),
     };
     audit = { record: jest.fn().mockResolvedValue(undefined) };
     metrics = { recordPaymentOutcome: jest.fn() };
@@ -422,6 +426,30 @@ describe('LedgerService (characterization)', () => {
         expect(result).toEqual(expect.objectContaining({ paymentId: 'pay-1' }));
       });
 
+      it('pushes the activation to the parent and links somewhere that exists', async () => {
+        // An admin settle touches nothing on the parent's client, so without an
+        // explicit push their dashboard kept showing the plan as pending. The link
+        // used to be /parent/enrollments/:id — not a route in the app.
+        prisma.payment.findFirst.mockResolvedValueOnce(makeFirstPayment());
+
+        await service.settleFirstPayment('pay-1', adminActor);
+
+        expect(tx.notification.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            userId: 'parent-1',
+            title: 'Enrollment Confirmed',
+            link: '/dashboard',
+          }),
+        });
+        expect(events.pushNotification).toHaveBeenCalledWith(
+          'parent-1',
+          expect.objectContaining({ id: 'notif-1' }),
+        );
+        expect(events.emitEnrollmentsChanged).toHaveBeenCalledWith(
+          expect.objectContaining({ parentUserId: 'parent-1' }),
+        );
+      });
+
       it('404s when the payment is missing/already settled (pre-tx)', async () => {
         prisma.payment.findFirst.mockResolvedValueOnce(null);
 
@@ -464,6 +492,25 @@ describe('LedgerService (characterization)', () => {
         );
         expect(tx.notification.create).toHaveBeenCalledTimes(2);
         expect(result).toEqual(expect.objectContaining({ paymentId: 'pay-1' }));
+      });
+
+      it('pushes the rejection to the parent as an ALERT linking to the retry', async () => {
+        prisma.payment.findFirst.mockResolvedValueOnce(makeFirstPayment());
+
+        await service.rejectFirstPayment('pay-1', adminActor);
+
+        expect(tx.notification.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            userId: 'parent-1',
+            title: 'First Payment Rejected',
+            type: 'ALERT',
+            link: '/dashboard',
+          }),
+        });
+        expect(events.pushNotification).toHaveBeenCalledWith(
+          'parent-1',
+          expect.objectContaining({ id: 'notif-1' }),
+        );
       });
 
       it('404s on a concurrent reject (count===0)', async () => {
@@ -863,6 +910,29 @@ describe('LedgerService (characterization)', () => {
         expect(flipped).toBe(true);
       });
 
+      it('types the notice ALERT and pushes it live to the parent', async () => {
+        // Written inside the transaction rather than through NotificationsService,
+        // so the socket push has to be made explicitly after commit. Without it the
+        // parent only learned they had defaulted on the next 5-minute poll.
+        tx.childEnrollment.updateMany = jest
+          .fn()
+          .mockResolvedValueOnce({ count: 1 });
+
+        await service.markEnrollmentDefaultedBySweep(makeSweepRow());
+
+        expect(tx.notification.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            userId: 'parent-1',
+            type: 'ALERT',
+            link: '/history',
+          }),
+        });
+        expect(events.pushNotification).toHaveBeenCalledWith(
+          'parent-1',
+          expect.objectContaining({ id: 'notif-1' }),
+        );
+      });
+
       it('returns false without audit/notify/emit when the row already changed (count===0)', async () => {
         tx.childEnrollment.updateMany = jest
           .fn()
@@ -875,6 +945,7 @@ describe('LedgerService (characterization)', () => {
         expect(audit.record).not.toHaveBeenCalled();
         expect(tx.notification.create).not.toHaveBeenCalled();
         expect(events.emitEnrollmentsChanged).not.toHaveBeenCalled();
+        expect(events.pushNotification).not.toHaveBeenCalled();
       });
     });
   });

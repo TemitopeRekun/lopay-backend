@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { UserRole } from '../generated/prisma/client';
+import { NotificationType, UserRole } from '../generated/prisma/client';
 import { CreateNotificationDto } from './dto/create.notification.dto';
 import { EventsGateway } from '../events/events.gateway';
 import { DeviceTokensService } from '../device-tokens/device-tokens.service';
@@ -24,6 +24,9 @@ export class NotificationsService {
         userId: dto.userId,
         title: dto.title,
         message: dto.message,
+        // Omitted rather than defaulted here so the column default (PAYMENT) stays
+        // the single source of truth for the fallback kind.
+        ...(dto.type ? { type: dto.type } : {}),
         link: dto.link,
       },
     });
@@ -60,7 +63,15 @@ export class NotificationsService {
     }
 
     await this.prisma.notification.createMany({
-      data: parents.map((p) => ({ userId: p.id, title, message, link })),
+      data: parents.map((p) => ({
+        userId: p.id,
+        title,
+        message,
+        link,
+        // Typed at write time so the parent app's Announcements tab can find it.
+        // Nothing in the wording distinguishes a broadcast from a payment event.
+        type: NotificationType.ANNOUNCEMENT,
+      })),
     });
 
     const PUSH_BATCH = 50;

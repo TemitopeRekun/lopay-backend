@@ -677,7 +677,7 @@ export class EnrollmentService {
         userId: school.schoolOwnerId,
         title: 'New Enrollment Initiated',
         message: `New Student: ${childName} | Class: ${dto.className} | Amount Paid: ${amountStr} | Status: Pending Admin Transfer.`,
-        link: '/school/pending-payments',
+        link: '/admin/approvals',
       });
     }
 
@@ -692,7 +692,7 @@ export class EnrollmentService {
           userId: admin.id,
           title: 'New First Payment Received',
           message: `Payment of ${amountStr} received for ${childName} at ${school.schoolName}. Please process 25% payout to school.`,
-          link: '/admin/payments',
+          link: '/admin/approvals',
         }),
       ),
     );
@@ -1027,7 +1027,7 @@ export class EnrollmentService {
           userId: a.id,
           title: 'Paystack Dispute / Refund',
           message: `A "${eventType}" event was received${reference ? ` for ${reference}` : ''}${payment ? ` (${Money.fromKobo(payment.amountPaid).formatNaira()})` : ''}. The payment has been automatically reversed and the enrollment marked FAILED. Verify Paystack-side reconciliation.`,
-          link: '/admin/payments',
+          link: '/admin/approvals',
         }),
       ),
     );

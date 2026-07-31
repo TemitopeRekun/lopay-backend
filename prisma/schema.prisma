@@ -331,16 +331,29 @@ model WebhookEvent {
   @@index([processedAt])
 }
 
+/// What kind of notification this is. Drives the recipient's filter tabs, so it
+/// must be persisted rather than guessed from the title: a platform broadcast and
+/// a payment confirmation are indistinguishable by wording alone.
+enum NotificationType {
+  /// A money event on the recipient's own enrollment (paid / confirmed / rejected).
+  PAYMENT
+  /// Something needing attention that is not itself a payment (defaulted, dispute).
+  ALERT
+  /// A platform-wide announcement broadcast to every parent.
+  ANNOUNCEMENT
+}
+
 model Notification {
-  id          String   @id @default(uuid())
-  userId      String   // Who receives this notification (parent or school owner)
+  id          String           @id @default(uuid())
+  userId      String           // Who receives this notification (parent or school owner)
   title       String
   message     String
-  isRead      Boolean  @default(false)
-  link        String?  // Optional: frontend route to redirect
-  createdAt   DateTime @default(now())
+  type        NotificationType @default(PAYMENT)
+  isRead      Boolean          @default(false)
+  link        String?          // Optional: frontend route to redirect
+  createdAt   DateTime         @default(now())
 
-  user        User     @relation(fields: [userId], references: [id])
+  user        User             @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([userId, isRead])
