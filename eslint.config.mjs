@@ -7,7 +7,15 @@ import tseslint from 'typescript-eslint';
 export default tseslint.config(
   {
     // Generated Prisma client + build output are not hand-authored — don't lint them.
-    ignores: ['eslint.config.mjs', 'src/generated/**', 'dist/**', 'node_modules/**'],
+    // `coverage/**` is Istanbul's bundled HTML reporter assets: gitignored, but
+    // ESLint still walks them unless told otherwise.
+    ignores: [
+      'eslint.config.mjs',
+      'src/generated/**',
+      'dist/**',
+      'coverage/**',
+      'node_modules/**',
+    ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
@@ -46,7 +54,20 @@ export default tseslint.config(
     },
   },
   {
-    files: ['test/**/*.ts', 'src/**/*.spec.ts'],
+    // Plain-JS config files (e.g. test/jest-e2e.js) are not in the TS project, so
+    // the type-aware rules cannot run on them and error out at parse time.
+    files: ['**/*.js', '**/*.cjs', '**/*.mjs'],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      parserOptions: { projectService: false },
+    },
+  },
+  {
+    // Test suites AND dev-tooling scripts. scripts/e2e-verify.ts drives the live
+    // API and reads untyped JSON responses, so the no-unsafe-* family fires on
+    // every property access. Those rules protect production code paths; applying
+    // them here would only invite blanket `any` casts that hide nothing.
+    files: ['test/**/*.ts', 'src/**/*.spec.ts', 'scripts/**/*.ts'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-floating-promises': 'off',

@@ -1,5 +1,6 @@
 import {
   Injectable,
+  BadRequestException,
   ForbiddenException,
   Logger,
   NotFoundException,
@@ -229,6 +230,90 @@ export class SchoolPaymentsService {
     return this.prisma.classFee.create({
       data: { schoolId, className, feeAmount: feeKobo },
     });
+  }
+
+  /**
+   * Upsert a whole fee schedule in one transaction.
+   *
+   * The client used to POST one class at a time, sleeping 2.5s between each to
+   * dodge the throttle — roughly 37 seconds for a fifteen-class school, with a
+   * partially-written schedule if the parent closed the tab midway. A school
+   * setting up for the first time has to publish its whole schedule at once, so
+   * this takes the full set and applies it atomically: either the schedule
+   * lands or nothing does.
+   *
+   * The payload is the school's COMPLETE schedule, not a patch: any class the
+   * school dropped is deactivated in the same transaction. Upserting alone would
+   * leave a removed class `isActive` — `getClassFees` filters on that flag, so
+   * parents would keep seeing it and could still enrol at the old price, which is
+   * exactly the mistake this method exists to prevent.
+   *
+   * Deactivation is a soft delete: enrolments snapshot `className` and
+   * `totalSchoolFee` at signing, so existing plans are untouched and keep the fee
+   * they agreed. Removing a class only stops NEW enrolments, and re-adding the
+   * class later revives it.
+   *
+   * `withTenant` does not apply inside `$transaction` (tx is a raw client), so
+   * every write here carries `schoolId` explicitly.
+   */
+  async setClassFees(
+    schoolId: string,
+    fees: { className: string; feeAmount: number }[],
+  ) {
+    // Same class twice in one payload would make the result order-dependent.
+    const seen = new Set<string>();
+    for (const fee of fees) {
+      const key = fee.className.trim().toLowerCase();
+      if (seen.has(key)) {
+        throw new BadRequestException(
+          `Duplicate class name in payload: ${fee.className}`,
+        );
+      }
+      seen.add(key);
+    }
+
+    const normalized = fees.map((fee) => ({
+      className: fee.className.trim(),
+      feeAmount: Money.fromNaira(fee.feeAmount).toKobo(),
+    }));
+
+    const keptNames = normalized.map((fee) => fee.className);
+
+    await this.prisma.$transaction([
+      // Retire anything the school left out of this schedule, before writing the
+      // set it kept. The two groups are disjoint, so ordering is only for clarity.
+      this.prisma.classFee.updateMany({
+        where: {
+          schoolId,
+          isActive: true,
+          className: { notIn: keptNames },
+        },
+        data: { isActive: false },
+      }),
+      ...normalized.map((fee) =>
+        this.prisma.classFee.upsert({
+          where: {
+            schoolId_className: { schoolId, className: fee.className },
+          },
+          create: {
+            schoolId,
+            className: fee.className,
+            feeAmount: fee.feeAmount,
+          },
+          update: { feeAmount: fee.feeAmount, isActive: true },
+        }),
+      ),
+    ]);
+
+    // Invalidate after the commit — a read racing an aborted tx must not cache
+    // fees that were rolled back.
+    await this.cache.del(CacheKeys.classFees(schoolId));
+
+    this.logger.log(
+      `School ${schoolId} published ${normalized.length} class fee(s)`,
+    );
+
+    return this.getClassFees(schoolId);
   }
 
   async getClassFees(schoolId: string) {

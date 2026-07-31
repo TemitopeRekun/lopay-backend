@@ -214,6 +214,89 @@ applied with `prisma migrate resolve --applied 20260630000001_add_scale_indexes`
 The hot `ORDER BY paymentDate DESC` path is covered by `Payment_paymentDate_idx`
 (proven by the EXPLAIN assertion in `test/admin-pagination.e2e-spec.ts`).
 
+Status: **applied to the Supabase database on 2026-07-30**; all five indexes verified
+present in `pg_indexes`.
+
+## Supabase Data API lockdown (`public` schema)
+
+### What the problem was
+
+Supabase serves the `public` schema over PostgREST at
+`https://<ref>.supabase.co/rest/v1/<Table>`, authorised as `anon` (pre-login) or
+`authenticated`. Both roles had SELECT/INSERT/UPDATE/DELETE/**TRUNCATE** on every
+table, RLS was disabled everywhere, and no policies existed. Anyone holding the anon
+key — a value designed to be shipped to browsers — could read `Session` (session
+tokens, i.e. impersonate any user including SUPER_ADMIN), read `Account` (password
+hashes, OAuth tokens), read every parent/child/payment row, or truncate the ledger.
+
+Lopay never uses PostgREST: the API is NestJS + Prisma on a direct connection as the
+owner role `postgres`, and Storage (receipts) lives in the separate `storage` schema
+behind the service-role key. Closing `public` to the PostgREST roles costs nothing.
+
+### The fix
+
+`migration 20260731010000_enable_rls_public_schema` — **applied 2026-07-31**. Two
+halves, both required:
+
+1. `ENABLE ROW LEVEL SECURITY` on every `public` table, with **no policies** →
+   deny-all for PostgREST.
+2. `REVOKE ALL` from `anon` / `authenticated`, **plus `ALTER DEFAULT PRIVILEGES`**.
+
+Why both: **RLS does not filter TRUNCATE** (it is a privilege check), so a grant
+holder could still wipe a table with RLS on. And revoking alone leaves rows unguarded
+if a grant is ever restored by a dashboard action or a pasted `GRANT ALL`.
+
+Why the default-privilege revoke matters: a table created by a later Prisma migration
+**inherits the anon/authenticated grants**, silently re-opening everything. Verified
+empirically — before the fix a freshly created table was readable by `anon`; after it,
+it is not.
+
+`service_role` is deliberately untouched (never browser-shipped; Storage uses it).
+
+### Why it is safe for the app
+
+Every table is owned by `postgres`, and owners bypass RLS unless the table is
+`FORCE ROW LEVEL SECURITY` (deliberately not used — `relforcerowsecurity` is 0 on all
+17 tables). The connection role also carries `rolbypassrls`. So RLS-with-no-policies
+is deny-all for PostgREST and a no-op for Prisma.
+
+On plain Postgres (local Docker, CI) the `anon`/`authenticated` roles do not exist, so
+every statement touching them is guarded by a `pg_roles` check and skipped.
+
+### Verifying
+
+```sql
+-- expect: 17 tables, 17 with RLS, 0 forced, 0 grants, 0 policies
+SELECT count(*) FILTER (WHERE relkind='r')                    AS tables,
+       count(*) FILTER (WHERE relrowsecurity)                 AS rls_on,
+       count(*) FILTER (WHERE relforcerowsecurity)            AS rls_forced
+FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public';
+
+SELECT count(*) FROM information_schema.role_table_grants
+WHERE table_schema='public' AND grantee IN ('anon','authenticated');   -- 0
+
+SELECT has_table_privilege('anon','public."Session"','SELECT');        -- false
+SELECT has_table_privilege('service_role','public."Payment"','SELECT'); -- true
+```
+
+Then confirm the app is unaffected: `GET /health` must report `db.ok` and
+`storage.ok`.
+
+### Belt-and-braces (dashboard, optional)
+
+Supabase Dashboard → Settings → API → **Exposed schemas**: remove `public`. This turns
+the Data API off for `public` entirely rather than relying on grants. Do not remove
+`storage`, which receipts depend on.
+
+### If a future migration adds a table
+
+The default-privilege revoke stops it being exposed, but RLS is per-table and is not
+inherited. Add to any new table's migration:
+
+```sql
+ALTER TABLE "NewTable" ENABLE ROW LEVEL SECURITY;
+```
+
 ## Observability (Milestone 5)
 
 ### Error tracking: `SENTRY_DSN`
@@ -255,3 +338,93 @@ raises a Sentry **warning** (`captureMessage`). Recommended paging rule: alert
 when `lopay_confirmations_stalled > 0` for 2+ consecutive scrapes, or on the
 Sentry message. A rising number means owners/admins aren't actioning pending
 first-payment settlements or installment confirmations.
+
+## Phone-number uniqueness (blind index)
+
+### Why there is a hash column
+
+`User.phoneNumber` is encrypted at rest with **randomized** AES-256-GCM
+(`src/common/pii-crypto.ts`), so the same number produces a different ciphertext
+on every write. That has two consequences that a plain unique index cannot work
+around:
+
+- a `UNIQUE` constraint on `phoneNumber` would never collide, enforcing nothing;
+- `where: { phoneNumber }` can never match, so the number cannot be looked up.
+
+`User.phoneHash` solves both. It is `HMAC-SHA256(key, canonical)` where
+`canonical` is the number folded to `+234XXXXXXXXXX` (so `08012345678` and
+`+234 801 234 5678` collapse to one value), and `key` is an HKDF subkey of
+`ENCRYPTION_KEY` labelled `lopay/phone-blind-index/v1`. It carries the `UNIQUE`
+constraint and is queryable by equality.
+
+HMAC rather than plain SHA-256 because ten digits behind a fixed `+234` prefix is
+a small enough space to brute-force from a stolen dump; keying the digest makes
+the dump useless without the key.
+
+### Where it is enforced
+
+| Path | Enforced by |
+|---|---|
+| `POST /api/auth/sign-up/email` | `guardUserCreate` (Better Auth `user.create.before` hook) → coded `PHONE_ALREADY_REGISTERED`, HTTP 422 |
+| `PATCH /api/v1/users/me` | `UsersService.updateProfile` → coded `PHONE_ALREADY_REGISTERED`, HTTP 409 |
+| Better Auth `/update-user` | `guardUserUpdate` recomputes the hash; the DB constraint rejects a collision |
+| Anything else | the `User_phoneHash_key` unique index |
+
+A concurrent pair of sign-ups on the same number can race past the pre-check;
+the index then rejects the loser, which Better Auth surfaces as
+`FAILED_TO_CREATE_USER` and the web client renders as a generic "please try
+again". Rare, and the data stays correct.
+
+### Deploying the migration
+
+```bash
+npm run migrate:deploy          # adds phoneHash + the unique index
+npx ts-node scripts/backfill-phone-hash.ts          # dry run — reports only
+npx ts-node scripts/backfill-phone-hash.ts --apply  # write
+```
+
+The column is nullable, and Postgres permits unlimited NULLs under a unique
+index, so **accounts created before the migration are exempt from the constraint
+until the backfill runs**. Two legacy accounts can still share a number in that
+window. Run the backfill in the same maintenance step as the migration.
+
+The backfill refuses to write if it finds two accounts sharing a number, and
+prints the affected emails. Deciding which parent keeps the number is a support
+call, not something a script should guess — resolve it, then re-run. It is
+idempotent, so re-running is always safe.
+
+### Rotating ENCRYPTION_KEY
+
+The blind-index key is derived from `ENCRYPTION_KEY`, so rotating it invalidates
+every stored `phoneHash`: duplicate detection silently stops working until the
+hashes are recomputed. A rotation already requires re-encrypting the PII columns;
+re-run `scripts/backfill-phone-hash.ts --apply` as part of the same procedure.
+
+Bumping the HKDF label (`lopay/phone-blind-index/v1`) has the identical effect
+and the identical remedy.
+
+When `ENCRYPTION_KEY` is unset the code falls back to a documented development
+key. Production cannot reach that path — the Joi schema in `app.module.ts` makes
+`ENCRYPTION_KEY` required when `NODE_ENV=production`.
+
+## Auth event logs
+
+Sign-up and profile-phone changes emit structured, single-object log lines via
+`logAuthEvent` (`src/common/logger/auth-events.ts`), formatted as JSON by
+`JsonLogger`. Contact details are masked before they are written (`a***e@gmail.com`,
+`***5678`) and secrets are dropped, so the log stream never carries PII in the
+clear — logs travel further than the database, and an unmasked email in Render's
+log viewer has left the encrypted-at-rest boundary.
+
+Useful queries:
+
+| Filter | Question it answers |
+|---|---|
+| `event=signup.rejected reason=PHONE_ALREADY_REGISTERED` | How many parents are hitting the duplicate-phone wall? A spike is either a broken re-signup loop or one person reusing a number. |
+| `event=signup.rejected reason=NAME_REQUIRED` | A client-side validation bypass — the web form should never let this reach the server. |
+| `event=signup.rejected` vs `event=signup.succeeded` | Sign-up funnel drop-off. |
+| `event=profile.phone_rejected` | Parents trying to move to an already-claimed number. |
+
+`outcome` distinguishes `rejected` (we said no for a chosen reason; logged at
+`warn`) from `failed` (something broke; logged at `error`). A rejection is the
+system working as designed, so it is deliberately not an error.

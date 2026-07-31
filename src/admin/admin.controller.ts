@@ -1,5 +1,10 @@
 import { Controller, Get, Post, Param, Body, Query } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../generated/prisma/client';
@@ -156,6 +161,47 @@ export class AdminController {
     return this.adminService.getStudentsSummary();
   }
 
+  /**
+   * Collections breakdown per school — backs the outstanding / overdue /
+   * students tabs of the admin breakdown screen from one payload.
+   */
+  @Get('breakdown')
+  @ApiOperation({
+    summary:
+      'Per-school collections breakdown (outstanding, overdue, student counts)',
+  })
+  getBreakdownSummary() {
+    return this.adminService.getBreakdownSummary();
+  }
+
+  /** Per-student breakdown for one school, for a single tab (paginated). */
+  @Get('schools/:schoolId/breakdown')
+  @ApiOperation({
+    summary: 'Per-student collections breakdown for one school (paginated)',
+  })
+  @ApiQuery({
+    name: 'tab',
+    required: false,
+    enum: ['students', 'outstanding', 'overdue'],
+    description:
+      'Which view to return. Applied server-side because overdue ranks on a derived figure.',
+  })
+  getSchoolBreakdown(
+    @Param('schoolId') schoolId: string,
+    @Query('tab') tab?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const resolved =
+      tab === 'outstanding' || tab === 'overdue' ? tab : 'students';
+    return this.adminService.getSchoolBreakdown(
+      schoolId,
+      resolved,
+      page,
+      limit,
+    );
+  }
+
   /** Optional: per-school summary */
   @Get('schools/summary')
   @ApiOperation({ summary: 'Get per-school summary' })
@@ -168,7 +214,15 @@ export class AdminController {
   @ApiOperation({
     summary: 'Get admin overview (single-call dashboard payload)',
   })
-  getOverview() {
-    return this.adminService.getOverview();
+  @ApiQuery({
+    name: 'range',
+    required: false,
+    enum: ['monthly', 'weekly'],
+    description: 'Bucket size for revenueSeries. Defaults to monthly.',
+  })
+  getOverview(@Query('range') range?: string) {
+    return this.adminService.getOverview(
+      range === 'weekly' ? 'weekly' : 'monthly',
+    );
   }
 }

@@ -22,6 +22,14 @@ export class PrismaService
 {
   private static readonly bootLogger = new Logger(PrismaService.name);
 
+  /**
+   * The pg pool backing the driver adapter. With driver adapters the pool is
+   * CALLER-owned: `$disconnect()` tears down Prisma's side but leaves these
+   * sockets open until pg's `idleTimeoutMillis` (default 10s) expires. Held so
+   * `onModuleDestroy` can end it deterministically.
+   */
+  private readonly pool: Pool;
+
   constructor(config: ConfigService) {
     const connectionString = config.get<string>('DATABASE_URL');
     const nodeEnv = config.get<string>('NODE_ENV') ?? 'development';
@@ -36,6 +44,7 @@ export class PrismaService
     });
     const adapter = new PrismaPg(pool);
     super({ adapter });
+    this.pool = pool;
 
     // PII encryption at rest. A Prisma `$extends` client is a NEW object (it does
     // not mutate `this`), so to make the extension apply to the injected service —
@@ -74,6 +83,10 @@ export class PrismaService
       'withLeaderLock',
       'onModuleInit',
       'onModuleDestroy',
+      // Listed explicitly rather than left to the undefined-fallback branch
+      // below: if a future Prisma client ever exposes its own `pool`, that would
+      // silently shadow ours and onModuleDestroy would end the wrong thing.
+      'pool',
     ]);
 
     const extendedIndex = extended as unknown as Record<
@@ -162,6 +175,9 @@ export class PrismaService
 
   async onModuleDestroy() {
     await this.$disconnect();
+    // Prisma does not own the adapter's pool, so without this the process keeps
+    // idle sockets (and the event loop) alive until pg's idle timeout fires.
+    await this.pool.end();
   }
 
   /**

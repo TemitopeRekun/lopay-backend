@@ -20,6 +20,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { SchoolOnboardingService } from '../school-onboarding/school-onboarding.service';
 import { Money } from '../common/money';
 import { PLATFORM_FEE_RATE } from '../common/fees';
+import { computeArrears } from '../common/arrears';
 import { errorMessage } from '../common/errors';
 import { paymentCommonFields } from '../common/payment-dto';
 import { PaystackService } from '../paystack/paystack.service';
@@ -494,6 +495,295 @@ export class AdminService {
     };
   }
 
+  /**
+   * Enrollments with their confirmed-installment counts, for arrears derivation.
+   *
+   * Two queries rather than a filtered relation count: the count is fetched as a
+   * single groupBy and joined in memory, so this stays one round trip per shape
+   * instead of one per enrollment.
+   *
+   * `openOnly` restricts to plans that still owe money — used for the
+   * platform-wide money aggregate, which must not materialise settled history.
+   * The per-school view passes false so the Students tab can list every student,
+   * settled ones included.
+   */
+  private async enrollmentsWithPaidCounts(schoolId?: string, openOnly = true) {
+    const where: Prisma.ChildEnrollmentWhereInput = {
+      ...(openOnly
+        ? {
+            remainingBalance: { gt: 0 },
+            paymentStatus: {
+              in: [
+                PaymentStatus.PENDING,
+                PaymentStatus.ACTIVE,
+                PaymentStatus.DEFAULTED,
+              ],
+            },
+          }
+        : {}),
+      ...(schoolId ? { schoolId } : {}),
+    };
+
+    const enrollments = await this.prisma.childEnrollment.findMany({
+      where,
+      select: {
+        id: true,
+        childId: true,
+        schoolId: true,
+        className: true,
+        totalSchoolFee: true,
+        remainingBalance: true,
+        paymentStatus: true,
+        installmentFrequency: true,
+        termStartDate: true,
+        termEndDate: true,
+        child: {
+          select: {
+            fullName: true,
+            parent: { select: { user: { select: { fullName: true } } } },
+          },
+        },
+        school: { select: { id: true, name: true } },
+      },
+    });
+
+    if (enrollments.length === 0) return [];
+
+    const paidCounts = await this.prisma.payment.groupBy({
+      by: ['enrollmentId'],
+      where: {
+        enrollmentId: { in: enrollments.map((e) => e.id) },
+        paymentType: PaymentType.INSTALLMENT,
+        isConfirmed: true,
+      },
+      _count: { _all: true },
+    });
+
+    const paidMap = new Map(
+      paidCounts.map((p) => [p.enrollmentId, p._count._all]),
+    );
+
+    return enrollments.map((e) => ({
+      enrollment: e,
+      paidInstallments: paidMap.get(e.id) ?? 0,
+    }));
+  }
+
+  /**
+   * Platform-wide collections breakdown, split per school (cached, short TTL).
+   *
+   * Backs all three tabs of the admin breakdown screen from one payload, because
+   * they are three readings of the same rows and the dashboard's old single
+   * "Plan Arrears" figure conflated the first two:
+   *   - `outstanding` — everything still uncollected, on schedule or not.
+   *   - `overdue`     — only what is past due against each plan's schedule.
+   *   - `totalStudents` — every enrollment, settled ones included.
+   * See `common/arrears.ts` for the overdue derivation.
+   */
+  async getBreakdownSummary() {
+    return this.cache.getOrSet(
+      CacheKeys.adminBreakdownSummary(),
+      AdminService.AGGREGATE_TTL_SECONDS,
+      () => this.computeBreakdownSummary(),
+    );
+  }
+
+  private async computeBreakdownSummary() {
+    // Enrollment totals come from a groupBy (indexed, cheap) so the expensive
+    // materialisation below is limited to plans that still owe money.
+    const [rows, enrollmentCounts] = await Promise.all([
+      this.enrollmentsWithPaidCounts(),
+      this.prisma.childEnrollment.groupBy({
+        by: ['schoolId'],
+        _count: { _all: true },
+      }),
+    ]);
+
+    const now = new Date();
+    const totalsMap = new Map(
+      enrollmentCounts.map((e) => [e.schoolId, e._count._all]),
+    );
+
+    interface Bucket {
+      schoolId: string;
+      schoolName: string;
+      outstandingKobo: number;
+      overdueKobo: number;
+      studentsWithBalance: number;
+      overdueStudentCount: number;
+    }
+    const bySchool = new Map<string, Bucket>();
+
+    let outstandingKobo = 0;
+    let overdueKobo = 0;
+    let overdueStudents = 0;
+
+    for (const { enrollment, paidInstallments } of rows) {
+      const arrears = computeArrears(
+        {
+          remainingBalance: enrollment.remainingBalance,
+          installmentFrequency: enrollment.installmentFrequency,
+          termStartDate: enrollment.termStartDate,
+          termEndDate: enrollment.termEndDate,
+          paidInstallments,
+        },
+        now,
+      );
+
+      outstandingKobo += enrollment.remainingBalance;
+      overdueKobo += arrears.overdueAmount;
+      if (arrears.overdueAmount > 0) overdueStudents += 1;
+
+      const key = enrollment.schoolId;
+      const bucket: Bucket = bySchool.get(key) ?? {
+        schoolId: key,
+        schoolName: enrollment.school?.name ?? 'Unknown School',
+        outstandingKobo: 0,
+        overdueKobo: 0,
+        studentsWithBalance: 0,
+        overdueStudentCount: 0,
+      };
+      bucket.outstandingKobo += enrollment.remainingBalance;
+      bucket.overdueKobo += arrears.overdueAmount;
+      bucket.studentsWithBalance += 1;
+      if (arrears.overdueAmount > 0) bucket.overdueStudentCount += 1;
+      bySchool.set(key, bucket);
+    }
+
+    // Schools with enrollments but nothing owed still belong on the Students tab,
+    // so seed them from the enrollment counts rather than only from open plans.
+    const missingIds = enrollmentCounts
+      .map((e) => e.schoolId)
+      .filter((id) => !bySchool.has(id));
+    if (missingIds.length > 0) {
+      const extra = await this.prisma.school.findMany({
+        where: { id: { in: missingIds } },
+        select: { id: true, name: true },
+      });
+      for (const s of extra) {
+        bySchool.set(s.id, {
+          schoolId: s.id,
+          schoolName: s.name,
+          outstandingKobo: 0,
+          overdueKobo: 0,
+          studentsWithBalance: 0,
+          overdueStudentCount: 0,
+        });
+      }
+    }
+
+    const schools = Array.from(bySchool.values()).map((s) => ({
+      schoolId: s.schoolId,
+      schoolName: s.schoolName,
+      totalStudents: totalsMap.get(s.schoolId) ?? 0,
+      studentsWithBalance: s.studentsWithBalance,
+      outstanding: Money.fromKobo(s.outstandingKobo).toNaira(),
+      overdue: Money.fromKobo(s.overdueKobo).toNaira(),
+      overdueStudentCount: s.overdueStudentCount,
+    }));
+
+    return {
+      totalOutstanding: Money.fromKobo(outstandingKobo).toNaira(),
+      totalOverdue: Money.fromKobo(overdueKobo).toNaira(),
+      totalStudents: enrollmentCounts.reduce(
+        (sum, e) => sum + e._count._all,
+        0,
+      ),
+      studentsWithBalance: rows.length,
+      overdueStudents,
+      overdueSchools: schools.filter((s) => s.overdue > 0).length,
+      schools,
+    };
+  }
+
+  /**
+   * Per-student breakdown for one school (paginated), for a single tab.
+   *
+   * The tab is applied server-side rather than filtered in the client: `overdue`
+   * and `outstanding` rank on derived figures that no column holds, so filtering
+   * after pagination would page over the wrong set. Sorting and slicing are
+   * bounded by one school's enrollments.
+   */
+  async getSchoolBreakdown(
+    schoolId: string,
+    tab: 'students' | 'outstanding' | 'overdue' = 'students',
+    page?: string | number,
+    limit?: string | number,
+  ) {
+    const { page: p, limit: l, skip } = parsePagination(page, limit);
+
+    const school = await this.prisma.school.findUnique({
+      where: { id: schoolId },
+      select: { name: true },
+    });
+    if (!school) throw new NotFoundException('School not found');
+
+    // The Students tab lists everyone; the money tabs only need open plans.
+    const rows = await this.enrollmentsWithPaidCounts(
+      schoolId,
+      tab !== 'students',
+    );
+    const now = new Date();
+
+    const computed = rows.map(({ enrollment, paidInstallments }) => {
+      const arrears = computeArrears(
+        {
+          remainingBalance: enrollment.remainingBalance,
+          installmentFrequency: enrollment.installmentFrequency,
+          termStartDate: enrollment.termStartDate,
+          termEndDate: enrollment.termEndDate,
+          paidInstallments,
+        },
+        now,
+      );
+
+      return {
+        childId: enrollment.childId,
+        studentName: enrollment.child?.fullName ?? 'Unknown Student',
+        className: enrollment.className,
+        parentName: enrollment.child?.parent?.user?.fullName ?? 'Unknown',
+        paymentStatus: enrollment.paymentStatus,
+        totalFee: Money.fromKobo(enrollment.totalSchoolFee).toNaira(),
+        outstanding: Money.fromKobo(enrollment.remainingBalance).toNaira(),
+        overdue: Money.fromKobo(arrears.overdueAmount).toNaira(),
+        paidInstallments,
+        missedInstallments: arrears.missedInstallments,
+        daysOverdue: arrears.daysOverdue,
+        termExpired: arrears.termExpired,
+        nextDueDate: arrears.nextDueDate
+          ? arrears.nextDueDate.toISOString().split('T')[0]
+          : null,
+        installmentFrequency: enrollment.installmentFrequency,
+      };
+    });
+
+    // Worst-first on the tab's own metric — an admin opens this to find who to
+    // chase, so the ordering has to match the column being read.
+    const filtered =
+      tab === 'overdue' ? computed.filter((r) => r.overdue > 0) : computed;
+
+    filtered.sort((a, b) => {
+      if (tab === 'overdue') {
+        return (
+          b.overdue - a.overdue ||
+          b.daysOverdue - a.daysOverdue ||
+          b.outstanding - a.outstanding
+        );
+      }
+      if (tab === 'outstanding') {
+        return b.outstanding - a.outstanding || b.overdue - a.overdue;
+      }
+      return a.studentName.localeCompare(b.studentName);
+    });
+
+    return {
+      ...paginate(filtered.slice(skip, skip + l), filtered.length, p, l),
+      schoolId,
+      schoolName: school.name,
+      tab,
+    };
+  }
+
   /** Per-school summary (cached, short TTL). */
   async getSchoolsSummary() {
     return this.cache.getOrSet(
@@ -545,17 +835,70 @@ export class AdminService {
     }));
   }
 
-  /** One-call admin overview */
-  async getOverview() {
-    const [revenue, studentsSummary, recentTransactions] = await Promise.all([
-      this.getPlatformRevenue(),
-      this.getStudentsSummary(),
-      this.recentTransactions(10),
-    ]);
+  /** Buckets the dashboard revenue chart supports. */
+  private static readonly SERIES_MONTHS = 6;
+  private static readonly SERIES_WEEKS = 8;
 
+  /**
+   * Confirmed platform fees bucketed by month or ISO-ish week.
+   *
+   * The client used to bucket this itself from whatever transaction page it held,
+   * and had no weekly data at all — its "Weekly" toggle silently re-rendered the
+   * monthly series. Both ranges are now derived here from the ledger.
+   */
+  private async revenueSeries(range: 'monthly' | 'weekly') {
     const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-    const paymentsForSeries = await this.prisma.payment.findMany({
+    const buckets: { key: string; label: string; value: number }[] = [];
+
+    // Bucket boundaries are computed once, in local server time, so the
+    // grouping key derived per payment below lands in exactly one bucket.
+    const keyFor =
+      range === 'monthly'
+        ? (d: Date) =>
+            `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+        : (d: Date) => {
+            const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+            // Snap to the Monday that starts this week.
+            const offset = (day.getDay() + 6) % 7;
+            day.setDate(day.getDate() - offset);
+            return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+          };
+
+    let start: Date;
+    if (range === 'monthly') {
+      start = new Date(
+        now.getFullYear(),
+        now.getMonth() - (AdminService.SERIES_MONTHS - 1),
+        1,
+      );
+      for (let i = AdminService.SERIES_MONTHS - 1; i >= 0; i -= 1) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        buckets.push({
+          key: keyFor(d),
+          label: d.toLocaleString('en-US', { month: 'short' }),
+          value: 0,
+        });
+      }
+    } else {
+      const thisMonday = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() - ((now.getDay() + 6) % 7),
+      );
+      start = new Date(thisMonday);
+      start.setDate(start.getDate() - 7 * (AdminService.SERIES_WEEKS - 1));
+      for (let i = AdminService.SERIES_WEEKS - 1; i >= 0; i -= 1) {
+        const d = new Date(thisMonday);
+        d.setDate(d.getDate() - 7 * i);
+        buckets.push({
+          key: keyFor(d),
+          label: `${d.getDate()} ${d.toLocaleString('en-US', { month: 'short' })}`,
+          value: 0,
+        });
+      }
+    }
+
+    const payments = await this.prisma.payment.findMany({
       where: {
         receiver: PaymentReceiver.PLATFORM,
         isConfirmed: true,
@@ -565,23 +908,26 @@ export class AdminService {
       orderBy: { paymentDate: 'asc' },
     });
 
-    const months: { key: string; label: string; value: number }[] = [];
-    for (let i = 5; i >= 0; i -= 1) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const label = d.toLocaleString('en-US', { month: 'short' });
-      months.push({ key, label, value: 0 });
-    }
-
-    const monthMap = new Map(months.map((m) => [m.key, m]));
-    for (const p of paymentsForSeries) {
-      const d = new Date(p.paymentDate);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const bucket = monthMap.get(key);
+    const bucketMap = new Map(buckets.map((b) => [b.key, b]));
+    for (const p of payments) {
+      const bucket = bucketMap.get(keyFor(new Date(p.paymentDate)));
       if (bucket) {
         bucket.value += Money.fromKobo(p.platformAmount ?? 0).toNaira();
       }
     }
+
+    return buckets.map(({ label, value }) => ({ label, value }));
+  }
+
+  /** One-call admin overview */
+  async getOverview(range: 'monthly' | 'weekly' = 'monthly') {
+    const [revenue, studentsSummary, recentTransactions, revenueSeries] =
+      await Promise.all([
+        this.getPlatformRevenue(),
+        this.getStudentsSummary(),
+        this.recentTransactions(10),
+        this.revenueSeries(range),
+      ]);
 
     return {
       totalRevenue: revenue.totalRevenue,
@@ -590,7 +936,7 @@ export class AdminService {
       pendingApprovals: studentsSummary.pendingFirstPayments,
       totalOutstandingBalance: studentsSummary.totalOutstandingBalance,
       recentTransactions,
-      revenueSeries: months.map(({ label, value }) => ({ label, value })),
+      revenueSeries,
     };
   }
 }

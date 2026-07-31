@@ -31,6 +31,7 @@ import {
 } from '../src/generated/prisma/client';
 
 describe('Enrollment & installment integration (real DB)', () => {
+  let moduleRef: TestingModule;
   let prisma: PrismaService;
   let enrollment: EnrollmentService;
   let ledger: LedgerService;
@@ -55,7 +56,7 @@ describe('Enrollment & installment integration (real DB)', () => {
       verifyTransaction: jest.fn(),
     };
 
-    const moduleRef: TestingModule = await Test.createTestingModule({
+    moduleRef = await Test.createTestingModule({
       imports: [ConfigModule.forRoot({ isGlobal: true })],
       providers: [
         PrismaService,
@@ -91,7 +92,9 @@ describe('Enrollment & installment integration (real DB)', () => {
   });
 
   afterAll(async () => {
-    await prisma.$disconnect();
+    // Runs PrismaService.onModuleDestroy, which ends the caller-owned pg pool as
+    // well as disconnecting Prisma. `$disconnect()` alone skips the hook.
+    await moduleRef.close();
   });
 
   // Fresh school + owner + parent (no child/enrollment yet) for each test.

@@ -210,6 +210,36 @@
         ]
       }
     },
+    "/api/v1/school-payments/fees/bulk": {
+      "post": {
+        "operationId": "SchoolPaymentsController_setClassFees",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetClassFeesDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Publish the authenticated owner's whole fee schedule",
+        "tags": [
+          "school-payments"
+        ]
+      }
+    },
     "/api/v1/school-payments/fees/{schoolId}": {
       "get": {
         "operationId": "SchoolPaymentsController_getClassFeesForSchool",
@@ -738,6 +768,36 @@
         "summary": "Delete a school by id",
         "tags": [
           "schools"
+        ]
+      }
+    },
+    "/api/v1/notifications/broadcast": {
+      "post": {
+        "operationId": "NotificationsController_broadcast",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BroadcastNotificationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Broadcast an announcement to all parents",
+        "tags": [
+          "notifications"
         ]
       }
     },
@@ -1725,6 +1785,85 @@
         ]
       }
     },
+    "/api/v1/admin/breakdown": {
+      "get": {
+        "operationId": "AdminController_getBreakdownSummary",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Per-school collections breakdown (outstanding, overdue, student counts)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/schools/{schoolId}/breakdown": {
+      "get": {
+        "operationId": "AdminController_getSchoolBreakdown",
+        "parameters": [
+          {
+            "name": "schoolId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tab",
+            "required": false,
+            "in": "query",
+            "description": "Which view to return. Applied server-side because overdue ranks on a derived figure.",
+            "schema": {
+              "enum": [
+                "students",
+                "outstanding",
+                "overdue"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Per-student collections breakdown for one school (paginated)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/schools/summary": {
       "get": {
         "operationId": "AdminController_getSchoolsSummary",
@@ -1748,7 +1887,21 @@
     "/api/v1/admin/overview": {
       "get": {
         "operationId": "AdminController_getOverview",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "range",
+            "required": false,
+            "in": "query",
+            "description": "Bucket size for revenueSeries. Defaults to monthly.",
+            "schema": {
+              "enum": [
+                "monthly",
+                "weekly"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": ""
@@ -1810,6 +1963,10 @@
         "type": "object",
         "properties": {}
       },
+      "SetClassFeesDto": {
+        "type": "object",
+        "properties": {}
+      },
       "UpdateSchoolDto": {
         "type": "object",
         "properties": {}
@@ -1840,6 +1997,10 @@
         ]
       },
       "CreateSchoolDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "BroadcastNotificationDto": {
         "type": "object",
         "properties": {}
       },

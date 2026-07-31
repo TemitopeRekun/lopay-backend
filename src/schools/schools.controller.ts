@@ -19,6 +19,7 @@ import { CurrentUser, AuthUser } from '../common/decorators/user.decorator';
 import { SkipThrottle } from '@nestjs/throttler';
 
 import { CreateClassFeeDto } from './dto/create-class-fee.dto';
+import { SetClassFeesDto } from './dto/set-class-fees.dto';
 import { UpdateSchoolDto } from './dto/update.school.dto';
 
 @ApiTags('school-payments')
@@ -43,6 +44,27 @@ export class SchoolPaymentsController {
       dto.className,
       dto.feeAmount,
     );
+  }
+
+  /**
+   * Publish a whole fee schedule at once (first-run setup, or a bulk revision).
+   *
+   * Scoped to the caller's own school from the session — a school owns its own
+   * fees, and no payload field can redirect the write at another school.
+   */
+  @Post('fees/bulk')
+  @Roles(UserRole.SCHOOL_OWNER)
+  @ApiOperation({
+    summary: "Publish the authenticated owner's whole fee schedule",
+  })
+  async setClassFees(
+    @Body() dto: SetClassFeesDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    if (!user.schoolId) {
+      throw new ForbiddenException('User is not associated with any school');
+    }
+    return this.schoolPaymentsService.setClassFees(user.schoolId, dto.fees);
   }
 
   /** ✅ Get all Class Fees */

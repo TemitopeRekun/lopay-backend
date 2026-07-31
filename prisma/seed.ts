@@ -16,7 +16,9 @@ dotenv.config();
  */
 function buildPoolConfig(): PoolConfig {
   const url = process.env.DATABASE_URL ?? '';
-  const stripped = url.replace(/([?&])sslmode=[^&]*&?/, '$1').replace(/[?&]$/, '');
+  const stripped = url
+    .replace(/([?&])sslmode=[^&]*&?/, '$1')
+    .replace(/[?&]$/, '');
   const sslMode = (process.env.DATABASE_SSL ?? '').toLowerCase();
   const urlSslMode = /[?&]sslmode=([^&]+)/.exec(url)?.[1]?.toLowerCase() ?? '';
 
@@ -33,7 +35,10 @@ function buildPoolConfig(): PoolConfig {
   const ca = process.env.DATABASE_CA_CERT;
   return {
     connectionString: stripped,
-    ssl: ca && ca.trim() ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: false },
+    ssl:
+      ca && ca.trim()
+        ? { ca, rejectUnauthorized: true }
+        : { rejectUnauthorized: false },
   };
 }
 
@@ -56,7 +61,9 @@ async function main() {
   console.log(`🌱 Seeding Super Admin...`);
   console.log(`   Email: ${adminEmail}`);
 
-  const existing = await prisma.user.findUnique({ where: { email: adminEmail } });
+  const existing = await prisma.user.findUnique({
+    where: { email: adminEmail },
+  });
   if (existing) {
     await prisma.user.update({
       where: { id: existing.id },
@@ -87,13 +94,19 @@ async function main() {
       console.log('   🔑 Password reconciled from ADMIN_PASSWORD.');
     }
 
-    console.log(`   ✅ Super Admin already exists (ID: ${existing.id}); role ensured.`);
+    console.log(
+      `   ✅ Super Admin already exists (ID: ${existing.id}); role ensured.`,
+    );
     return;
   }
 
   // Create via Better Auth so a credential account (password hash) is created.
   const res = await auth.api.signUpEmail({
-    body: { email: adminEmail, password: adminPassword, name: 'Super Admin' } as any,
+    body: {
+      email: adminEmail,
+      password: adminPassword,
+      name: 'Super Admin',
+    },
   });
   // role is not a sign-up input (security); elevate to SUPER_ADMIN server-side.
   await prisma.user.update({

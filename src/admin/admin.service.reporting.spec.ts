@@ -535,6 +535,267 @@ describe('AdminService (reporting)', () => {
     });
   });
 
+  describe('collections breakdown', () => {
+    // Term start 12 weeks back with nothing paid → every weekly installment is
+    // missed, so overdue equals the whole balance. A second enrollment starting
+    // today is on schedule: outstanding, but NOT overdue. The distinction is the
+    // entire point of splitting the old "Plan Arrears" figure in two.
+    const now = new Date();
+    const weeksAgo = (n: number) => {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 7 * n);
+      return d;
+    };
+    const weeksAhead = (n: number) => {
+      const d = new Date(now);
+      d.setDate(d.getDate() + 7 * n);
+      return d;
+    };
+
+    const behind = {
+      id: 'e1',
+      childId: 'c1',
+      schoolId: 's1',
+      className: 'JSS1',
+      totalSchoolFee: 1_000_000,
+      remainingBalance: 600_000,
+      paymentStatus: PaymentStatus.ACTIVE,
+      installmentFrequency: 'WEEKLY',
+      termStartDate: weeksAgo(12),
+      termEndDate: weeksAhead(1),
+      child: {
+        fullName: 'Behind Kid',
+        parent: { user: { fullName: 'Parent A' } },
+      },
+      school: { id: 's1', name: 'Acme' },
+    };
+
+    const onTrack = {
+      id: 'e2',
+      childId: 'c2',
+      schoolId: 's2',
+      className: 'JSS2',
+      totalSchoolFee: 800_000,
+      remainingBalance: 400_000,
+      paymentStatus: PaymentStatus.ACTIVE,
+      installmentFrequency: 'WEEKLY',
+      termStartDate: now,
+      termEndDate: weeksAhead(12),
+      child: {
+        fullName: 'Ontrack Kid',
+        parent: { user: { fullName: 'Parent B' } },
+      },
+      school: { id: 's2', name: 'Bright Stars' },
+    };
+
+    describe('getBreakdownSummary', () => {
+      it('separates overdue from merely outstanding', async () => {
+        prisma.childEnrollment.findMany.mockResolvedValue([behind, onTrack]);
+        prisma.payment.groupBy.mockResolvedValue([]);
+        prisma.childEnrollment.groupBy.mockResolvedValue([
+          { schoolId: 's1', _count: { _all: 1 } },
+          { schoolId: 's2', _count: { _all: 3 } },
+        ]);
+
+        const res = await service.getBreakdownSummary();
+
+        // Both balances are uncollected...
+        expect(res.totalOutstanding).toBe(10_000);
+        // ...but only the plan past its schedule is overdue.
+        expect(res.totalOverdue).toBe(6_000);
+        expect(res.overdueStudents).toBe(1);
+        expect(res.overdueSchools).toBe(1);
+        // Student totals include settled enrollments, hence 4 not 2.
+        expect(res.totalStudents).toBe(4);
+        expect(res.studentsWithBalance).toBe(2);
+      });
+
+      it('attributes figures to the right school', async () => {
+        prisma.childEnrollment.findMany.mockResolvedValue([behind, onTrack]);
+        prisma.payment.groupBy.mockResolvedValue([]);
+        prisma.childEnrollment.groupBy.mockResolvedValue([
+          { schoolId: 's1', _count: { _all: 1 } },
+          { schoolId: 's2', _count: { _all: 3 } },
+        ]);
+
+        const res = await service.getBreakdownSummary();
+        const acme = res.schools.find((s) => s.schoolId === 's1');
+        const bright = res.schools.find((s) => s.schoolId === 's2');
+
+        expect(acme).toEqual(
+          expect.objectContaining({
+            schoolName: 'Acme',
+            outstanding: 6_000,
+            overdue: 6_000,
+            totalStudents: 1,
+            overdueStudentCount: 1,
+          }),
+        );
+        expect(bright).toEqual(
+          expect.objectContaining({
+            schoolName: 'Bright Stars',
+            outstanding: 4_000,
+            overdue: 0,
+            totalStudents: 3,
+            overdueStudentCount: 0,
+          }),
+        );
+      });
+
+      it('discounts confirmed installments when judging who is behind', async () => {
+        prisma.childEnrollment.findMany.mockResolvedValue([behind]);
+        // All 12 installments confirmed → nothing missed on schedule. The term
+        // has not expired yet, so no overdue despite the balance.
+        prisma.payment.groupBy.mockResolvedValue([
+          { enrollmentId: 'e1', _count: { _all: 12 } },
+        ]);
+        prisma.childEnrollment.groupBy.mockResolvedValue([
+          { schoolId: 's1', _count: { _all: 1 } },
+        ]);
+
+        const res = await service.getBreakdownSummary();
+
+        expect(res.totalOutstanding).toBe(6_000);
+        expect(res.totalOverdue).toBe(0);
+        expect(res.overdueStudents).toBe(0);
+      });
+
+      it('still lists a school whose plans are all settled', async () => {
+        prisma.childEnrollment.findMany.mockResolvedValue([]);
+        prisma.payment.groupBy.mockResolvedValue([]);
+        prisma.childEnrollment.groupBy.mockResolvedValue([
+          { schoolId: 's3', _count: { _all: 5 } },
+        ]);
+        prisma.school.findMany.mockResolvedValue([
+          { id: 's3', name: 'Settled School' },
+        ]);
+
+        const res = await service.getBreakdownSummary();
+
+        expect(res.schools).toEqual([
+          expect.objectContaining({
+            schoolId: 's3',
+            schoolName: 'Settled School',
+            totalStudents: 5,
+            outstanding: 0,
+            overdue: 0,
+          }),
+        ]);
+      });
+
+      it('reports zeroes on an empty platform', async () => {
+        prisma.childEnrollment.findMany.mockResolvedValue([]);
+        prisma.payment.groupBy.mockResolvedValue([]);
+        prisma.childEnrollment.groupBy.mockResolvedValue([]);
+
+        const res = await service.getBreakdownSummary();
+
+        expect(res.totalOutstanding).toBe(0);
+        expect(res.totalOverdue).toBe(0);
+        expect(res.totalStudents).toBe(0);
+        expect(res.schools).toEqual([]);
+      });
+    });
+
+    describe('getSchoolBreakdown', () => {
+      beforeEach(() => {
+        prisma.school.findUnique.mockResolvedValue({ name: 'Acme' });
+        prisma.payment.groupBy.mockResolvedValue([]);
+      });
+
+      it('404s for an unknown school', async () => {
+        prisma.school.findUnique.mockResolvedValue(null);
+        await expect(
+          service.getSchoolBreakdown('nope', 'students'),
+        ).rejects.toBeInstanceOf(NotFoundException);
+      });
+
+      it('returns per-student rows with both figures', async () => {
+        prisma.childEnrollment.findMany.mockResolvedValue([behind]);
+
+        const res = await service.getSchoolBreakdown('s1', 'students');
+
+        expect(res.schoolName).toBe('Acme');
+        expect(res.tab).toBe('students');
+        expect(res.items).toHaveLength(1);
+        expect(res.items[0]).toEqual(
+          expect.objectContaining({
+            childId: 'c1',
+            studentName: 'Behind Kid',
+            className: 'JSS1',
+            parentName: 'Parent A',
+            totalFee: 10_000,
+            outstanding: 6_000,
+            overdue: 6_000,
+          }),
+        );
+        expect(res.items[0].daysOverdue).toBeGreaterThan(0);
+      });
+
+      it('lists every student on the students tab, settled included', async () => {
+        prisma.childEnrollment.findMany.mockResolvedValue([behind]);
+
+        await service.getSchoolBreakdown('s1', 'students');
+
+        // No balance/status filter — the Students tab is a roster, not a debt list.
+        const where = prisma.childEnrollment.findMany.mock.calls[0][0].where;
+        expect(where).toEqual({ schoolId: 's1' });
+      });
+
+      it('restricts the money tabs to plans that still owe', async () => {
+        prisma.childEnrollment.findMany.mockResolvedValue([behind]);
+
+        await service.getSchoolBreakdown('s1', 'outstanding');
+
+        const where = prisma.childEnrollment.findMany.mock.calls[0][0].where;
+        expect(where.remainingBalance).toEqual({ gt: 0 });
+        expect(where.schoolId).toBe('s1');
+      });
+
+      it('drops non-overdue students from the overdue tab', async () => {
+        prisma.childEnrollment.findMany.mockResolvedValue([
+          { ...onTrack, schoolId: 's1' },
+          behind,
+        ]);
+
+        const res = await service.getSchoolBreakdown('s1', 'overdue');
+
+        expect(res.total).toBe(1);
+        expect(res.items).toHaveLength(1);
+        expect(res.items[0].studentName).toBe('Behind Kid');
+      });
+
+      it('keeps non-overdue students on the outstanding tab', async () => {
+        prisma.childEnrollment.findMany.mockResolvedValue([
+          { ...onTrack, schoolId: 's1' },
+          behind,
+        ]);
+
+        const res = await service.getSchoolBreakdown('s1', 'outstanding');
+
+        expect(res.total).toBe(2);
+        // Ranked worst-first by amount owed: 6,000 before 4,000.
+        expect(res.items[0].studentName).toBe('Behind Kid');
+        expect(res.items[1].studentName).toBe('Ontrack Kid');
+      });
+
+      it('paginates the derived ranking', async () => {
+        prisma.childEnrollment.findMany.mockResolvedValue([
+          { ...onTrack, schoolId: 's1' },
+          behind,
+        ]);
+
+        const res = await service.getSchoolBreakdown('s1', 'outstanding', 2, 1);
+
+        expect(res.page).toBe(2);
+        expect(res.total).toBe(2);
+        expect(res.totalPages).toBe(2);
+        expect(res.items).toHaveLength(1);
+        expect(res.items[0].studentName).toBe('Ontrack Kid');
+      });
+    });
+  });
+
   describe('getSchoolsSummary', () => {
     it('joins per-school enrollment counts and pending/collected amounts', async () => {
       prisma.school.findMany.mockResolvedValue([
@@ -629,6 +890,70 @@ describe('AdminService (reporting)', () => {
       expect(res.revenueSeries).toHaveLength(6);
       // Current month bucket picked up the 1000-Naira series row.
       expect(res.revenueSeries[5].value).toBe(1000);
+    });
+
+    it('buckets by week when range=weekly, so the chart toggle is not a no-op', async () => {
+      prisma.payment.aggregate.mockResolvedValue({
+        _sum: { platformAmount: 500000 },
+      });
+      prisma.childEnrollment.count
+        .mockResolvedValueOnce(20)
+        .mockResolvedValueOnce(12)
+        .mockResolvedValueOnce(1);
+      prisma.payment.count.mockResolvedValueOnce(4);
+      prisma.childEnrollment.aggregate.mockResolvedValue({
+        _sum: { remainingBalance: 300000 },
+      });
+
+      // A payment made today must land in the final (current) week bucket.
+      prisma.payment.findMany.mockImplementation(
+        (args: { select?: unknown }) =>
+          args?.select
+            ? Promise.resolve([
+                { paymentDate: new Date(), platformAmount: 100000 },
+              ])
+            : Promise.resolve([]),
+      );
+
+      const res = await service.getOverview('weekly');
+
+      expect(res.revenueSeries).toHaveLength(8);
+      expect(res.revenueSeries[7].value).toBe(1000);
+      // Week labels are day+month, distinct from the monthly series' "Jul".
+      expect(res.revenueSeries[7].label).toMatch(/^\d{1,2} [A-Z][a-z]{2}$/);
+    });
+
+    it('spreads weekly revenue across the correct buckets', async () => {
+      prisma.payment.aggregate.mockResolvedValue({
+        _sum: { platformAmount: 0 },
+      });
+      prisma.childEnrollment.count
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+      prisma.payment.count.mockResolvedValueOnce(0);
+      prisma.childEnrollment.aggregate.mockResolvedValue({
+        _sum: { remainingBalance: 0 },
+      });
+
+      const twoWeeksAgo = new Date();
+      twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+      prisma.payment.findMany.mockImplementation(
+        (args: { select?: unknown }) =>
+          args?.select
+            ? Promise.resolve([
+                { paymentDate: new Date(), platformAmount: 100000 },
+                { paymentDate: twoWeeksAgo, platformAmount: 50000 },
+              ])
+            : Promise.resolve([]),
+      );
+
+      const res = await service.getOverview('weekly');
+
+      expect(res.revenueSeries[7].value).toBe(1000);
+      expect(res.revenueSeries[5].value).toBe(500);
+      // Nothing leaked into the untouched buckets.
+      expect(res.revenueSeries[6].value).toBe(0);
     });
   });
 
