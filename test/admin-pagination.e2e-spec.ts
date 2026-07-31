@@ -33,6 +33,7 @@ import {
 } from '../src/generated/prisma/client';
 
 describe('Admin pagination & index usage (real DB)', () => {
+  let moduleRef: TestingModule;
   let prisma: PrismaService;
   let admin: AdminService;
 
@@ -44,7 +45,7 @@ describe('Admin pagination & index usage (real DB)', () => {
   const SEEDED = 5;
 
   beforeAll(async () => {
-    const moduleRef: TestingModule = await Test.createTestingModule({
+    moduleRef = await Test.createTestingModule({
       imports: [ConfigModule.forRoot({ isGlobal: true })],
       providers: [
         PrismaService,
@@ -151,7 +152,10 @@ describe('Admin pagination & index usage (real DB)', () => {
     await prisma.user.deleteMany({
       where: { id: { in: [ownerUserId, parentUserId] } },
     });
-    await prisma.$disconnect();
+    // Closing the module runs PrismaService.onModuleDestroy, which disconnects
+    // Prisma AND ends the caller-owned pg pool. Calling `$disconnect()` directly
+    // skips the hook and leaves the pool's idle sockets holding the event loop.
+    await moduleRef.close();
   });
 
   it('returns a capped page envelope (page size respected, total >= seeded)', async () => {

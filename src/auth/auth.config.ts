@@ -2,6 +2,11 @@ import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { bearer, customSession } from 'better-auth/plugins';
 import type { PrismaClient } from '../generated/prisma/client';
+import {
+  guardUserCreate,
+  guardUserUpdate,
+  type UserCreateData,
+} from './signup-guard';
 
 /**
  * Builds the Better Auth instance. Takes the app's PrismaClient so it shares the
@@ -96,22 +101,41 @@ export function createAuth(prisma: PrismaClient) {
           required: false,
           input: false,
         },
+        // Blind index over `phoneNumber` — the column that actually enforces one
+        // account per phone number (see src/common/phone.ts). input:false because
+        // it is derived server-side from the submitted number: accepting it as an
+        // input would let a caller claim a hash that doesn't match their number,
+        // or squat on someone else's.
+        phoneHash: {
+          type: 'string',
+          required: false,
+          input: false,
+        },
       },
     },
 
     databaseHooks: {
       user: {
         create: {
-          before: (user: { name?: string; fullName?: string }) => {
-            // Mirror Better Auth `name` onto the domain `fullName` column.
-            return Promise.resolve({
-              data: { ...user, fullName: user.fullName ?? user.name },
-            });
+          // Sanitize, validate, and enforce phone uniqueness for EVERY creation
+          // path (email sign-up, Google sign-in, admin owner provisioning). See
+          // signup-guard.ts for why this is the right seam and why an APIError
+          // thrown here reaches the client with its code intact.
+          before: (user: UserCreateData) => {
+            return guardUserCreate(prisma, user).then((data) => ({ data }));
           },
           // NOTE: the domain `Parent` row is created lazily on first enrollment
           // (EnrollmentService.resolveEnrollmentTarget), NOT here — every sign-up
           // defaults to role PARENT at creation, so a hook here would also create
           // spurious Parent rows for school owners/admins created via signUpEmail.
+        },
+        update: {
+          // Keep phoneHash in step with phoneNumber on Better Auth's own update
+          // route, so a number changed there can't leave a stale reservation
+          // behind. The user-facing profile path is PATCH /users/me.
+          before: (user: UserCreateData) => {
+            return Promise.resolve({ data: guardUserUpdate(user) });
+          },
         },
       },
     },

@@ -1,8 +1,17 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  hkdfSync,
+  randomBytes,
+} from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
+
+/** Fixed salt for HKDF. A salt is not a secret; a constant is fine here because
+ * the `info` label is what separates one purpose's subkey from another's. */
+const HKDF_SALT = 'lopay/hkdf/v1';
 
 let _key: Buffer | null = null;
 
@@ -26,6 +35,23 @@ function deriveKey(): Buffer {
 
 export function isEncryptionEnabled(): boolean {
   return _key !== null;
+}
+
+/**
+ * HKDF-derive a purpose-scoped subkey from the master `ENCRYPTION_KEY`, so a
+ * feature that needs a key (e.g. the phone blind index) never handles the master
+ * key itself and can't collide with another feature's key material.
+ *
+ * Returns `null` when no master key is configured (dev/test), letting the caller
+ * choose its own fallback — production requires `ENCRYPTION_KEY` (see the Joi
+ * schema in app.module.ts), so `null` cannot happen there.
+ *
+ * `label` MUST be versioned (`'…/v1'`): changing it changes every derived value,
+ * which for a blind index means a full re-backfill.
+ */
+export function deriveSubkey(label: string, length = 32): Buffer | null {
+  if (!_key) return null;
+  return Buffer.from(hkdfSync('sha256', _key, HKDF_SALT, label, length));
 }
 
 export function encrypt(plaintext: string): string {

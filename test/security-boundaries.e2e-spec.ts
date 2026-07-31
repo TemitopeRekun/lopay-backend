@@ -39,6 +39,7 @@ import {
 import type { AuthUser } from '../src/common/types/auth-user';
 
 describe('Security boundaries (real DB)', () => {
+  let moduleRef: TestingModule;
   let prisma: PrismaService;
   let enrollment: EnrollmentService;
   let schools: SchoolPaymentsService;
@@ -53,7 +54,7 @@ describe('Security boundaries (real DB)', () => {
   let reference: string;
 
   beforeAll(async () => {
-    const moduleRef: TestingModule = await Test.createTestingModule({
+    moduleRef = await Test.createTestingModule({
       imports: [ConfigModule.forRoot({ isGlobal: true })],
       providers: [
         PrismaService,
@@ -98,7 +99,9 @@ describe('Security boundaries (real DB)', () => {
   });
 
   afterAll(async () => {
-    await prisma.$disconnect();
+    // Runs PrismaService.onModuleDestroy, which ends the caller-owned pg pool as
+    // well as disconnecting Prisma. `$disconnect()` alone skips the hook.
+    await moduleRef.close();
   });
 
   beforeEach(async () => {

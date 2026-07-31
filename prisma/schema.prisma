@@ -70,7 +70,14 @@ model User {
   name          String?
   emailVerified Boolean   @default(false)
   image         String?
-  phoneNumber   String?   // captured at sign-up; mirrored onto Parent
+  phoneNumber   String?   // captured at sign-up; mirrored onto Parent. ENCRYPTED at rest (randomized AES-GCM) — not queryable, not uniquable.
+  // Blind index over `phoneNumber`: HMAC-SHA256 of the canonical +234 form, keyed
+  // by a subkey of ENCRYPTION_KEY. This — NOT phoneNumber — is what enforces one
+  // account per phone number and what "is this number taken?" queries match on,
+  // because the randomized ciphertext in phoneNumber can do neither. Nullable so
+  // rows predating the column stay valid until backfilled (Postgres allows many
+  // NULLs under a unique index). See src/common/phone.ts.
+  phoneHash     String?   @unique
 
   deletedAt DateTime?
 
