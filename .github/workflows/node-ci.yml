@@ -5,9 +5,25 @@ on:
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+
+# Least privilege: nothing here writes to the repo. The deploy job only uploads
+# an artifact, which uses the runner's own token rather than GITHUB_TOKEN.
+permissions:
+  contents: read
+
+# Supersede in-flight runs for a branch that gets new commits, but only for PRs.
+# Pushes to main/master are left to finish so every merged commit keeps a
+# conclusive result (and so a dispatched deploy is never cancelled mid-flight).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    # Generous vs. the ~2m real runtime, tight enough that a hung step (the e2e
+    # suite talks to a real DB) fails fast instead of burning the 6h default.
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -26,9 +42,10 @@ jobs:
       NODE_ENV: test
       DATABASE_URL: postgresql://lopay:lopay@localhost:5432/lopay_test?schema=public
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
+          # Matches "engines": { "node": "22.x" } in package.json.
           node-version: '22'
           cache: 'npm'
       - name: Install
@@ -41,19 +58,28 @@ jobs:
           npm run generate:swagger
           git diff --exit-code -- openapi.json
       - name: Lint
-        run: npm run lint
+        # `npm run lint` carries --fix for local use. In CI that is actively
+        # harmful: ESLint rewrites the file, exits 0, and the fix is discarded
+        # with the runner — so every auto-fixable violation (all prettier
+        # formatting) passed this gate silently. lint:ci drops --fix so those
+        # violations fail the build instead.
+        run: npm run lint:ci
       - name: Apply migrations (test DB)
         run: npm run migrate:deploy
       - name: Unit tests + coverage gate
         run: npm run test:cov
       - name: E2E tests (real DB)
+        # Serialised via maxWorkers in test/jest-e2e.js — the suites share this
+        # one Postgres service and corrupt each other's assertions in parallel.
         run: npm run test:e2e
       - name: Build
         run: npm run build
+
   deploy:
     if: ${{ github.event_name == 'workflow_dispatch' }}
     needs: build-and-test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       NODE_ENV: production
       PORT: ${{ secrets.PORT }}
@@ -64,26 +90,90 @@ jobs:
       BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL }}
       GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
       GOOGLE_WEB_CLIENT_SECRET: ${{ secrets.GOOGLE_WEB_CLIENT_SECRET }}
-      # Firebase Admin SDK (storage / FCM only — no longer used for auth)
+      # Firebase Admin SDK — FCM push notifications ONLY. Receipt storage moved to
+      # Supabase in #6/#7, which retired FIREBASE_STORAGE_BUCKET; these three are
+      # still Joi-`required()` in app.module.ts, so the app will not boot without them.
       FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
       FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
       FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
-      FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
-      # Paystack split payments
+      # Supabase Storage (receipts). All optional — when unset, receipt storage is
+      # disabled and /health reports it as such rather than failing to boot.
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_STORAGE_BUCKET: ${{ secrets.SUPABASE_STORAGE_BUCKET }}
+      # PII encryption at rest — required in production, and must be exactly 64 hex chars.
+      ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+      # Paystack split payments. Production rejects anything but an sk_live_ key.
       PAYSTACK_SECRET_KEY: ${{ secrets.PAYSTACK_SECRET_KEY }}
       ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
       ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: 'npm'
       - name: Install
         run: npm ci
       - name: Secrets sanity check
+        # Fails BEFORE `migrate deploy` touches the production database, so a
+        # half-configured dispatch can't leave the schema migrated but the app
+        # unbootable. Lists mirror the Joi schema in src/app.module.ts under
+        # NODE_ENV=production — keep them in sync when that schema changes.
         run: |
-          node -e "const req=['DATABASE_URL','BETTER_AUTH_SECRET','BETTER_AUTH_URL','FIREBASE_PROJECT_ID','FIREBASE_CLIENT_EMAIL','FIREBASE_PRIVATE_KEY','FIREBASE_STORAGE_BUCKET','PAYSTACK_SECRET_KEY','CORS_ORIGINS']; const opt=['PORT','GOOGLE_WEB_CLIENT_ID','GOOGLE_WEB_CLIENT_SECRET','ADMIN_EMAIL','ADMIN_PASSWORD']; const miss=req.filter(k=>!process.env[k]||!String(process.env[k]).trim()); if(miss.length){console.error('Missing required secrets:', miss.join(', ')); process.exit(1)} const missOpt=opt.filter(k=>!process.env[k]||!String(process.env[k]).trim()); if(missOpt.length){console.warn('Missing optional secrets:', missOpt.join(', '))}"
+          node <<'EOF'
+          const required = [
+            'DATABASE_URL',
+            'BETTER_AUTH_SECRET',
+            'BETTER_AUTH_URL',
+            'FIREBASE_PROJECT_ID',
+            'FIREBASE_CLIENT_EMAIL',
+            'FIREBASE_PRIVATE_KEY',
+            'PAYSTACK_SECRET_KEY',
+            'CORS_ORIGINS',
+            'ENCRYPTION_KEY',
+          ];
+          const optional = [
+            'PORT',
+            'GOOGLE_WEB_CLIENT_ID',
+            'GOOGLE_WEB_CLIENT_SECRET',
+            'SUPABASE_URL',
+            'SUPABASE_SERVICE_ROLE_KEY',
+            'SUPABASE_STORAGE_BUCKET',
+            'ADMIN_EMAIL',
+            'ADMIN_PASSWORD',
+          ];
+          const unset = (k) => !process.env[k] || !String(process.env[k]).trim();
+
+          const missing = required.filter(unset);
+          if (missing.length) {
+            console.error('Missing required secrets:', missing.join(', '));
+            process.exit(1);
+          }
+
+          // Shape checks the schema enforces at boot. Catching them here turns an
+          // unbootable deploy into a failed CI step with a precise reason.
+          const problems = [];
+          if (!/^sk_live_/.test(process.env.PAYSTACK_SECRET_KEY)) {
+            problems.push('PAYSTACK_SECRET_KEY must start with sk_live_ in production');
+          }
+          if (!/^[0-9a-fA-F]{64}$/.test(process.env.ENCRYPTION_KEY)) {
+            problems.push('ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)');
+          }
+          if (String(process.env.BETTER_AUTH_SECRET).length < 32) {
+            problems.push('BETTER_AUTH_SECRET must be at least 32 characters');
+          }
+          if (problems.length) {
+            console.error('Invalid secrets:\n  - ' + problems.join('\n  - '));
+            process.exit(1);
+          }
+
+          const missingOptional = optional.filter(unset);
+          if (missingOptional.length) {
+            console.warn('Missing optional secrets:', missingOptional.join(', '));
+          }
+          console.log('Secrets sanity check passed.');
+          EOF
       - name: Run Prisma migrations
         run: npm run migrate:deploy
         env:
@@ -91,7 +181,7 @@ jobs:
       - name: Build
         run: npm run build
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lopay-backend-dist
           path: |
