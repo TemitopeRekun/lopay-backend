@@ -11,9 +11,14 @@ describe('NotificationsService', () => {
   const mockPrisma = {
     notification: {
       create: jest.fn(),
+      createMany: jest.fn(),
       findMany: jest.fn(),
       findFirst: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    user: {
+      findMany: jest.fn(),
     },
     deviceToken: {
       deleteMany: jest.fn(),
@@ -62,6 +67,63 @@ describe('NotificationsService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  describe('broadcastToParents', () => {
+    it('writes one row per parent and pushes to each', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([
+        { id: 'p1' },
+        { id: 'p2' },
+        { id: 'p3' },
+      ]);
+      mockPrisma.notification.createMany.mockResolvedValue({ count: 3 });
+
+      const res = await service.broadcastToParents('Notice', 'Body', '/x');
+
+      expect(res).toEqual({ recipients: 3 });
+      expect(mockPrisma.notification.createMany).toHaveBeenCalledWith({
+        data: [
+          { userId: 'p1', title: 'Notice', message: 'Body', link: '/x' },
+          { userId: 'p2', title: 'Notice', message: 'Body', link: '/x' },
+          { userId: 'p3', title: 'Notice', message: 'Body', link: '/x' },
+        ],
+      });
+      expect(mockEvents.pushNotification).toHaveBeenCalledTimes(3);
+    });
+
+    it('targets only live parent accounts', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([{ id: 'p1' }]);
+      mockPrisma.notification.createMany.mockResolvedValue({ count: 1 });
+
+      await service.broadcastToParents('T', 'M');
+
+      expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
+        where: { role: 'PARENT', deletedAt: null },
+        select: { id: true },
+      });
+    });
+
+    it('writes nothing when there are no parents', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([]);
+
+      const res = await service.broadcastToParents('T', 'M');
+
+      expect(res).toEqual({ recipients: 0 });
+      expect(mockPrisma.notification.createMany).not.toHaveBeenCalled();
+    });
+
+    it('still reports success when a push fails after rows are persisted', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([{ id: 'p1' }, { id: 'p2' }]);
+      mockPrisma.notification.createMany.mockResolvedValue({ count: 2 });
+      // An announcement already committed must not be lost to a transport error.
+      mockDeviceTokens.getTokensForUser.mockRejectedValue(
+        new Error('fcm down'),
+      );
+
+      await expect(service.broadcastToParents('T', 'M')).resolves.toEqual({
+        recipients: 2,
+      });
+    });
   });
 
   describe('create', () => {

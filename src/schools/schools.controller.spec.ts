@@ -15,6 +15,7 @@ describe('SchoolPaymentsController', () => {
 
   const service = {
     createClassFee: jest.fn().mockResolvedValue({ id: 'fee-1' }),
+    setClassFees: jest.fn().mockResolvedValue([{ id: 'fee-1' }]),
     getClassFees: jest.fn().mockResolvedValue([{ id: 'fee-1' }]),
     getSchoolBankDetails: jest.fn().mockResolvedValue({ bankName: 'GTB' }),
     updateSchoolBankDetails: jest.fn().mockResolvedValue({ updated: true }),
@@ -70,6 +71,37 @@ describe('SchoolPaymentsController', () => {
         controller.createClassFee(dto, ownerNoSchool),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(service.createClassFee).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('setClassFees (bulk publish)', () => {
+    const dto = {
+      fees: [
+        { className: 'JSS1', feeAmount: 120000 },
+        { className: 'JSS2', feeAmount: 150000 },
+      ],
+    };
+
+    it('publishes the whole schedule against the session school', async () => {
+      await controller.setClassFees(dto, owner);
+      expect(service.setClassFees).toHaveBeenCalledWith('school-1', dto.fees);
+    });
+
+    it('takes the school from the session, never from the payload', async () => {
+      // A school owns its own fees: an injected schoolId must be ignored, so one
+      // school can never publish a fee schedule onto another.
+      await controller.setClassFees(
+        { ...dto, schoolId: 'someone-elses-school' } as never,
+        owner,
+      );
+      expect(service.setClassFees).toHaveBeenCalledWith('school-1', dto.fees);
+    });
+
+    it('throws when the owner has no school', async () => {
+      await expect(
+        controller.setClassFees(dto, ownerNoSchool),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(service.setClassFees).not.toHaveBeenCalled();
     });
   });
 

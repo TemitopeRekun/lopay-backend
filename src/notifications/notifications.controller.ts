@@ -1,7 +1,10 @@
-import { Controller, Get, Patch, Param } from '@nestjs/common';
+import { Controller, Get, Patch, Post, Param, Body } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
 import { CurrentUser, AuthUser } from '../common/decorators/user.decorator';
+import { Roles } from '../auth/roles.decorator';
+import { UserRole } from '../generated/prisma/client';
+import { BroadcastNotificationDto } from './dto/broadcast.notification.dto';
 
 // Auth enforced globally by BetterAuthGuard.
 @ApiTags('notifications')
@@ -9,6 +12,18 @@ import { CurrentUser, AuthUser } from '../common/decorators/user.decorator';
 @Controller('notifications')
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
+
+  /** Platform announcement to every parent (admin only). */
+  @Post('broadcast')
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Broadcast an announcement to all parents' })
+  async broadcast(@Body() dto: BroadcastNotificationDto) {
+    return this.notificationsService.broadcastToParents(
+      dto.title,
+      dto.message,
+      dto.link,
+    );
+  }
 
   @Get()
   @ApiOperation({ summary: "List the current user's notifications" })
