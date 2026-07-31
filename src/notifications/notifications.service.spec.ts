@@ -83,9 +83,27 @@ describe('NotificationsService', () => {
       expect(res).toEqual({ recipients: 3 });
       expect(mockPrisma.notification.createMany).toHaveBeenCalledWith({
         data: [
-          { userId: 'p1', title: 'Notice', message: 'Body', link: '/x' },
-          { userId: 'p2', title: 'Notice', message: 'Body', link: '/x' },
-          { userId: 'p3', title: 'Notice', message: 'Body', link: '/x' },
+          {
+            userId: 'p1',
+            title: 'Notice',
+            message: 'Body',
+            link: '/x',
+            type: 'ANNOUNCEMENT',
+          },
+          {
+            userId: 'p2',
+            title: 'Notice',
+            message: 'Body',
+            link: '/x',
+            type: 'ANNOUNCEMENT',
+          },
+          {
+            userId: 'p3',
+            title: 'Notice',
+            message: 'Body',
+            link: '/x',
+            type: 'ANNOUNCEMENT',
+          },
         ],
       });
       expect(mockEvents.pushNotification).toHaveBeenCalledTimes(3);
@@ -101,6 +119,20 @@ describe('NotificationsService', () => {
         where: { role: 'PARENT', deletedAt: null },
         select: { id: true },
       });
+    });
+
+    it('types every row ANNOUNCEMENT so the parent app can filter it', async () => {
+      // Nothing in a broadcast's wording distinguishes it from a payment event, so
+      // the kind has to be persisted or the Announcements tab stays empty.
+      mockPrisma.user.findMany.mockResolvedValue([{ id: 'p1' }, { id: 'p2' }]);
+      mockPrisma.notification.createMany.mockResolvedValue({ count: 2 });
+
+      await service.broadcastToParents('Term resumes', 'On Monday');
+
+      const { data } = mockPrisma.notification.createMany.mock.calls[0][0] as {
+        data: { type: string }[];
+      };
+      expect(data.every((row) => row.type === 'ANNOUNCEMENT')).toBe(true);
     });
 
     it('writes nothing when there are no parents', async () => {
@@ -143,6 +175,23 @@ describe('NotificationsService', () => {
         expect.objectContaining({ id: 'notif-1' }),
       );
       expect(result).toEqual(expect.objectContaining({ id: 'notif-1' }));
+    });
+
+    it('omits type when the caller gives none, so the column default applies', async () => {
+      await service.create(dto);
+
+      const { data } = mockPrisma.notification.create.mock.calls[0][0] as {
+        data: Record<string, unknown>;
+      };
+      expect('type' in data).toBe(false);
+    });
+
+    it('persists the caller-supplied type', async () => {
+      await service.create({ ...dto, type: 'ALERT' as never });
+
+      expect(mockPrisma.notification.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ type: 'ALERT' }),
+      });
     });
 
     it('skips FCM when the user has no device tokens', async () => {

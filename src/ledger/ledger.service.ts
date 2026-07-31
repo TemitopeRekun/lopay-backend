@@ -12,6 +12,7 @@ import {
   PaymentType,
   PaymentReceiver,
   AuditAction,
+  NotificationType,
 } from '../generated/prisma/client';
 import { EventsGateway } from '../events/events.gateway';
 import { AuditService, AuditActor } from '../audit/audit.service';
@@ -166,6 +167,7 @@ export class LedgerService {
         userId: payment.enrollment.child.parent.userId,
         title: isCompleted ? 'Payment Completed' : 'Payment Confirmed',
         message: message,
+        link: '/history',
       });
 
       return {
@@ -267,6 +269,8 @@ export class LedgerService {
         userId: payment.enrollment.child.parent.userId,
         title: 'Payment Rejected',
         message: `Your payment of ${Money.fromKobo(payment.amountPaid).formatNaira()} for ${payment.enrollment.child.fullName} at ${payment.enrollment.school.name} has been rejected. Please contact the school.`,
+        type: NotificationType.ALERT,
+        link: '/history',
       });
 
       return {
@@ -411,6 +415,8 @@ export class LedgerService {
         userId: payment.enrollment.child.parent.userId,
         title: 'Payment Reversed',
         message: `A confirmed payment of ${Money.fromKobo(payment.amountPaid).formatNaira()} for ${payment.enrollment.child.fullName} (${payment.enrollment.className}) at ${payment.enrollment.school.name} has been reversed.${reason ? ` Reason: ${reason}` : ''} Please contact the school.`,
+        type: NotificationType.ALERT,
+        link: '/history',
       });
 
       return {
@@ -508,25 +514,42 @@ export class LedgerService {
           title: 'First Payment Settled',
           message:
             'The platform has settled the first payment. Enrollment is now active.',
-          link: `/school/enrollments/${enrollment.id}`,
+          link: '/school-owner-dashboard',
         },
       });
 
       // 4️⃣ Notify Parent
-      await tx.notification.create({
+      // `/dashboard` — the plan card there carries the now-active status. There is
+      // no `/parent/enrollments/:id` route in the app; linking to one dead-ended
+      // the tap.
+      return tx.notification.create({
         data: {
           userId: enrollment.child.parent.userId,
           title: 'Enrollment Confirmed',
           message: `Your first payment of ${Money.fromKobo(payment.amountPaid).formatNaira()} has been confirmed. Enrollment is active.`,
-          link: `/parent/enrollments/${enrollment.id}`,
+          link: '/dashboard',
         },
       });
-      return true;
     });
 
     if (!settled) {
       throw new NotFoundException('Payment not found or already settled');
     }
+
+    // In-transaction notification, so push it here. This is an admin-initiated
+    // settle: nothing else in the request touches the parent's client, and their
+    // enrollment just went active.
+    this.events.pushNotification(enrollment.child.parent.userId, settled);
+    this.events.emitEnrollmentsChanged({
+      parentUserId: enrollment.child.parent.userId,
+      schoolId: payment.schoolId,
+      notifyAdmins: true,
+    });
+    this.events.emitPaymentsChanged({
+      parentUserId: enrollment.child.parent.userId,
+      schoolId: payment.schoolId,
+      notifyAdmins: true,
+    });
 
     this.metrics.recordPaymentOutcome('confirmed', {
       type: PaymentType.FIRST_PAYMENT,
@@ -613,21 +636,23 @@ export class LedgerService {
           title: 'First Payment Rejected',
           message:
             'The platform has rejected the first payment for this enrollment. Please review the receipt or contact the parent.',
-          link: `/school/enrollments/${enrollment.id}`,
+          link: '/school-owner-dashboard',
         },
       });
 
       // 4️⃣ Notify Parent
-      await tx.notification.create({
+      // `/dashboard` — the plan card there is where the retry lives. There is no
+      // `/parent/enrollments/:id` route in the app.
+      return tx.notification.create({
         data: {
           userId: enrollment.child.parent.userId,
           title: 'First Payment Rejected',
           message:
             'Your first payment could not be verified. Please pay again and upload a clearer receipt.',
-          link: `/parent/enrollments/${enrollment.id}`,
+          type: NotificationType.ALERT,
+          link: '/dashboard',
         },
       });
-      return true;
     });
 
     if (!rejectedOk) {
@@ -635,6 +660,20 @@ export class LedgerService {
         'First payment not found or already processed',
       );
     }
+
+    // In-transaction notification on an admin-initiated reject — push it so the
+    // parent learns their enrollment needs a retry without waiting for a poll.
+    this.events.pushNotification(enrollment.child.parent.userId, rejectedOk);
+    this.events.emitEnrollmentsChanged({
+      parentUserId: enrollment.child.parent.userId,
+      schoolId: payment.schoolId,
+      notifyAdmins: true,
+    });
+    this.events.emitPaymentsChanged({
+      parentUserId: enrollment.child.parent.userId,
+      schoolId: payment.schoolId,
+      notifyAdmins: true,
+    });
 
     this.metrics.recordPaymentOutcome('rejected', {
       type: PaymentType.FIRST_PAYMENT,
@@ -767,7 +806,7 @@ export class LedgerService {
         userId: enrollment.school.ownerId,
         title: 'First Payment Received',
         message: `${Money.fromKobo(payment.schoolAmount).formatNaira()} settled to your account for ${enrollment.child.fullName} (${enrollment.className}).`,
-        link: '/school/enrollments',
+        link: '/school-owner-dashboard',
       });
     }
 
@@ -826,6 +865,7 @@ export class LedgerService {
         userId: payment.enrollment.child.parent.userId,
         title: 'Payment Failed',
         message: 'Your first payment did not go through. Please try again.',
+        type: NotificationType.ALERT,
         link: '/history',
       });
     }
@@ -922,11 +962,12 @@ export class LedgerService {
         tx,
       );
 
-      await tx.notification.create({
+      const parentNotification = await tx.notification.create({
         data: {
           userId: enrollment.child.parent.userId,
           title: 'Payment Disputed / Reversed',
           message: `Your first payment of ${Money.fromKobo(payment.amountPaid).formatNaira()} for ${enrollment.child.fullName} (${enrollment.className}) at ${enrollment.school.name} has been reversed due to a "${eventType}" event. Please contact the school or re-enroll.`,
+          type: NotificationType.ALERT,
           link: '/history',
         },
       });
@@ -937,15 +978,21 @@ export class LedgerService {
             userId: enrollment.school.ownerId,
             title: 'Payment Disputed / Reversed',
             message: `A first payment of ${Money.fromKobo(payment.amountPaid).formatNaira()} for ${enrollment.child.fullName} (${enrollment.className}) has been reversed due to a "${eventType}" event. The enrollment has been marked as FAILED.`,
-            link: `/school/enrollments/${enrollment.id}`,
+            type: NotificationType.ALERT,
+            link: '/school-owner-dashboard',
           },
         });
       }
 
-      return true;
+      return parentNotification;
     });
 
     if (!flipped) return { reversed: false };
+
+    // Written in-transaction (atomic with the reversal), so the socket push has to
+    // happen here — losing someone's money needs to reach them live, not on the
+    // next poll.
+    this.events.pushNotification(enrollment.child.parent.userId, flipped);
 
     this.events.emitEnrollmentsChanged({
       parentUserId: enrollment.child.parent.userId,
@@ -1055,6 +1102,7 @@ export class LedgerService {
         userId: enrollment.child.parent.userId,
         title: 'Enrollment Confirmed',
         message: `Your enrollment for ${enrollment.child.fullName} (${enrollment.className}) at ${enrollment.school.name} has been confirmed.`,
+        link: '/dashboard',
       });
 
       return {
@@ -1132,6 +1180,8 @@ export class LedgerService {
         userId: enrollment.child.parent.userId,
         title: 'Payment Defaulted',
         message: `Your enrollment for ${enrollment.child.fullName} (${enrollment.className}) at ${enrollment.school.name} has been marked as defaulted. Please contact the school.`,
+        type: NotificationType.ALERT,
+        link: '/history',
       });
 
       return updatedEnrollment;
@@ -1188,18 +1238,24 @@ export class LedgerService {
         tx,
       );
 
-      await tx.notification.create({
+      return tx.notification.create({
         data: {
           userId: enrollment.child.parent.userId,
           title: 'Payment Defaulted',
           message: `Your enrollment for ${enrollment.child.fullName} at ${enrollment.school.name} has been marked as defaulted due to outstanding balance of ${Money.fromKobo(enrollment.remainingBalance).formatNaira()}.`,
+          type: NotificationType.ALERT,
           link: '/history',
         },
       });
-      return true;
     });
 
     if (!flipped) return false;
+
+    // Written inside the transaction (atomic with the flip) rather than through
+    // NotificationsService, so the socket push has to be made here. Without it the
+    // parent's notification list only picked this up on the 5-minute fallback poll
+    // — every other notification in the system arrives live.
+    this.events.pushNotification(enrollment.child.parent.userId, flipped);
 
     this.events.emitEnrollmentsChanged({
       parentUserId: enrollment.child.parent.userId,

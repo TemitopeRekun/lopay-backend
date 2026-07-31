@@ -76,3 +76,12 @@ export const InstallmentFrequency = {
 } as const
 
 export type InstallmentFrequency = (typeof InstallmentFrequency)[keyof typeof InstallmentFrequency]
+
+
+export const NotificationType = {
+  PAYMENT: 'PAYMENT',
+  ALERT: 'ALERT',
+  ANNOUNCEMENT: 'ANNOUNCEMENT'
+} as const
+
+export type NotificationType = (typeof NotificationType)[keyof typeof NotificationType]
