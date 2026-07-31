@@ -63,17 +63,10 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
         GOOGLE_WEB_CLIENT_ID: Joi.string().optional(),
         GOOGLE_WEB_CLIENT_SECRET: Joi.string().optional(),
         GOOGLE_ANDROID_CLIENT_ID: Joi.string().optional(),
-        // Firebase Admin SDK
+        // Firebase Admin SDK — FCM push notifications only (receipts use Supabase).
         FIREBASE_PROJECT_ID: Joi.string().required(),
         FIREBASE_CLIENT_EMAIL: Joi.string().email().required(),
         FIREBASE_PRIVATE_KEY: Joi.string().required(),
-        FIREBASE_STORAGE_BUCKET: Joi.string().required(),
-        FIREBASE_SIGNED_URL_TTL_SECONDS: Joi.number()
-          .integer()
-          .min(60)
-          .max(86400)
-          .optional(),
-        FIREBASE_MAX_UPLOAD_BYTES: Joi.number().integer().min(1024).optional(),
         // Supabase Storage for receipt upload/download signed URLs. Optional —
         // when URL/key are unset, receipt storage is disabled and /health reports
         // storage as degraded (the service still boots).

@@ -1,12 +1,10 @@
 import { Module, Global } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { initializeApp, cert, getApps, getApp } from 'firebase-admin/app';
-import { getStorage } from 'firebase-admin/storage';
 import { getMessaging } from 'firebase-admin/messaging';
 import type { App } from 'firebase-admin/app';
 
 export const FIREBASE_APP = 'FIREBASE_APP';
-export const FIREBASE_STORAGE = 'FIREBASE_STORAGE';
 export const FIREBASE_MESSAGING = 'FIREBASE_MESSAGING';
 
 function createFirebaseApp(config: ConfigService): App {
@@ -25,12 +23,13 @@ function createFirebaseApp(config: ConfigService): App {
         clientEmail,
         privateKey,
       }),
-      storageBucket: config.get<string>('FIREBASE_STORAGE_BUCKET'),
     });
   }
   return getApp();
 }
 
+// Firebase is used ONLY for FCM push notifications. Receipt storage is Supabase
+// (see SupabaseModule) — there is no Firebase Storage bucket here anymore.
 @Global()
 @Module({
   providers: [
@@ -40,16 +39,11 @@ function createFirebaseApp(config: ConfigService): App {
       useFactory: createFirebaseApp,
     },
     {
-      provide: FIREBASE_STORAGE,
-      inject: [FIREBASE_APP],
-      useFactory: (app: App) => getStorage(app),
-    },
-    {
       provide: FIREBASE_MESSAGING,
       inject: [FIREBASE_APP],
       useFactory: (app: App) => getMessaging(app),
     },
   ],
-  exports: [FIREBASE_APP, FIREBASE_STORAGE, FIREBASE_MESSAGING],
+  exports: [FIREBASE_APP, FIREBASE_MESSAGING],
 })
 export class FirebaseModule {}
