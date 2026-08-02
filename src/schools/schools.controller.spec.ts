@@ -167,16 +167,18 @@ describe('SchoolPaymentsController', () => {
         false,
         'ALL',
         100,
+        undefined,
       );
     });
 
-    it('honours query params and clamps take to 200', async () => {
+    it('honours query params up to the export ceiling', async () => {
       await controller.getHistory(owner, 'true', 'INSTALLMENT', '500');
       expect(service.getHistory).toHaveBeenCalledWith(
         'school-1',
         true,
         'INSTALLMENT',
-        200,
+        500,
+        undefined,
       );
     });
 
@@ -187,6 +189,93 @@ describe('SchoolPaymentsController', () => {
         false,
         'FIRST_PAYMENT',
         50,
+        undefined,
+      );
+    });
+
+    it('clamps take to the export ceiling', async () => {
+      await controller.getHistory(owner, 'false', 'ALL', '99999');
+      expect(service.getHistory).toHaveBeenCalledWith(
+        'school-1',
+        false,
+        'ALL',
+        1000,
+        undefined,
+      );
+    });
+
+    it('ignores a non-numeric or non-positive take', async () => {
+      await controller.getHistory(owner, 'false', 'ALL', 'abc');
+      expect(service.getHistory).toHaveBeenLastCalledWith(
+        'school-1',
+        false,
+        'ALL',
+        100,
+        undefined,
+      );
+      await controller.getHistory(owner, 'false', 'ALL', '0');
+      expect(service.getHistory).toHaveBeenLastCalledWith(
+        'school-1',
+        false,
+        'ALL',
+        100,
+        undefined,
+      );
+    });
+
+    /* Backs the monthly collection-ledger export. */
+    it('parses a from/to window', async () => {
+      await controller.getHistory(
+        owner,
+        'false',
+        'ALL',
+        '1000',
+        '2026-02-01T00:00:00.000Z',
+        '2026-02-28T23:59:59.999Z',
+      );
+      expect(service.getHistory).toHaveBeenCalledWith(
+        'school-1',
+        false,
+        'ALL',
+        1000,
+        {
+          from: new Date('2026-02-01T00:00:00.000Z'),
+          to: new Date('2026-02-28T23:59:59.999Z'),
+        },
+      );
+    });
+
+    it('accepts a one-sided window', async () => {
+      await controller.getHistory(
+        owner,
+        'false',
+        'ALL',
+        undefined,
+        '2026-02-01T00:00:00.000Z',
+      );
+      expect(service.getHistory).toHaveBeenCalledWith(
+        'school-1',
+        false,
+        'ALL',
+        100,
+        { from: new Date('2026-02-01T00:00:00.000Z'), to: undefined },
+      );
+    });
+
+    it('ignores an unparseable date instead of filtering on NaN', async () => {
+      await controller.getHistory(
+        owner,
+        'false',
+        'ALL',
+        undefined,
+        'not-a-date',
+      );
+      expect(service.getHistory).toHaveBeenCalledWith(
+        'school-1',
+        false,
+        'ALL',
+        100,
+        undefined,
       );
     });
 
@@ -206,16 +295,18 @@ describe('SchoolPaymentsController', () => {
         false,
         'ALL',
         100,
+        undefined,
       );
     });
 
-    it('honours query params and clamps take to 200', async () => {
+    it('honours query params up to the export ceiling', async () => {
       await controller.getHistoryAll(owner, 'true', 'INSTALLMENT', '999');
       expect(service.getHistory).toHaveBeenCalledWith(
         'school-1',
         true,
         'INSTALLMENT',
-        200,
+        999,
+        undefined,
       );
     });
 
@@ -290,6 +381,8 @@ describe('SchoolPaymentsController', () => {
         'school-1',
         false,
         'ALL',
+        100,
+        'INSTALLMENT',
       );
     });
 
@@ -299,6 +392,19 @@ describe('SchoolPaymentsController', () => {
         'school-1',
         true,
         'INSTALLMENT',
+        100,
+        'INSTALLMENT',
+      );
+    });
+
+    it('can widen the queue to first payments', async () => {
+      await controller.getPendingPayments(owner, 'false', 'ALL', 'ALL');
+      expect(service.getPendingPayments).toHaveBeenCalledWith(
+        'school-1',
+        false,
+        'ALL',
+        100,
+        'ALL',
       );
     });
 
