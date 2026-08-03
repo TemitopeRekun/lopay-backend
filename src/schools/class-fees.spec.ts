@@ -34,6 +34,7 @@ describe('SchoolPaymentsService — class fees', () => {
     {} as never,
     {} as never,
     cache as never,
+    {} as never, // paystack (unused by the class-fee paths)
   );
 
   beforeEach(() => {

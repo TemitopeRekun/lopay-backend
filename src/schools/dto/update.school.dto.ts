@@ -21,6 +21,15 @@ export class UpdateSchoolDto {
   @IsOptional()
   bankName?: string;
 
+  /**
+   * Paystack bank code (e.g. "058"), from `GET /admin/paystack/banks`. Required
+   * when the settlement account number changes: it is what actually identifies the
+   * destination bank to Paystack, and without it the subaccount cannot be re-pointed.
+   */
+  @IsString()
+  @IsOptional()
+  bankCode?: string;
+
   @IsString()
   @IsOptional()
   accountName?: string;

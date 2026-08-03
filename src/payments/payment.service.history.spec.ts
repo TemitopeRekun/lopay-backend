@@ -29,11 +29,18 @@ describe('PaymentService.getHistory', () => {
 
   const row = (over: Record<string, unknown> = {}) => ({
     id: 'p1',
+    enrollmentId: 'enr-1',
+    schoolId: 's1',
     amountPaid: 25_000,
+    platformAmount: 625,
+    schoolAmount: 24_375,
+    receiver: 'SCHOOL',
+    isConfirmed: true,
     status: 'CONFIRMED',
     paymentType: 'INSTALLMENT',
     receiptUrl: null as string | null,
     paymentDate: new Date('2026-01-01T00:00:00Z'),
+    // The query joins these three columns only — see the `select` in getHistory.
     enrollment: {
       className: 'JSS1',
       child: { fullName: 'Ada' },
@@ -42,6 +49,20 @@ describe('PaymentService.getHistory', () => {
     ...over,
   });
 
+  /**
+   * Columns a joined `School` row carries that must never reach a payer.
+   * `getHistory` used to `include: { school: true }` and spread the row, so every
+   * parent's history shipped the school's settlement account.
+   */
+  const SENSITIVE_SCHOOL_FIELDS = [
+    'accountNumber',
+    'accountName',
+    'bankName',
+    'bankCode',
+    'paystackSubaccountCode',
+    'ownerId',
+  ];
+
   it('scopes a PARENT to their own payments and converts kobo→naira', async () => {
     findMany.mockResolvedValue([row()]);
     const res = await service.getHistory('u1', UserRole.PARENT);
@@ -49,6 +70,65 @@ describe('PaymentService.getHistory', () => {
       enrollment: { child: { parent: { userId: 'u1' } } },
     });
     expect(res[0].amount).toBe(250); // 25_000 kobo → ₦250
+  });
+
+  it('selects only the three joined columns the DTO denormalizes', () => {
+    findMany.mockResolvedValue([]);
+    return service.getHistory('u1', UserRole.PARENT).then(() => {
+      // Narrowing the query is the first line of defence: the sensitive School
+      // columns never leave Postgres, so no projection bug can surface them.
+      expect(findMany.mock.calls[0][0].include).toEqual({
+        enrollment: {
+          select: {
+            className: true,
+            child: { select: { fullName: true } },
+            school: { select: { name: true } },
+          },
+        },
+      });
+    });
+  });
+
+  it("never serializes the school's settlement details to a payer", async () => {
+    // Belt and braces: even if the query were widened again, the projection is
+    // an allow-list. Feed it a fully-populated joined School row and prove none
+    // of it — nor the nested relation itself — reaches the response.
+    findMany.mockResolvedValue([
+      row({
+        paystackReference: 'lopay_secret_ref',
+        idempotencyKey: 'idem-1',
+        enrollment: {
+          className: 'JSS1',
+          child: { fullName: 'Ada' },
+          school: {
+            name: 'Acme',
+            accountNumber: '0123456789',
+            accountName: 'Acme School Ltd',
+            bankName: 'Access Bank',
+            bankCode: '044',
+            paystackSubaccountCode: 'ACCT_secret',
+            ownerId: 'owner-1',
+            email: 'bursar@acme.test',
+            phone: '+2348000000000',
+          },
+        },
+      }),
+    ]);
+
+    const [dto] = await service.getHistory('u1', UserRole.PARENT);
+
+    expect(dto.schoolName).toBe('Acme');
+    expect(dto).not.toHaveProperty('enrollment');
+    expect(dto).not.toHaveProperty('paystackReference');
+    expect(dto).not.toHaveProperty('idempotencyKey');
+
+    const serialized = JSON.stringify(dto);
+    for (const field of SENSITIVE_SCHOOL_FIELDS) {
+      expect(dto).not.toHaveProperty(field);
+    }
+    expect(serialized).not.toContain('0123456789');
+    expect(serialized).not.toContain('ACCT_secret');
+    expect(serialized).not.toContain('bursar@acme.test');
   });
 
   it('scopes a SCHOOL_OWNER to their school', async () => {

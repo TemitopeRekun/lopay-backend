@@ -54,16 +54,30 @@ export class AdminController {
     return this.adminService.createSubaccountForSchool(schoolId);
   }
 
-  /** View pending first payments (paginated) */
+  /** View pending first payments (paginated, optionally one school) */
   @Get('pending-first-payments')
   @ApiOperation({ summary: 'List pending first payments (paginated)' })
+  @ApiQuery({
+    name: 'schoolId',
+    required: false,
+    description:
+      "Narrow to one school. Backs the dashboard's per-school drill-in, which " +
+      'used to switch the admin into a school-owner acting role and land on an ' +
+      'unfiltered platform-wide list.',
+  })
   getPendingFirstPayments(
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('schoolId') schoolId?: string,
   ) {
     const include = includeReceiptSignedUrls === 'true';
-    return this.adminService.getPendingFirstPayments(include, page, limit);
+    return this.adminService.getPendingFirstPayments(
+      include,
+      page,
+      limit,
+      schoolId,
+    );
   }
 
   /** View pending installment payments across schools (paginated, read-only) */

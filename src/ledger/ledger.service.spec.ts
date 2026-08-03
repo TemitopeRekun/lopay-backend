@@ -49,7 +49,10 @@ describe('LedgerService (characterization)', () => {
     pushNotification: jest.Mock;
   };
   let audit: { record: jest.Mock };
-  let metrics: { recordPaymentOutcome: jest.Mock };
+  let metrics: {
+    recordPaymentOutcome: jest.Mock;
+    recordPaystackFeeDelta: jest.Mock;
+  };
   let service: LedgerService;
 
   const SCHOOL_ID = 'school-1';
@@ -83,7 +86,10 @@ describe('LedgerService (characterization)', () => {
       pushNotification: jest.fn(),
     };
     audit = { record: jest.fn().mockResolvedValue(undefined) };
-    metrics = { recordPaymentOutcome: jest.fn() };
+    metrics = {
+      recordPaymentOutcome: jest.fn(),
+      recordPaystackFeeDelta: jest.fn(),
+    };
 
     service = new LedgerService(
       prisma as never,
@@ -391,10 +397,14 @@ describe('LedgerService (characterization)', () => {
         receiver: PaymentReceiver.PLATFORM,
         isConfirmed: false,
         amountPaid: 100_000,
+        // The deposit's school share. An enrollment opens owing the WHOLE fee;
+        // this is what gets credited when the payment is confirmed.
+        schoolAmount: 75_000,
         enrollment: {
           id: 'enr-1',
           schoolId: 'school-1',
           paymentStatus: PaymentStatus.PENDING,
+          remainingBalance: 100_000,
           school: { name: 'Acme School', ownerId: 'owner-1' },
           child: { fullName: 'Ada Lovelace', parent: { userId: 'parent-1' } },
         },
@@ -405,6 +415,11 @@ describe('LedgerService (characterization)', () => {
     describe('settleFirstPayment', () => {
       it('confirms the payment and ACTIVATES the enrollment, with owner + parent notifications', async () => {
         prisma.payment.findFirst.mockResolvedValueOnce(makeFirstPayment());
+        // 100_000 owed - 75_000 school share
+        tx.childEnrollment.update.mockResolvedValueOnce({
+          id: 'enr-1',
+          remainingBalance: 25_000,
+        });
 
         const result = await service.settleFirstPayment('pay-1', adminActor);
 
@@ -412,13 +427,23 @@ describe('LedgerService (characterization)', () => {
           where: { id: 'pay-1', isConfirmed: false },
           data: { isConfirmed: true, status: PaymentTransactionStatus.SUCCESS },
         });
-        expect(tx.childEnrollment.update).toHaveBeenCalledWith({
+        // Settling is when the deposit is credited — the enrollment opened owing
+        // the whole fee, so: atomic decrement, then the clamped landing write.
+        expect(tx.childEnrollment.update).toHaveBeenNthCalledWith(1, {
           where: { id: 'enr-1' },
-          data: { paymentStatus: PaymentStatus.ACTIVE },
+          data: { remainingBalance: { decrement: 75_000 } },
+        });
+        expect(tx.childEnrollment.update).toHaveBeenNthCalledWith(2, {
+          where: { id: 'enr-1' },
+          data: {
+            remainingBalance: 25_000,
+            paymentStatus: PaymentStatus.ACTIVE,
+          },
         });
         expect(audit.record).toHaveBeenCalledWith(
           expect.objectContaining({
             action: AuditAction.FIRST_PAYMENT_SETTLED,
+            after: expect.objectContaining({ remainingBalance: 25_000 }),
           }),
           tx,
         );
@@ -543,7 +568,9 @@ describe('LedgerService (characterization)', () => {
         enrollment: {
           id: 'enr-1',
           className: 'JSS1',
-          remainingBalance: 50_000, // > 0 -> ACTIVE on success
+          // Opens owing the whole fee; crediting the 100_000 school share
+          // leaves 50_000 -> ACTIVE.
+          remainingBalance: 150_000,
           school: { name: 'Acme School', ownerId: 'owner-1' },
           child: { fullName: 'Ada Lovelace', parent: { userId: 'parent-1' } },
         },
@@ -554,6 +581,11 @@ describe('LedgerService (characterization)', () => {
     describe('reconcilePaystackPayment', () => {
       it('flips PENDING -> SUCCESS, activates the enrollment, and records the fee delta', async () => {
         prisma.payment.findUnique.mockResolvedValueOnce(makePayment());
+        // 150_000 owed - 100_000 school share
+        tx.childEnrollment.update.mockResolvedValueOnce({
+          id: 'enr-1',
+          remainingBalance: 50_000,
+        });
 
         const result = await service.reconcilePaystackPayment(
           'ref-1',
@@ -569,9 +601,16 @@ describe('LedgerService (characterization)', () => {
             actualPaystackFee: 1_800,
           }),
         });
-        expect(tx.childEnrollment.update).toHaveBeenCalledWith({
+        expect(tx.childEnrollment.update).toHaveBeenNthCalledWith(1, {
           where: { id: 'enr-1' },
-          data: { paymentStatus: PaymentStatus.ACTIVE },
+          data: { remainingBalance: { decrement: 100_000 } },
+        });
+        expect(tx.childEnrollment.update).toHaveBeenNthCalledWith(2, {
+          where: { id: 'enr-1' },
+          data: {
+            remainingBalance: 50_000,
+            paymentStatus: PaymentStatus.ACTIVE,
+          },
         });
         expect(audit.record).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -594,12 +633,19 @@ describe('LedgerService (characterization)', () => {
             enrollment: {
               id: 'enr-1',
               className: 'JSS1',
-              remainingBalance: 0, // fully covered -> COMPLETED
+              // The school share covers the whole fee -> COMPLETED.
+              remainingBalance: 100_000,
               school: { name: 'Acme', ownerId: 'owner-1' },
               child: { fullName: 'Ada', parent: { userId: 'parent-1' } },
             },
           }),
         );
+
+        // 100_000 owed - 100_000 school share
+        tx.childEnrollment.update.mockResolvedValueOnce({
+          id: 'enr-1',
+          remainingBalance: 0,
+        });
 
         const result = await service.reconcilePaystackPayment(
           'ref-1',
@@ -607,9 +653,12 @@ describe('LedgerService (characterization)', () => {
           null,
         );
 
-        expect(tx.childEnrollment.update).toHaveBeenCalledWith({
+        expect(tx.childEnrollment.update).toHaveBeenNthCalledWith(2, {
           where: { id: 'enr-1' },
-          data: { paymentStatus: PaymentStatus.COMPLETED },
+          data: {
+            remainingBalance: 0,
+            paymentStatus: PaymentStatus.COMPLETED,
+          },
         });
         expect(result).toEqual({ reconciled: true, completed: true });
       });
@@ -700,6 +749,7 @@ describe('LedgerService (characterization)', () => {
           id: 'enr-1',
           schoolId: SCHOOL_ID,
           paymentStatus: PaymentStatus.PENDING,
+          remainingBalance: 100_000,
           className: 'JSS1',
           school: { name: 'Acme School' },
           child: {
@@ -718,10 +768,16 @@ describe('LedgerService (characterization)', () => {
           id: 'pay-1',
           isConfirmed: false,
           amountPaid: 80_000,
+          schoolAmount: 75_000,
         });
         tx.childEnrollment.updateMany = jest
           .fn()
           .mockResolvedValue({ count: 1 });
+        // 100_000 owed - 75_000 school share
+        tx.childEnrollment.update.mockResolvedValueOnce({
+          id: 'enr-1',
+          remainingBalance: 25_000,
+        });
 
         const result = await service.confirmFirstPayment(
           'enr-1',
@@ -736,13 +792,24 @@ describe('LedgerService (characterization)', () => {
             status: PaymentTransactionStatus.SUCCESS,
           }),
         });
-        expect(tx.childEnrollment.updateMany).toHaveBeenCalledWith({
-          where: { id: 'enr-1', paymentStatus: PaymentStatus.PENDING },
-          data: { paymentStatus: PaymentStatus.ACTIVE },
+        // Activation goes through the same credit path as settle/reconcile, so a
+        // manually-confirmed first payment reduces the balance too. It used to
+        // only flip the status, leaving the whole fee outstanding forever.
+        expect(tx.childEnrollment.update).toHaveBeenNthCalledWith(1, {
+          where: { id: 'enr-1' },
+          data: { remainingBalance: { decrement: 75_000 } },
+        });
+        expect(tx.childEnrollment.update).toHaveBeenNthCalledWith(2, {
+          where: { id: 'enr-1' },
+          data: {
+            remainingBalance: 25_000,
+            paymentStatus: PaymentStatus.ACTIVE,
+          },
         });
         expect(audit.record).toHaveBeenCalledWith(
           expect.objectContaining({
             action: AuditAction.FIRST_PAYMENT_CONFIRMED,
+            after: expect.objectContaining({ remainingBalance: 25_000 }),
           }),
           tx,
         );

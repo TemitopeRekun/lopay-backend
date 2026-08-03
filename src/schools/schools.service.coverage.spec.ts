@@ -39,6 +39,7 @@ describe('SchoolPaymentsService (coverage)', () => {
   };
   let onboarding: { provisionSchoolAndOwner: jest.Mock };
   let cache: { getOrSet: jest.Mock; del: jest.Mock };
+  let paystack: { resolveAccount: jest.Mock; updateSubaccount: jest.Mock };
   let service: SchoolPaymentsService;
 
   beforeEach(() => {
@@ -81,6 +82,12 @@ describe('SchoolPaymentsService (coverage)', () => {
       ),
       del: jest.fn().mockResolvedValue(undefined),
     };
+    paystack = {
+      resolveAccount: jest
+        .fn()
+        .mockResolvedValue({ accountName: 'ACME SCHOOLS LTD' }),
+      updateSubaccount: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new SchoolPaymentsService(
       prisma as never,
@@ -91,6 +98,7 @@ describe('SchoolPaymentsService (coverage)', () => {
       ledger as never,
       onboarding as never,
       cache as never,
+      paystack as never,
     );
   });
 
@@ -130,12 +138,22 @@ describe('SchoolPaymentsService (coverage)', () => {
     });
 
     it('maps the DTO fields onto the update payload', async () => {
-      prisma.school.findFirst.mockResolvedValue({ id: 's1', deletedAt: null });
+      // Same settlement account as the stored one, so this is a pure profile edit
+      // and no Paystack re-pointing is triggered (see schools.settlement.spec.ts).
+      prisma.school.findFirst.mockResolvedValue({
+        id: 's1',
+        deletedAt: null,
+        name: 'Old Name',
+        bankCode: '058',
+        accountNumber: '0001',
+        paystackSubaccountCode: null,
+      });
       await service.updateSchool('s1', {
         schoolName: 'New Name',
         address: 'Addr',
         phone: '080',
         bankName: 'GTB',
+        bankCode: '058',
         accountName: 'Acme',
         accountNumber: '0001',
       } as never);
@@ -147,10 +165,12 @@ describe('SchoolPaymentsService (coverage)', () => {
           address: 'Addr',
           phone: '080',
           bankName: 'GTB',
+          bankCode: '058',
           accountName: 'Acme',
           accountNumber: '0001',
         },
       });
+      expect(paystack.updateSubaccount).not.toHaveBeenCalled();
     });
   });
 
@@ -234,16 +254,29 @@ describe('SchoolPaymentsService (coverage)', () => {
     });
 
     it('updates only the bank fields', async () => {
-      prisma.school.findUnique.mockResolvedValue({ id: 's1' });
+      // Settlement account unchanged (same number + code) -> a display-only edit.
+      prisma.school.findUnique.mockResolvedValue({
+        id: 's1',
+        name: 'Acme',
+        bankCode: '033',
+        accountNumber: '0002',
+        paystackSubaccountCode: null,
+      });
       await service.updateSchoolBankDetails('s1', {
         bankName: 'UBA',
+        bankCode: '033',
         accountName: 'Acme',
         accountNumber: '0002',
       } as never);
 
       expect(prisma.school.update).toHaveBeenCalledWith({
         where: { id: 's1' },
-        data: { bankName: 'UBA', accountName: 'Acme', accountNumber: '0002' },
+        data: {
+          bankName: 'UBA',
+          bankCode: '033',
+          accountName: 'Acme',
+          accountNumber: '0002',
+        },
       });
     });
   });
@@ -725,9 +758,14 @@ describe('SchoolPaymentsService (coverage)', () => {
   describe('getPendingPayments', () => {
     const pendingRow = {
       id: 'p1',
+      enrollmentId: 'enr-1',
+      schoolId: 's1',
       amountPaid: 100000,
       platformAmount: 2500,
       schoolAmount: 97500,
+      receiver: 'SCHOOL',
+      isConfirmed: false,
+      status: PaymentTransactionStatus.PENDING,
       paymentDate: new Date('2026-01-01'),
       paymentType: PaymentType.INSTALLMENT,
       receiptUrl: 'r/1',
@@ -747,6 +785,12 @@ describe('SchoolPaymentsService (coverage)', () => {
         isConfirmed: false,
         status: PaymentTransactionStatus.PENDING,
         paymentType: PaymentType.INSTALLMENT,
+        // Card first payments confirm themselves from the Paystack webhook; an
+        // owner must never be offered one to approve.
+        NOT: {
+          paymentType: PaymentType.FIRST_PAYMENT,
+          paystackReference: { not: null },
+        },
       });
     });
 
@@ -758,6 +802,12 @@ describe('SchoolPaymentsService (coverage)', () => {
       expect(db.payment.findMany.mock.calls[0][0].where).toEqual({
         isConfirmed: false,
         status: PaymentTransactionStatus.PENDING,
+        // Card first payments confirm themselves from the Paystack webhook; an
+        // owner must never be offered one to approve.
+        NOT: {
+          paymentType: PaymentType.FIRST_PAYMENT,
+          paystackReference: { not: null },
+        },
       });
     });
 
@@ -776,6 +826,12 @@ describe('SchoolPaymentsService (coverage)', () => {
         isConfirmed: false,
         status: PaymentTransactionStatus.PENDING,
         paymentType: PaymentType.FIRST_PAYMENT,
+        // Card first payments confirm themselves from the Paystack webhook; an
+        // owner must never be offered one to approve.
+        NOT: {
+          paymentType: PaymentType.FIRST_PAYMENT,
+          paystackReference: { not: null },
+        },
       });
     });
 
@@ -785,15 +841,20 @@ describe('SchoolPaymentsService (coverage)', () => {
       const res = await service.getPendingPayments('s1');
 
       expect(res).toHaveLength(1);
+      // The shared payment view names the platform's cut `platformFeeAmount`
+      // (what the client reads) rather than the raw column name.
       expect(res[0]).toEqual(
         expect.objectContaining({
-          platformAmount: 25,
+          platformFeeAmount: 25,
           schoolAmount: 975,
           childName: 'Kid A',
           amount: 1000,
         }),
       );
       expect('receiptSignedUrl' in res[0]).toBe(false);
+      // The owner's own settlement account is not payload for a payments list.
+      expect(res[0]).not.toHaveProperty('enrollment');
+      expect(res[0]).not.toHaveProperty('accountNumber');
     });
 
     it('signs receipts when requested and swallows signing errors', async () => {

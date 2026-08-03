@@ -163,7 +163,12 @@ describe('EnrollmentService — initiation (characterization)', () => {
             schoolId: SCHOOL_ID,
             totalSchoolFee: CALC.schoolFees,
             platformFee: CALC.platformFee,
-            remainingBalance: CALC.remainingBalance,
+            // A PENDING enrollment owes the WHOLE fee. It used to open at
+            // `CALC.remainingBalance` — already net of a deposit nothing had
+            // collected — so an abandoned checkout advertised a payment that
+            // never happened. The deposit is credited by whichever path
+            // confirms the money (see LedgerService.creditFirstPaymentToBalance).
+            remainingBalance: CALC.schoolFees,
             paymentStatus: PaymentStatus.PENDING,
           }),
         }),

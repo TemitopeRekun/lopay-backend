@@ -22,19 +22,18 @@ import { EventsGateway } from '../events/events.gateway';
 import { AuditService, AuditActor } from '../audit/audit.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { Money } from '../common/money';
-import { WEEKLY_INSTALLMENTS, MONTHLY_INSTALLMENTS } from '../common/fees';
+import {
+  toEnrollmentView,
+  summariseParentDashboard,
+  type EnrollmentView,
+  type ParentDashboardSummary,
+} from './enrollment-view';
 import {
   PaystackService,
   PaystackWebhookEvent,
 } from '../paystack/paystack.service';
 import { grossUp } from '../common/paystack-fee';
 import { randomUUID } from 'crypto';
-
-type EnrollmentWithRelations = Prisma.ChildEnrollmentGetPayload<{
-  include: { child: true; school: true; payments: true };
-}>;
-
-type PaymentRecord = EnrollmentWithRelations['payments'][number];
 
 type PaymentWithEnrollment = Prisma.PaymentGetPayload<{
   include: { enrollment: { include: { child: true; school: true } } };
@@ -327,141 +326,72 @@ export class EnrollmentService {
     };
   }
 
-  private calculateEnrichment(
-    enrollment: EnrollmentWithRelations,
-    payments: PaymentRecord[],
-  ) {
-    const confirmedPayments = payments.filter((p) => p.isConfirmed);
-    const paidAmountKobo = confirmedPayments.reduce(
-      (sum, p) => sum + p.amountPaid,
-      0,
-    );
+  /**
+   * The enrollment columns a parent-facing view needs.
+   *
+   * `school: true` used to be selected here purely to read `school.name`, and the
+   * whole row — settlement account included — went out with the response.
+   */
+  private static readonly PARENT_ENROLLMENT_INCLUDE = {
+    child: { select: { fullName: true } },
+    school: { select: { name: true } },
+    payments: { orderBy: { paymentDate: 'desc' } },
+  } satisfies Prisma.ChildEnrollmentInclude;
 
-    const pendingInstallmentsKobo = payments
-      .filter(
-        (p) =>
-          p.paymentType === PaymentType.INSTALLMENT &&
-          p.status === PaymentTransactionStatus.PENDING &&
-          !p.isConfirmed,
-      )
-      .reduce((sum, p) => sum + p.amountPaid, 0);
-
-    const availableKobo = Math.max(
-      0,
-      enrollment.remainingBalance - pendingInstallmentsKobo,
-    );
-
-    let nextDueDate: Date | null = null;
-    let nextInstallmentAmountKobo = 0;
-
-    if (enrollment.remainingBalance > 0) {
-      const lastPayment = confirmedPayments[0];
-
-      if (lastPayment) {
-        const lastDate = new Date(lastPayment.paymentDate);
-        if (enrollment.installmentFrequency === 'WEEKLY') {
-          lastDate.setDate(lastDate.getDate() + 7);
-        } else if (enrollment.installmentFrequency === 'MONTHLY') {
-          lastDate.setMonth(lastDate.getMonth() + 1);
-        }
-        nextDueDate = lastDate;
-      } else {
-        nextDueDate = enrollment.termStartDate || enrollment.createdAt;
-      }
-
-      const plan = enrollment.installmentFrequency;
-      const totalInstallments =
-        plan === 'WEEKLY' ? WEEKLY_INSTALLMENTS : MONTHLY_INSTALLMENTS;
-      const paidInstallments = confirmedPayments.filter(
-        (p) => p.paymentType === PaymentType.INSTALLMENT,
-      ).length;
-      const remainingInstallments = totalInstallments - paidInstallments;
-
-      nextInstallmentAmountKobo =
-        remainingInstallments > 0
-          ? Math.round(enrollment.remainingBalance / remainingInstallments)
-          : enrollment.remainingBalance;
-    }
-
-    // Enrich payments — convert kobo amounts to naira.
-    const enrichedPayments = payments.map((p) => ({
-      ...p,
-      amount: Money.fromKobo(p.amountPaid).toNaira(),
-      amountPaid: Money.fromKobo(p.amountPaid).toNaira(),
-      date: p.paymentDate,
-      type: p.paymentType,
-    }));
-
-    return {
-      ...enrollment,
-      payments: enrichedPayments,
-      studentName: enrollment.child?.fullName,
-      childName: enrollment.child?.fullName,
-      totalFee: Money.fromKobo(enrollment.totalSchoolFee).toNaira(),
-      remainingBalance: Money.fromKobo(enrollment.remainingBalance).toNaira(),
-      availableBalance: Money.fromKobo(availableKobo).toNaira(),
-      paidAmount: Money.fromKobo(paidAmountKobo).toNaira(),
-      nextDueDate: nextDueDate ? nextDueDate.toISOString().split('T')[0] : null,
-      nextInstallmentAmount: Money.fromKobo(
-        nextInstallmentAmountKobo,
-      ).toNaira(),
-    };
-  }
-
-  async getParentEnrollments(userId: string) {
-    this.logger.log(`Fetching enrollments for userId: ${userId}`);
-
-    // Step 1: Find Parent
+  /** Every enrollment belonging to a parent, newest first. */
+  private async parentEnrollmentViews(
+    userId: string,
+  ): Promise<EnrollmentView[]> {
     const parent = await this.prisma.parent.findUnique({
       where: { userId },
-      include: { children: true },
+      select: { id: true, children: { select: { id: true } } },
     });
 
-    if (!parent) {
-      this.logger.log(`Parent not found for userId: ${userId}`);
-      return [];
-    }
-    this.logger.log(
-      `Parent found. ID: ${parent.id}. Children: ${parent.children.length}`,
-    );
-
-    if (parent.children.length === 0) {
+    if (!parent || parent.children.length === 0) {
       return [];
     }
 
-    const childIds = parent.children.map((c) => c.id);
-
-    // Step 2: Find Enrollments for these children
     const enrollments = await this.prisma.childEnrollment.findMany({
-      where: {
-        childId: { in: childIds },
-      },
-      include: {
-        child: true,
-        school: true,
-        payments: {
-          orderBy: { paymentDate: 'desc' },
-        },
-      },
+      where: { childId: { in: parent.children.map((c) => c.id) } },
+      include: EnrollmentService.PARENT_ENROLLMENT_INCLUDE,
       orderBy: { createdAt: 'desc' },
     });
 
-    this.logger.log(
-      `Found ${enrollments.length} enrollments for userId: ${userId}`,
-    );
-
     return enrollments.map((enrollment) =>
-      this.calculateEnrichment(enrollment, enrollment.payments),
+      toEnrollmentView(enrollment, enrollment.payments),
     );
+  }
+
+  async getParentEnrollments(userId: string) {
+    const views = await this.parentEnrollmentViews(userId);
+    this.logger.log(`Found ${views.length} enrollments for userId: ${userId}`);
+    return views;
+  }
+
+  /**
+   * The parent dashboard's headline figures, rolled up server-side.
+   *
+   * The client used to sum `nextInstallmentAmount` across enrollments and take
+   * the minimum `nextDueDate` itself, filtering on a locally-normalised status
+   * string. That put an aggregate the backend never validated on the busiest card
+   * in the app, and it counted plans whose first payment had not been collected.
+   * See `summariseParentDashboard`.
+   */
+  async getParentDashboardSummary(
+    userId: string,
+  ): Promise<ParentDashboardSummary> {
+    return summariseParentDashboard(await this.parentEnrollmentViews(userId));
   }
 
   async getEnrollmentHistory(enrollmentId: string, userId: string) {
     const enrollment = await this.prisma.childEnrollment.findUnique({
       where: { id: enrollmentId },
       include: {
-        child: { include: { parent: true } },
+        child: {
+          select: { fullName: true, parent: { select: { userId: true } } },
+        },
+        school: { select: { name: true } },
         payments: { orderBy: { paymentDate: 'desc' } },
-        school: true,
       },
     });
 
@@ -475,7 +405,7 @@ export class EnrollmentService {
       );
     }
 
-    return this.calculateEnrichment(enrollment, enrollment.payments);
+    return toEnrollmentView(enrollment, enrollment.payments);
   }
 
   /** Look up the active fee config for a class, or fail with a clear 400. */
@@ -572,7 +502,9 @@ export class EnrollmentService {
               platformFee: calculation.platformFee, // kobo
               schoolMinimumFee: calculation.minimumDeposit, // kobo
               firstPaymentPaid: depositKobo, // kobo
-              remainingBalance: calculation.remainingBalance, // kobo
+              // Full fee outstanding until the money is confirmed — see the note
+              // on the same field in initiateFirstPayment.
+              remainingBalance: calculation.schoolFees, // kobo
               paymentStatus: PaymentStatus.PENDING,
               installmentFrequency: dto.installmentFrequency,
               termStartDate: dto.termStartDate,
@@ -592,7 +524,9 @@ export class EnrollmentService {
               platformFee: calculation.platformFee, // kobo
               schoolMinimumFee: calculation.minimumDeposit, // kobo
               firstPaymentPaid: depositKobo, // kobo
-              remainingBalance: calculation.remainingBalance, // kobo
+              // Full fee outstanding until the money is confirmed — see the note
+              // on the same field in initiateFirstPayment.
+              remainingBalance: calculation.schoolFees, // kobo
               paymentStatus: PaymentStatus.PENDING,
               installmentFrequency: dto.installmentFrequency,
               termStartDate: dto.termStartDate,
@@ -785,7 +719,14 @@ export class EnrollmentService {
           platformFee: calc.platformFee,
           schoolMinimumFee: calc.minimumDeposit,
           firstPaymentPaid: depositKobo,
-          remainingBalance: calc.remainingBalance,
+          // The whole fee is outstanding until the charge actually lands. This
+          // used to open at `calc.remainingBalance` — already net of a deposit
+          // Paystack had not collected — so a parent who closed the popup still
+          // showed 75% owed on a plan they had paid nothing toward, and the same
+          // phantom credit shrank the platform's arrears book (and could put the
+          // enrollment on the admin's Overdue tab). The deposit is applied by
+          // whichever path confirms the money: reconcile, settle or confirm.
+          remainingBalance: calc.schoolFees,
           paymentStatus: PaymentStatus.PENDING,
           installmentFrequency: dto.installmentFrequency,
           termStartDate: dto.termStartDate,
@@ -1069,19 +1010,25 @@ export class EnrollmentService {
 
     if (!enrollment) throw new NotFoundException('Enrollment not found');
 
-    // Authorization: prevent paying (and attaching a receipt) against another
-    // family's enrollment. A parent may only pay their own child's enrollment;
-    // a school owner may only act within their own school.
-    const ownsAsParent =
-      user.role === UserRole.PARENT &&
-      enrollment.child.parent.userId === user.userId;
-    const ownsAsSchool =
-      user.role === UserRole.SCHOOL_OWNER &&
-      !!user.schoolId &&
-      enrollment.schoolId === user.schoolId;
-    if (!ownsAsParent && !ownsAsSchool) {
-      throw new BadRequestException(
-        'You are not authorized to pay this enrollment',
+    // Authorization: only the child's own parent may declare a payment against an
+    // enrollment — checked on PARENTHOOD, not on role.
+    //
+    // A school owner previously qualified for any enrollment at their own school,
+    // which handed one person both halves of the control: submit a payment on a
+    // family's plan, then approve it from the school dashboard. That silently
+    // clears a balance nobody paid and writes a payment into the parent's own
+    // history that they never made. It also meant a school owner who is a parent
+    // somewhere ELSE could not pay their own child's fees, because the check was
+    // gated on `role === PARENT`. Keying on parenthood fixes both.
+    if (enrollment.child.parent.userId !== user.userId) {
+      const wouldSelfApprove =
+        user.role === UserRole.SCHOOL_OWNER &&
+        !!user.schoolId &&
+        enrollment.schoolId === user.schoolId;
+      throw new ForbiddenException(
+        wouldSelfApprove
+          ? 'A school cannot record a payment on a parent’s behalf — the parent submits it, the school confirms it.'
+          : 'You are not authorized to pay this enrollment',
       );
     }
 

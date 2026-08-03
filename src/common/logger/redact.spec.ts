@@ -1,4 +1,10 @@
-import { fingerprint, maskEmail, maskPhone, redactFields } from './redact';
+import {
+  fingerprint,
+  maskEmail,
+  maskPhone,
+  redactFields,
+  redactText,
+} from './redact';
 
 describe('redact', () => {
   describe('maskEmail', () => {
@@ -102,6 +108,42 @@ describe('redact', () => {
       expect(out.ownerEmail).toBe('o***r@school.com');
       expect(out.phone).toBe('***5678');
       expect(out.accountNumber).toBe('[redacted]');
+    });
+  });
+
+  describe('redactText', () => {
+    // redactFields can only protect keys we assembled ourselves. Third-party code
+    // does not cooperate — Better Auth logs the caller's address in free text on
+    // every failed sign-in — so text from outside gets scanned instead of trusted.
+    it('masks an email embedded in a sentence', () => {
+      expect(redactText('User not found: ada.lovelace@example.com')).toBe(
+        'User not found: a***e@example.com',
+      );
+    });
+
+    it('masks every occurrence, not just the first', () => {
+      expect(redactText('ada@x.com invited bob@y.org')).toBe(
+        'a***a@x.com invited b***b@y.org',
+      );
+    });
+
+    it('does not swallow the surrounding punctuation', () => {
+      expect(redactText("'ada.l@x.com' is taken")).toBe(
+        "'a***l@x.com' is taken",
+      );
+      expect(redactText('to <ada.l@x.com>, ok')).toBe('to <a***l@x.com>, ok');
+    });
+
+    it('leaves text with no email untouched', () => {
+      expect(redactText('rate limit exceeded')).toBe('rate limit exceeded');
+    });
+
+    it('leaves an @ that is not an address alone', () => {
+      expect(redactText('see @lopay on socials')).toBe('see @lopay on socials');
+    });
+
+    it('handles an empty string', () => {
+      expect(redactText('')).toBe('');
     });
   });
 });

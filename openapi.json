@@ -844,7 +844,17 @@
     "/api/v1/notifications": {
       "get": {
         "operationId": "NotificationsController_getUserNotifications",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Rows to return (default 100, max 200).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": ""
@@ -855,7 +865,7 @@
             "bearer": []
           }
         ],
-        "summary": "List the current user's notifications",
+        "summary": "List the current user's notifications (bounded, newest first)",
         "tags": [
           "notifications"
         ]
@@ -1265,6 +1275,26 @@
         ]
       }
     },
+    "/api/v1/enrollments/summary": {
+      "get": {
+        "operationId": "EnrollmentController_getDashboardSummary",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The parent dashboard's next-collection and plan totals",
+        "tags": [
+          "enrollments"
+        ]
+      }
+    },
     "/api/v1/enrollments/{id}/history": {
       "get": {
         "operationId": "EnrollmentController_getEnrollmentHistory",
@@ -1555,6 +1585,15 @@
             "name": "limit",
             "required": true,
             "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "schoolId",
+            "required": false,
+            "in": "query",
+            "description": "Narrow to one school. Backs the dashboard's per-school drill-in, which used to switch the admin into a school-owner acting role and land on an unfiltered platform-wide list.",
             "schema": {
               "type": "string"
             }

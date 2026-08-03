@@ -21,8 +21,21 @@ export class UsersService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * The admin user directory.
+   *
+   * `enrollmentCount` is the number of plans the user's children hold. The
+   * directory renders it per parent, and used to derive it in the browser by
+   * filtering a school roster on `child.parentId` — which fetched a
+   * SCHOOL_OWNER-only endpoint (403 for the admin looking at it) and matched on a
+   * field the client's adapter hard-codes to `""`, so every parent read "0 Plans"
+   * no matter what they had. It is a server-side count now.
+   *
+   * One `groupBy` over the enrollments of every listed user's children, joined in
+   * memory — not a per-row subquery.
+   */
   async findAll() {
-    return this.prisma.user.findMany({
+    const users = await this.prisma.user.findMany({
       where: { deletedAt: null },
       orderBy: { createdAt: 'desc' },
       select: {
@@ -32,8 +45,42 @@ export class UsersService {
         role: true,
         createdAt: true,
         updatedAt: true,
+        parent: { select: { id: true } },
       },
     });
+
+    const parentIds = users
+      .map((u) => u.parent?.id)
+      .filter((id): id is string => !!id);
+
+    const counts = parentIds.length
+      ? await this.prisma.childEnrollment.groupBy({
+          by: ['childId'],
+          where: { child: { parentId: { in: parentIds } } },
+          _count: { _all: true },
+        })
+      : [];
+
+    // groupBy is keyed by child, so map each child back to its parent to total.
+    const children = parentIds.length
+      ? await this.prisma.child.findMany({
+          where: { parentId: { in: parentIds } },
+          select: { id: true, parentId: true },
+        })
+      : [];
+    const parentOfChild = new Map(children.map((c) => [c.id, c.parentId]));
+
+    const byParent = new Map<string, number>();
+    for (const row of counts) {
+      const parentId = parentOfChild.get(row.childId);
+      if (!parentId) continue;
+      byParent.set(parentId, (byParent.get(parentId) ?? 0) + row._count._all);
+    }
+
+    return users.map(({ parent, ...user }) => ({
+      ...user,
+      enrollmentCount: parent ? (byParent.get(parent.id) ?? 0) : 0,
+    }));
   }
 
   async findOne(id: string) {

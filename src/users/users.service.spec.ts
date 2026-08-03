@@ -157,3 +157,102 @@ describe('UsersService.updateProfile', () => {
     });
   });
 });
+
+/**
+ * The admin user directory counts plans server-side.
+ *
+ * The screen used to derive this in the browser from a SCHOOL_OWNER-only roster
+ * endpoint (403 for the admin reading it) and match on `child.parentId`, a field
+ * the client adapter hard-codes to `""` — so every parent rendered "0 Plans".
+ */
+describe('UsersService.findAll — enrollmentCount', () => {
+  const prisma = {
+    user: { findMany: jest.fn() },
+    childEnrollment: { groupBy: jest.fn() },
+    child: { findMany: jest.fn() },
+  };
+  const service = new UsersService(prisma as never);
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('totals every plan across a parent\u2019s children', async () => {
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: 'u1',
+        email: 'a@x',
+        fullName: 'A',
+        role: 'PARENT',
+        parent: { id: 'p1' },
+      },
+      {
+        id: 'u2',
+        email: 'b@x',
+        fullName: 'B',
+        role: 'PARENT',
+        parent: { id: 'p2' },
+      },
+      {
+        id: 'u3',
+        email: 'c@x',
+        fullName: 'C',
+        role: 'SUPER_ADMIN',
+        parent: null,
+      },
+    ]);
+    prisma.child.findMany.mockResolvedValue([
+      { id: 'c1', parentId: 'p1' },
+      { id: 'c2', parentId: 'p1' },
+      { id: 'c3', parentId: 'p2' },
+    ]);
+    prisma.childEnrollment.groupBy.mockResolvedValue([
+      { childId: 'c1', _count: { _all: 1 } },
+      { childId: 'c2', _count: { _all: 1 } },
+      { childId: 'c3', _count: { _all: 1 } },
+    ]);
+
+    const res = await service.findAll();
+
+    expect(res.map((u) => [u.id, u.enrollmentCount])).toEqual([
+      ['u1', 2],
+      ['u2', 1],
+      ['u3', 0],
+    ]);
+    // The relation is a lookup key, not payload.
+    expect(res[0]).not.toHaveProperty('parent');
+  });
+
+  it('reports zero rather than skipping a parent with no plans', async () => {
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: 'u1',
+        email: 'a@x',
+        fullName: 'A',
+        role: 'PARENT',
+        parent: { id: 'p1' },
+      },
+    ]);
+    prisma.child.findMany.mockResolvedValue([]);
+    prisma.childEnrollment.groupBy.mockResolvedValue([]);
+
+    await expect(service.findAll()).resolves.toEqual([
+      expect.objectContaining({ id: 'u1', enrollmentCount: 0 }),
+    ]);
+  });
+
+  it('does not query enrollments when nobody in the list is a parent', async () => {
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: 'u3',
+        email: 'c@x',
+        fullName: 'C',
+        role: 'SUPER_ADMIN',
+        parent: null,
+      },
+    ]);
+
+    await service.findAll();
+
+    expect(prisma.childEnrollment.groupBy).not.toHaveBeenCalled();
+    expect(prisma.child.findMany).not.toHaveBeenCalled();
+  });
+});

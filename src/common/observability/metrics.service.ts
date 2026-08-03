@@ -36,6 +36,8 @@ export class MetricsService {
   private readonly payments: Counter<'outcome' | 'type' | 'receiver'>;
   private readonly confirmLatency: Histogram<'type'>;
   private readonly stalled: Gauge<string>;
+  private readonly reconcileConflicts: Counter<'local_status'>;
+  private readonly paystackFeeDelta: Gauge<string>;
 
   constructor() {
     this.registry.setDefaultLabels({ app: 'lopay-backend' });
@@ -61,6 +63,24 @@ export class MetricsService {
     this.stalled = new Gauge({
       name: 'lopay_confirmations_stalled',
       help: 'Payments awaiting confirmation for longer than the stall threshold',
+      registers: [this.registry],
+    });
+
+    // Book-vs-bank breaks: Paystack says a charge succeeded, our row says
+    // FAILED/REVERSED. Any non-zero value is money that needs a human.
+    this.reconcileConflicts = new Counter({
+      name: 'lopay_paystack_reconcile_conflicts_total',
+      help: 'Successful Paystack charges that arrived for a non-PENDING payment',
+      labelNames: ['local_status'],
+      registers: [this.registry],
+    });
+
+    // Signed, cumulative drift between the Paystack fee we estimated (and routed
+    // via transaction_charge) and the fee Paystack actually took off the platform
+    // main account. Sustained positive drift = the platform is under-recovering.
+    this.paystackFeeDelta = new Gauge({
+      name: 'lopay_paystack_fee_delta_kobo',
+      help: 'Cumulative actual-minus-estimated Paystack fee, in kobo',
       registers: [this.registry],
     });
   }
@@ -100,6 +120,32 @@ export class MetricsService {
   setStalledConfirmations(count: number): void {
     try {
       this.stalled.set(count);
+    } catch {
+      // swallow
+    }
+  }
+
+  /**
+   * Count a successful Paystack charge that arrived for a payment we had already
+   * closed (FAILED/REVERSED). Alert on any increase — it is unreconciled money.
+   */
+  recordReconcileConflict(localStatus: string): void {
+    try {
+      this.reconcileConflicts.inc({ local_status: localStatus });
+    } catch {
+      // swallow
+    }
+  }
+
+  /**
+   * Accumulate the signed actual-minus-estimated Paystack fee for one reconciled
+   * charge (kobo). Positive means Paystack took more than we routed to the platform
+   * main account, i.e. the platform absorbed the difference.
+   */
+  recordPaystackFeeDelta(deltaKobo: number): void {
+    try {
+      if (!Number.isFinite(deltaKobo) || deltaKobo === 0) return;
+      this.paystackFeeDelta.inc(deltaKobo);
     } catch {
       // swallow
     }

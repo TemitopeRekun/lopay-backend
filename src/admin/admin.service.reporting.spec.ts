@@ -234,6 +234,13 @@ describe('AdminService (reporting)', () => {
         {
           id: 'p1',
           amountPaid: 250000,
+          platformAmount: 6_250,
+          schoolAmount: 243_750,
+          enrollmentId: 'enr-1',
+          schoolId: 's1',
+          receiver: 'PLATFORM',
+          isConfirmed: false,
+          status: 'PENDING',
           paymentDate: new Date('2026-01-01'),
           paymentType: PaymentType.FIRST_PAYMENT,
           receiptUrl: 'r/1',
@@ -265,11 +272,44 @@ describe('AdminService (reporting)', () => {
           amount: 2500,
           amountPaid: 2500,
           type: PaymentType.FIRST_PAYMENT,
-          receiptSignedUrl: null,
         }),
       );
-      // Signing skipped when not requested.
+      // Signing skipped when not requested — and the field is OMITTED rather
+      // than nulled, so "this caller didn't ask" reads differently from "we
+      // tried and the object is gone". Same convention as the school and parent
+      // payment lists; see toPaymentView.
+      expect(res.items[0]).not.toHaveProperty('receiptSignedUrl');
       expect(documents.createSignedUrlForPath).not.toHaveBeenCalled();
+    });
+
+    it('narrows to one school when the dashboard drills into it', async () => {
+      // The admin dashboard's per-school row used to switch the admin into a
+      // school-owner acting role and land on the unfiltered platform-wide queue
+      // (while 403ing four school-scoped requests on the way). The filter is
+      // applied in the query because the list is paginated — filtering a page
+      // client-side would page over the wrong set.
+      prisma.payment.findMany.mockResolvedValue([]);
+      prisma.payment.count.mockResolvedValue(0);
+
+      await service.getPendingFirstPayments(false, 1, 50, 'school-7');
+
+      expect(prisma.payment.findMany.mock.calls[0][0].where).toEqual(
+        expect.objectContaining({ schoolId: 'school-7' }),
+      );
+      expect(prisma.payment.count.mock.calls[0][0].where).toEqual(
+        expect.objectContaining({ schoolId: 'school-7' }),
+      );
+    });
+
+    it('stays platform-wide when no school is given', async () => {
+      prisma.payment.findMany.mockResolvedValue([]);
+      prisma.payment.count.mockResolvedValue(0);
+
+      await service.getPendingFirstPayments(false, 1, 50);
+
+      expect(prisma.payment.findMany.mock.calls[0][0].where).not.toHaveProperty(
+        'schoolId',
+      );
     });
 
     it('signs receipt URLs when asked and tolerates a signing failure', async () => {
@@ -277,6 +317,13 @@ describe('AdminService (reporting)', () => {
         {
           id: 'p1',
           amountPaid: 100,
+          platformAmount: 0,
+          schoolAmount: 0,
+          enrollmentId: 'enr-1',
+          schoolId: 's1',
+          receiver: 'PLATFORM',
+          isConfirmed: false,
+          status: 'PENDING',
           paymentDate: new Date(),
           paymentType: PaymentType.FIRST_PAYMENT,
           receiptUrl: 'r/ok',
@@ -285,6 +332,13 @@ describe('AdminService (reporting)', () => {
         {
           id: 'p2',
           amountPaid: 100,
+          platformAmount: 0,
+          schoolAmount: 0,
+          enrollmentId: 'enr-1',
+          schoolId: 's1',
+          receiver: 'PLATFORM',
+          isConfirmed: false,
+          status: 'PENDING',
           paymentDate: new Date(),
           paymentType: PaymentType.FIRST_PAYMENT,
           receiptUrl: 'r/bad',
@@ -310,6 +364,13 @@ describe('AdminService (reporting)', () => {
         {
           id: 'p1',
           amountPaid: 50000,
+          platformAmount: 0,
+          schoolAmount: 50_000,
+          enrollmentId: 'enr-1',
+          schoolId: 's1',
+          receiver: 'SCHOOL',
+          isConfirmed: false,
+          status: 'PENDING',
           paymentDate: new Date('2026-02-02'),
           paymentType: PaymentType.INSTALLMENT,
           enrollment: {
@@ -446,6 +507,12 @@ describe('AdminService (reporting)', () => {
       id: 'p1',
       amountPaid: 200000,
       platformAmount: 5000,
+      schoolAmount: 195_000,
+      enrollmentId: 'enr-1',
+      schoolId: 's1',
+      receiver: 'PLATFORM',
+      isConfirmed: true,
+      status: 'SUCCESS',
       paymentDate: new Date('2026-01-01'),
       paymentType: PaymentType.FIRST_PAYMENT,
       receiptUrl: 'r/1',
@@ -497,6 +564,36 @@ describe('AdminService (reporting)', () => {
 
       const res = await service.getTransactions(true, 'ALL', 1, 50);
       expect(res.items[0].receiptSignedUrl).toBeNull();
+    });
+
+    it('joins only the three columns it denormalizes, and projects the rest away', async () => {
+      prisma.payment.findMany.mockResolvedValue([
+        {
+          ...row,
+          paystackReference: 'lopay_secret_ref',
+          enrollment: {
+            className: 'JSS1',
+            child: { fullName: 'Kid A' },
+            school: { name: 'Acme', accountNumber: '0123456789' },
+          },
+        },
+      ]);
+      prisma.payment.count.mockResolvedValue(1);
+
+      const res = await service.getTransactions(false, 'ALL', 1, 50);
+
+      expect(prisma.payment.findMany.mock.calls[0][0].include).toEqual({
+        enrollment: {
+          select: {
+            className: true,
+            child: { select: { fullName: true } },
+            school: { select: { name: true } },
+          },
+        },
+      });
+      expect(res.items[0]).not.toHaveProperty('enrollment');
+      expect(res.items[0]).not.toHaveProperty('paystackReference');
+      expect(JSON.stringify(res.items[0])).not.toContain('0123456789');
     });
   });
 
@@ -642,12 +739,14 @@ describe('AdminService (reporting)', () => {
         );
       });
 
-      it('discounts confirmed installments when judging who is behind', async () => {
-        prisma.childEnrollment.findMany.mockResolvedValue([behind]);
-        // All 12 installments confirmed → nothing missed on schedule. The term
-        // has not expired yet, so no overdue despite the balance.
+      it('discounts confirmed installment money when judging who is behind', async () => {
+        // Four weeks into a ₦12,000 schedule with four ₦1,000 slots paid →
+        // on schedule, so the balance is outstanding but not overdue.
+        prisma.childEnrollment.findMany.mockResolvedValue([
+          { ...behind, termStartDate: weeksAgo(4), remainingBalance: 800_000 },
+        ]);
         prisma.payment.groupBy.mockResolvedValue([
-          { enrollmentId: 'e1', _count: { _all: 12 } },
+          { enrollmentId: 'e1', _sum: { amountPaid: 400_000 } },
         ]);
         prisma.childEnrollment.groupBy.mockResolvedValue([
           { schoolId: 's1', _count: { _all: 1 } },
@@ -655,9 +754,45 @@ describe('AdminService (reporting)', () => {
 
         const res = await service.getBreakdownSummary();
 
-        expect(res.totalOutstanding).toBe(6_000);
+        expect(res.totalOutstanding).toBe(8_000);
         expect(res.totalOverdue).toBe(0);
         expect(res.overdueStudents).toBe(0);
+      });
+
+      it('does not chase a parent who paid several installments in one go', async () => {
+        // The same ₦4,000 as the case above, but it arrived as a single
+        // transfer. Counting payment ROWS reported this parent as three
+        // installments missed; counting money reports them as on schedule.
+        prisma.childEnrollment.findMany.mockResolvedValue([
+          { ...behind, termStartDate: weeksAgo(4), remainingBalance: 800_000 },
+        ]);
+        prisma.payment.groupBy.mockResolvedValue([
+          { enrollmentId: 'e1', _sum: { amountPaid: 400_000 } },
+        ]);
+        prisma.childEnrollment.groupBy.mockResolvedValue([
+          { schoolId: 's1', _count: { _all: 1 } },
+        ]);
+
+        const res = await service.getBreakdownSummary();
+
+        expect(res.totalOverdue).toBe(0);
+        expect(res.overdueStudents).toBe(0);
+      });
+
+      it('sums installment value rather than counting payments', async () => {
+        prisma.childEnrollment.findMany.mockResolvedValue([behind]);
+        prisma.payment.groupBy.mockResolvedValue([]);
+        prisma.childEnrollment.groupBy.mockResolvedValue([]);
+        prisma.school.findMany.mockResolvedValue([]);
+
+        await service.getBreakdownSummary();
+
+        expect(prisma.payment.groupBy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            by: ['enrollmentId'],
+            _sum: { amountPaid: true },
+          }),
+        );
       });
 
       it('still lists a school whose plans are all settled', async () => {
@@ -866,6 +1001,12 @@ describe('AdminService (reporting)', () => {
                   id: 'p1',
                   amountPaid: 100000,
                   platformAmount: 2000,
+                  schoolAmount: 98_000,
+                  enrollmentId: 'enr-1',
+                  schoolId: 's1',
+                  receiver: 'SCHOOL',
+                  isConfirmed: true,
+                  status: 'SUCCESS',
                   paymentDate: now,
                   paymentType: PaymentType.INSTALLMENT,
                   receiptUrl: null,

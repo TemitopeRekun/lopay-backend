@@ -1211,7 +1211,9 @@ async function finish() {
   console.log();
   await prisma.$disconnect();
   await pool.end();
-  process.exit(0);
+  // Non-zero on any failed check so CI (or a pre-deploy gate) can rely on this
+  // script instead of a human reading the tally.
+  process.exit(fail > 0 ? 1 : 0);
 }
 
 main().catch(async (e) => {

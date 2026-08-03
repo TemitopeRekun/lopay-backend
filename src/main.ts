@@ -8,6 +8,7 @@ import { initSentry } from './common/observability/sentry';
 import { RedisIoAdapter } from './events/redis-io.adapter';
 import { initEncryptionKey } from './common/encryption';
 import { JsonLogger } from './common/logger/json.logger';
+import { resolveSecurityPosture } from './common/security-posture';
 
 async function bootstrap() {
   initSentry();
@@ -29,6 +30,12 @@ async function bootstrap() {
     app.set('trust proxy', Number.isNaN(hops) ? trustProxy : hops);
   }
 
+  // Which hardening applies is derived from what this deployment IS (served over
+  // TLS? documenting itself?) rather than from NODE_ENV — the Render host runs
+  // NODE_ENV=development deliberately, so the old gate silently dropped HSTS and
+  // the CSP on a public internet service. See common/security-posture.ts.
+  const posture = resolveSecurityPosture(process.env);
+
   // Security headers
   app.use(
     (
@@ -43,19 +50,19 @@ async function bootstrap() {
         'Permissions-Policy',
         'geolocation=(), microphone=(), camera=()',
       );
-      if (process.env.NODE_ENV === 'production') {
+      if (posture.hsts) {
         res.setHeader(
           'Strict-Transport-Security',
           'max-age=31536000; includeSubDomains',
         );
-        // This service returns JSON only (the SPA is a separate origin). A strict
-        // CSP is the strongest defense against any reflected-content XSS — and
-        // replaces the deprecated X-XSS-Protection header. Swagger (dev only) needs
-        // inline assets, so the CSP is applied in production only.
-        res.setHeader(
-          'Content-Security-Policy',
-          "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
-        );
+      }
+      // This service returns JSON only (the SPA is a separate origin), so the
+      // strictest possible CSP is also the correct one — the strongest defense
+      // against any reflected-content XSS, and the replacement for the deprecated
+      // X-XSS-Protection header. Withheld only when Swagger is serving HTML with
+      // inline assets that `default-src 'none'` would blank out.
+      if (posture.contentSecurityPolicy) {
+        res.setHeader('Content-Security-Policy', posture.contentSecurityPolicy);
       }
       next();
     },
@@ -91,8 +98,11 @@ async function bootstrap() {
     credentials: corsOrigins.length > 0,
   });
 
-  // Swagger Configuration
-  if (nodeEnv !== 'production') {
+  // Swagger Configuration. Gated on an explicit API_DOCS_ENABLED opt-in, NOT on
+  // NODE_ENV: the live Render host runs NODE_ENV=development, so the old condition
+  // published Swagger UI at /api and the full OpenAPI document at /api-json to the
+  // public internet. Defaulting to off means a missing setting closes the door.
+  if (posture.apiDocsEnabled) {
     const config = new DocumentBuilder()
       .setTitle('LoPay API')
       .setDescription('The LoPay API documentation for frontend integration')

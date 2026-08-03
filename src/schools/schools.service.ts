@@ -12,6 +12,7 @@ import {
   UserRole,
   PaymentTransactionStatus,
   PaymentType,
+  NotificationType,
   Prisma,
 } from '../generated/prisma/client';
 import { CreateSchoolDto } from '../admin/dto/create.school.dto';
@@ -22,8 +23,10 @@ import { AuditService, AuditActor } from '../audit/audit.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { SchoolOnboardingService } from '../school-onboarding/school-onboarding.service';
 import { Money } from '../common/money';
-import { paymentCommonFields } from '../common/payment-dto';
+import { toPaymentView } from '../common/payment-dto';
 import { CacheService, CacheKeys } from '../cache/cache.service';
+import { PaystackService } from '../paystack/paystack.service';
+import { errorMessage } from '../common/errors';
 
 @Injectable()
 export class SchoolPaymentsService {
@@ -44,6 +47,7 @@ export class SchoolPaymentsService {
     private readonly ledger: LedgerService,
     private readonly onboarding: SchoolOnboardingService,
     private readonly cache: CacheService,
+    private readonly paystack: PaystackService,
   ) {}
 
   /** Thin caller — provisioning saga lives in SchoolOnboardingService (Milestone 3). */
@@ -67,16 +71,10 @@ export class SchoolPaymentsService {
     });
     if (!school) throw new NotFoundException('School not found');
 
-    return this.prisma.school.update({
-      where: { id },
-      data: {
-        name: dto.schoolName,
-        address: dto.address,
-        phone: dto.phone,
-        bankName: dto.bankName,
-        accountName: dto.accountName,
-        accountNumber: dto.accountNumber,
-      },
+    return this.applySettlementUpdate(school, dto, {
+      name: dto.schoolName,
+      address: dto.address,
+      phone: dto.phone,
     });
   }
 
@@ -132,14 +130,157 @@ export class SchoolPaymentsService {
       throw new NotFoundException('School not found');
     }
 
-    return this.prisma.school.update({
-      where: { id: schoolId },
+    return this.applySettlementUpdate(school, dto, {});
+  }
+
+  /**
+   * Persist a school profile update, keeping the TWO settlement destinations in
+   * step: the bank details we show parents for installments, and the Paystack
+   * subaccount that first-payment splits settle into.
+   *
+   * Before this existed, editing bank details only moved the first: installments
+   * went to the new account while card money kept landing in the old one, with
+   * nothing in the product to reveal the split-brain.
+   *
+   * Order matters, and it is chosen so every failure mode is safe:
+   *  1. Resolve the new account at Paystack first — a typo'd account number is
+   *     rejected before it is ever shown to a parent, and the bank's registered
+   *     name (not the submitted one) is what we store.
+   *  2. Persist.
+   *  3. Re-point the subaccount. If that call fails we DEACTIVATE online payments
+   *     for the school rather than leave card money flowing to the old account:
+   *     `initiateFirstPayment` refuses a school whose subaccount is inactive, so
+   *     the school is blocked (recoverable via the admin re-provision endpoint)
+   *     instead of quietly mis-settling.
+   */
+  private async applySettlementUpdate(
+    school: {
+      id: string;
+      name: string;
+      bankCode: string | null;
+      accountNumber: string;
+      paystackSubaccountCode: string | null;
+    },
+    dto: UpdateSchoolDto,
+    otherFields: Prisma.SchoolUpdateInput,
+  ) {
+    const accountNumber = dto.accountNumber ?? school.accountNumber;
+    const bankCode = dto.bankCode ?? school.bankCode;
+    const settlementChanged =
+      accountNumber !== school.accountNumber || bankCode !== school.bankCode;
+
+    let accountName = dto.accountName;
+    if (settlementChanged) {
+      if (!bankCode) {
+        throw new BadRequestException(
+          'bankCode is required when changing the settlement account',
+        );
+      }
+      // Authoritative check + authoritative name. Storing the bank's registered
+      // account name (rather than whatever was typed) means the name a parent
+      // reads always matches the account the money reaches.
+      const resolved = await this.paystack.resolveAccount(
+        accountNumber,
+        bankCode,
+      );
+      accountName = resolved.accountName;
+    }
+
+    // When the destination moves and there is a subaccount to re-point, the new
+    // details and `paystackSubaccountActive: false` are written TOGETHER, and the
+    // flag is restored only once Paystack confirms the new destination.
+    //
+    // The order matters for the crash case. Persisting the details first and
+    // deactivating only in the catch block leaves a window in which the process can
+    // die (a Render restart mid-request) with the new details saved and the
+    // subaccount still ACTIVE against the OLD account — card money then settles
+    // somewhere the school no longer controls, silently. Deactivating in the same
+    // write makes every interruption fail closed: worst case online payments are
+    // blocked for a school until an admin re-provisions, which is loud and fixable.
+    const needsRepoint = settlementChanged && !!school.paystackSubaccountCode;
+    const updated = await this.prisma.school.update({
+      where: { id: school.id },
       data: {
+        ...otherFields,
         bankName: dto.bankName,
-        accountName: dto.accountName,
+        bankCode: dto.bankCode,
+        accountName,
         accountNumber: dto.accountNumber,
+        ...(needsRepoint ? { paystackSubaccountActive: false } : {}),
       },
     });
+
+    if (!settlementChanged) return updated;
+
+    await this.announceSettlementChange(school.id, updated.name, accountNumber);
+
+    // `bankCode` is non-null here (the guard above throws without it); the explicit
+    // check also narrows the type for the Paystack call.
+    if (!school.paystackSubaccountCode || !bankCode) return updated;
+
+    try {
+      await this.paystack.updateSubaccount(school.paystackSubaccountCode, {
+        businessName: updated.name,
+        settlementBank: bankCode,
+        accountNumber,
+        percentageCharge: 0, // overridden per-transaction via transaction_charge
+      });
+      // Confirmed: the subaccount now points where the parents' installments do.
+      return this.prisma.school.update({
+        where: { id: school.id },
+        data: { paystackSubaccountActive: true },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to re-point Paystack subaccount for school ${school.id}: ${errorMessage(
+          error,
+        )} — online payments disabled until it is re-provisioned.`,
+      );
+      await this.notifyAdmins(
+        'Paystack subaccount out of sync',
+        `${updated.name} changed its settlement account but the Paystack subaccount could not be updated. Online first payments are disabled for this school until an admin re-provisions the subaccount.`,
+      );
+      // Already inactive from the write above — return that state, don't re-write.
+      return updated;
+    }
+  }
+
+  /**
+   * A settlement account change is the classic payment-redirection fraud, so tell
+   * the admins every time one happens — detection does not need a schema change.
+   */
+  private async announceSettlementChange(
+    schoolId: string,
+    schoolName: string,
+    accountNumber: string,
+  ) {
+    const masked = accountNumber.slice(-4).padStart(accountNumber.length, '•');
+    this.logger.warn(
+      `School ${schoolId} changed its settlement account (now ${masked})`,
+    );
+    await this.notifyAdmins(
+      'School settlement account changed',
+      `${schoolName} updated its bank details. Money now settles to account ${masked}. Verify with the school if this was not expected.`,
+    );
+  }
+
+  /** Fan a platform-level alert out to every super admin. */
+  private async notifyAdmins(title: string, message: string) {
+    const admins = await this.prisma.user.findMany({
+      where: { role: UserRole.SUPER_ADMIN },
+      select: { id: true },
+    });
+    await Promise.all(
+      admins.map((admin) =>
+        this.notificationsService.create({
+          userId: admin.id,
+          title,
+          message,
+          type: NotificationType.ALERT,
+          link: '/admin/schools',
+        }),
+      ),
+    );
   }
 
   async deleteSchool(id: string) {
@@ -573,9 +714,10 @@ export class SchoolPaymentsService {
       where: baseWhere,
       include: {
         enrollment: {
-          include: {
-            child: true,
-            school: true,
+          select: {
+            className: true,
+            child: { select: { fullName: true } },
+            school: { select: { name: true } },
           },
         },
       },
@@ -586,19 +728,7 @@ export class SchoolPaymentsService {
     const toPaymentDto = (
       payment: (typeof payments)[0],
       receiptSignedUrl?: string | null,
-    ) => ({
-      id: payment.id,
-      schoolId: payment.schoolId,
-      date: payment.paymentDate,
-      paymentDate: payment.paymentDate,
-      ...paymentCommonFields(payment),
-      childName: payment.enrollment.child.fullName,
-      type: payment.paymentType,
-      paymentType: payment.paymentType,
-      status: payment.status,
-      receiptUrl: payment.receiptUrl,
-      ...(receiptSignedUrl !== undefined ? { receiptSignedUrl } : {}),
-    });
+    ) => toPaymentView(payment, receiptSignedUrl);
 
     if (!includeReceiptSignedUrls) {
       return payments.map((payment) => toPaymentDto(payment));
@@ -652,13 +782,22 @@ export class SchoolPaymentsService {
           ? {}
           : { paymentType: paymentType as PaymentType }),
         status: PaymentTransactionStatus.PENDING,
+        // Never offer a card first payment as an owner approval: it is PENDING from
+        // the moment the popup opens and confirms itself from the Paystack webhook.
+        // Approving one manually would activate an enrollment for money that may
+        // never be captured (see LedgerService.confirmFirstPayment).
+        NOT: {
+          paymentType: PaymentType.FIRST_PAYMENT,
+          paystackReference: { not: null },
+        },
       },
       take: cappedTake,
       include: {
         enrollment: {
-          include: {
-            child: true,
-            school: true,
+          select: {
+            className: true,
+            child: { select: { fullName: true } },
+            school: { select: { name: true } },
           },
         },
       },
@@ -667,15 +806,7 @@ export class SchoolPaymentsService {
     const toPendingDto = (
       p: (typeof payments)[0],
       receiptSignedUrl?: string | null,
-    ) => ({
-      ...p,
-      date: p.paymentDate,
-      ...paymentCommonFields(p),
-      platformAmount: Money.fromKobo(p.platformAmount).toNaira(),
-      schoolAmount: Money.fromKobo(p.schoolAmount).toNaira(),
-      childName: p.enrollment?.child?.fullName,
-      ...(receiptSignedUrl !== undefined ? { receiptSignedUrl } : {}),
-    });
+    ) => toPaymentView(p, receiptSignedUrl);
 
     if (!includeReceiptSignedUrls) {
       return payments.map((p) => toPendingDto(p));

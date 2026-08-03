@@ -104,6 +104,65 @@ describe('EventsGateway', () => {
       await gateway.handleConnection(client as never);
       expect(authService.api.getSession).toHaveBeenCalledTimes(1);
     });
+
+    // Cookie auth mode (M2 dual-path). A cookie-mode client has no bearer token to
+    // put in the handshake — it relies on the browser attaching the httpOnly
+    // session cookie. Without this branch the HTTP layer would authenticate fine
+    // while every socket was rejected for a "missing token", silently killing
+    // realtime for the whole web app.
+    describe('cookie session (no bearer token)', () => {
+      it('authenticates from the handshake cookie', async () => {
+        authService.api.getSession.mockResolvedValue({
+          user: { id: 'u1', role: 'PARENT', schoolId: null },
+        });
+        const client = makeClient({
+          headers: { cookie: 'better-auth.session_token=abc123' },
+        });
+
+        await gateway.handleConnection(client as never);
+
+        const headers = authService.api.getSession.mock.calls[0][0]
+          .headers as Headers;
+        expect(headers.get('cookie')).toBe('better-auth.session_token=abc123');
+        expect(client.join).toHaveBeenCalledWith('user:u1');
+        expect(client.disconnect).not.toHaveBeenCalled();
+      });
+
+      it('still rejects an invalid cookie session', async () => {
+        authService.api.getSession.mockResolvedValue(null);
+        const client = makeClient({
+          headers: { cookie: 'better-auth.session_token=stale' },
+        });
+
+        await gateway.handleConnection(client as never);
+
+        expect(client.disconnect).toHaveBeenCalledWith(true);
+      });
+
+      it('prefers an explicit bearer token over the ambient cookie', async () => {
+        authService.api.getSession.mockResolvedValue({ user: { id: 'u1' } });
+        const client = makeClient({
+          auth: { token: 'tok' },
+          headers: { cookie: 'better-auth.session_token=abc123' },
+        });
+
+        await gateway.handleConnection(client as never);
+
+        const headers = authService.api.getSession.mock.calls[0][0]
+          .headers as Headers;
+        expect(headers.get('authorization')).toBe('Bearer tok');
+        expect(headers.get('cookie')).toBeNull();
+      });
+
+      it('rejects a handshake with neither credential without hitting the session', async () => {
+        const client = makeClient({ headers: {} });
+
+        await gateway.handleConnection(client as never);
+
+        expect(authService.api.getSession).not.toHaveBeenCalled();
+        expect(client.disconnect).toHaveBeenCalledWith(true);
+      });
+    });
   });
 
   it('handleDisconnect logs without throwing', () => {

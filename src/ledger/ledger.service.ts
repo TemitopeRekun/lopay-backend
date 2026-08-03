@@ -13,11 +13,15 @@ import {
   PaymentReceiver,
   AuditAction,
   NotificationType,
+  UserRole,
+  Prisma,
 } from '../generated/prisma/client';
 import { EventsGateway } from '../events/events.gateway';
 import { AuditService, AuditActor } from '../audit/audit.service';
 import { Money } from '../common/money';
+import { errorMessage } from '../common/errors';
 import { MetricsService } from '../common/observability/metrics.service';
+import { captureMessage } from '../common/observability/sentry';
 
 /**
  * The single owner of every money-state transition (Milestone 3).
@@ -56,6 +60,47 @@ export class LedgerService {
       return undefined;
     }
     return Math.max(0, (Date.now() - submittedAt.getTime()) / 1000);
+  }
+
+  /**
+   * Credit a confirmed first payment's school share against the enrollment and
+   * move the plan to its resulting state.
+   *
+   * An enrollment opens with the WHOLE school fee outstanding — the deposit is
+   * only credited here, by whichever path confirms the money (Paystack reconcile,
+   * admin settle, or a school owner's manual confirm). Previously the balance was
+   * pre-credited at initiation, so an abandoned checkout advertised a payment that
+   * never arrived: the parent saw 75% owed having paid nothing, and the platform's
+   * arrears book was short the uncollected deposit.
+   *
+   * Callers must already hold the exactly-once guard (the conditional `updateMany`
+   * that flips the payment), so this decrement can never be applied twice. The
+   * clamp keeps a slight overpayment from driving the balance negative.
+   */
+  private async creditFirstPaymentToBalance(
+    tx: Prisma.TransactionClient,
+    enrollmentId: string,
+    schoolAmountKobo: number,
+  ): Promise<{ remainingBalance: number; isCompleted: boolean }> {
+    const decremented = await tx.childEnrollment.update({
+      where: { id: enrollmentId },
+      data: { remainingBalance: { decrement: schoolAmountKobo } },
+    });
+
+    const isCompleted = decremented.remainingBalance <= 0;
+    const remainingBalance = Math.max(0, decremented.remainingBalance);
+
+    await tx.childEnrollment.update({
+      where: { id: enrollmentId },
+      data: {
+        remainingBalance,
+        paymentStatus: isCompleted
+          ? PaymentStatus.COMPLETED
+          : PaymentStatus.ACTIVE,
+      },
+    });
+
+    return { remainingBalance, isCompleted };
   }
 
   // ============================== installments ==============================
@@ -149,7 +194,16 @@ export class LedgerService {
               ? PaymentStatus.COMPLETED
               : before.paymentStatus,
           },
-          metadata: { amount: payment.amountPaid, isCompleted },
+          metadata: {
+            amount: payment.amountPaid,
+            isCompleted,
+            // True when the approver is also the payer (a school owner confirming
+            // a payment on their own child's enrollment at their own school — the
+            // only way one person can still hold both halves of this control).
+            // Recorded so the maker-checker exception is visible in the audit log.
+            selfApproved:
+              payment.enrollment.child.parent.userId === actor.userId,
+          },
         },
         tx,
       );
@@ -447,7 +501,17 @@ export class LedgerService {
 
   // ============================ first payments ============================
 
-  /** Settle school share and activate enrollment */
+  /**
+   * Settle school share and activate enrollment.
+   *
+   * MANUAL first payments only (`paystackReference: null`). A Paystack-collected
+   * first payment is created PENDING at *initiation* — before the parent has paid
+   * anything — so it would otherwise match this query and let an admin activate an
+   * enrollment for money that was never collected. Worse, the manual flip makes the
+   * later real `charge.success` a no-op (see `reconcilePaystackPayment`), losing the
+   * fee reconciliation and audit trail for an actual charge. Card first payments
+   * settle themselves from the webhook / verify-on-return / reconciliation sweep.
+   */
   async settleFirstPayment(paymentId: string, actor: AuditActor) {
     const payment = await this.prisma.payment.findFirst({
       where: {
@@ -455,6 +519,7 @@ export class LedgerService {
         paymentType: PaymentType.FIRST_PAYMENT,
         receiver: PaymentReceiver.PLATFORM,
         isConfirmed: false,
+        paystackReference: null,
       },
       include: {
         enrollment: {
@@ -483,11 +548,13 @@ export class LedgerService {
       });
       if (res.count === 0) return false;
 
-      // 2️⃣ Activate enrollment
-      await tx.childEnrollment.update({
-        where: { id: payment.enrollmentId },
-        data: { paymentStatus: PaymentStatus.ACTIVE },
-      });
+      // 2️⃣ Credit the school share and activate (or settle) the enrollment.
+      const { remainingBalance, isCompleted } =
+        await this.creditFirstPaymentToBalance(
+          tx,
+          payment.enrollmentId,
+          payment.schoolAmount,
+        );
 
       // 2b. Audit (atomic with the settlement)
       await this.audit.record(
@@ -500,8 +567,15 @@ export class LedgerService {
           before: {
             isConfirmed: false,
             paymentStatus: enrollment.paymentStatus,
+            remainingBalance: enrollment.remainingBalance,
           },
-          after: { isConfirmed: true, paymentStatus: PaymentStatus.ACTIVE },
+          after: {
+            isConfirmed: true,
+            paymentStatus: isCompleted
+              ? PaymentStatus.COMPLETED
+              : PaymentStatus.ACTIVE,
+            remainingBalance,
+          },
           metadata: { enrollmentId: enrollment.id, amount: payment.amountPaid },
         },
         tx,
@@ -563,7 +637,16 @@ export class LedgerService {
     };
   }
 
-  /** Reject a pending first payment and mark enrollment as failed */
+  /**
+   * Reject a pending first payment and mark enrollment as failed.
+   *
+   * MANUAL first payments only (`paystackReference: null`) — same reasoning as
+   * `settleFirstPayment`, but the failure mode is worse in this direction: a
+   * rejected-then-completed card payment leaves the charge captured and split at
+   * Paystack while our enrollment sits FAILED, and the arriving `charge.success`
+   * can no longer flip a non-PENDING row. Card failures come from Paystack itself
+   * (`charge.failed`, or the 24h abandonment sweep).
+   */
   async rejectFirstPayment(paymentId: string, actor: AuditActor) {
     const payment = await this.prisma.payment.findFirst({
       where: {
@@ -571,6 +654,7 @@ export class LedgerService {
         paymentType: PaymentType.FIRST_PAYMENT,
         receiver: PaymentReceiver.PLATFORM,
         isConfirmed: false,
+        paystackReference: null,
       },
       include: {
         enrollment: {
@@ -688,6 +772,177 @@ export class LedgerService {
 
   // =========================== paystack reconcile ===========================
 
+  /**
+   * A `charge.success` arrived for a payment that is no longer PENDING (FAILED or
+   * REVERSED in our books). Real money has moved at Paystack and the split has
+   * already paid the school subaccount, so this is a book-vs-bank break that only a
+   * human can resolve — the parent may have re-enrolled since, and the enrollment's
+   * balance may already reflect a different plan.
+   *
+   * We therefore change NO money state: we record the break loudly (error log +
+   * metric + Sentry) and notify every super admin with the reference and amount.
+   * Returning `reconciled: false` keeps the webhook's 200 (the event is not
+   * retryable — retrying would not fix a conflict) while making the discrepancy
+   * impossible to miss.
+   *
+   * The alert is raised AT MOST ONCE per reference. Three separate callers can reach
+   * this (the webhook, the parent-triggered verify-on-return, and the reconciliation
+   * sweep), and verify-on-return is a plain GET the parent can repeat by refreshing
+   * — without a durable guard, one conflicted payment would fan out an unbounded
+   * stream of ALERTs to every admin and bury the signal it exists to raise. The
+   * `WebhookEvent` unique `dedupeKey` is reused as that guard: it is the table
+   * already dedicating a uniquely-constrained row per provider event, so the marker
+   * survives restarts and is shared across instances, and the row doubles as an
+   * auditable record of the break.
+   */
+  private async escalateReconcileConflict(
+    payment: {
+      id: string;
+      status: PaymentTransactionStatus;
+      amountPaid: number;
+      schoolId: string;
+      enrollmentId: string;
+    },
+    reference: string,
+    actualFeeKobo: number | null,
+  ): Promise<{ reconciled: false; reason: 'status_conflict'; status: string }> {
+    const outcome = {
+      reconciled: false as const,
+      reason: 'status_conflict' as const,
+      status: payment.status,
+    };
+
+    const amountStr = Money.fromKobo(payment.amountPaid).formatNaira();
+    const detail =
+      `Paystack reported a SUCCESSFUL charge for ${reference} (${amountStr}) ` +
+      `but the payment is ${payment.status} in our books. The money has been ` +
+      `captured and split at Paystack; no state was changed automatically.`;
+
+    // Claim the alert. A duplicate key means another caller already escalated this
+    // reference — still log it (the operator needs to see repeat hits) but do not
+    // re-notify.
+    const dedupeKey = `reconcile.conflict:${reference}`;
+    let alreadyEscalated = false;
+    try {
+      await this.prisma.webhookEvent.create({
+        data: {
+          provider: 'paystack',
+          eventType: 'reconcile.conflict',
+          dedupeKey,
+          reference,
+          payload: {
+            paymentId: payment.id,
+            enrollmentId: payment.enrollmentId,
+            schoolId: payment.schoolId,
+            localStatus: payment.status,
+            amountPaid: payment.amountPaid,
+            actualPaystackFee: actualFeeKobo,
+          },
+          error: detail,
+        },
+      });
+    } catch (err) {
+      if (!this.isUniqueConflictOn(err, 'dedupeKey')) throw err;
+      alreadyEscalated = true;
+    }
+
+    this.logger.error(detail);
+    if (alreadyEscalated) {
+      this.logger.warn(
+        `Reconcile conflict on ${reference} already escalated — not re-alerting.`,
+      );
+      return outcome;
+    }
+
+    this.metrics.recordReconcileConflict(payment.status);
+    captureMessage(`Paystack reconcile conflict on ${reference}`, 'error', {
+      reference,
+      paymentId: payment.id,
+      enrollmentId: payment.enrollmentId,
+      schoolId: payment.schoolId,
+      localStatus: payment.status,
+      amountPaid: payment.amountPaid,
+      actualPaystackFee: actualFeeKobo,
+    });
+
+    // Deliver the alert — with the claim above already taken, a delivery failure
+    // must not become a PERMANENTLY lost alert. The claim is created first because
+    // at-most-once matters under concurrency (three callers race here, and one is
+    // a GET the parent can spam), but that ordering means a fan-out that dies after
+    // the claim would mark the break "escalated" while no human ever heard about
+    // it. So: each admin is notified independently (one bad row cannot sink the
+    // batch), and if NOBODY could be told, the claim is released so the next
+    // charge.success replay escalates again instead of hitting the dedupe wall.
+    let intendedRecipients = 0;
+    let delivered = 0;
+    try {
+      const admins = await this.prisma.user.findMany({
+        where: { role: UserRole.SUPER_ADMIN },
+        select: { id: true },
+      });
+      intendedRecipients = admins.length;
+      const deliveries = await Promise.allSettled(
+        admins.map((admin) =>
+          this.notificationsService.create({
+            userId: admin.id,
+            title: 'Payment needs manual reconciliation',
+            // Deliberately does NOT promise an in-app settle button: card first
+            // payments are no longer manually settleable (that guard is what stops an
+            // uncollected payment being approved), so the resolution is on Paystack's
+            // side — refund the parent, or pay the school and have the parent re-enroll.
+            message: `${detail} Resolve it on the Paystack dashboard (refund the payer, or settle the school directly) — the app will not activate this enrollment on its own.`,
+            type: NotificationType.ALERT,
+            link: '/admin/approvals',
+          }),
+        ),
+      );
+      for (const delivery of deliveries) {
+        if (delivery.status === 'fulfilled') {
+          delivered += 1;
+        } else {
+          this.logger.error(
+            `Failed to notify an admin about the reconcile conflict on ${reference}: ${errorMessage(delivery.reason)}`,
+          );
+        }
+      }
+    } catch (err) {
+      // The admin lookup itself failed — treat it as zero deliveries below.
+      this.logger.error(
+        `Could not look up admins for the reconcile conflict on ${reference}: ${errorMessage(err)}`,
+      );
+      intendedRecipients = -1; // unknown, but certainly not "nobody to tell"
+    }
+
+    if (intendedRecipients !== 0 && delivered === 0) {
+      // Nobody heard the one alert this path exists to raise. Release the claim
+      // (best-effort — losing the release only re-arms the dedupe, never money)
+      // so a later replay of the charge re-escalates.
+      await this.prisma.webhookEvent
+        .delete({ where: { dedupeKey } })
+        .catch(() => undefined);
+      this.logger.error(
+        `No admin was notified of the reconcile conflict on ${reference}; ` +
+          `released the escalation claim so the next replay re-alerts.`,
+      );
+    }
+
+    return outcome;
+  }
+
+  /** True when an error is the unique-constraint violation on the given field. */
+  private isUniqueConflictOn(error: unknown, field: string): boolean {
+    if (
+      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+      error.code !== 'P2002'
+    ) {
+      return false;
+    }
+    const target = error.meta?.target;
+    return Array.isArray(target)
+      ? target.includes(field)
+      : typeof target === 'string' && target.includes(field);
+  }
+
   async reconcilePaystackPayment(
     reference: string,
     actualFeeKobo: number | null,
@@ -710,10 +965,17 @@ export class LedgerService {
     if (payment.status === PaymentTransactionStatus.SUCCESS) {
       return { reconciled: true, alreadyProcessed: true };
     }
+    // Money arrived for a payment our books had already closed the other way
+    // (FAILED by charge.failed / the abandonment sweep, or REVERSED by a dispute).
+    // The SUCCESS flip below is guarded on PENDING, so it would silently no-op and
+    // report success — the one outcome we must never produce: Paystack has captured
+    // and split real money while the enrollment stays failed. Hold the state and
+    // escalate to a human instead of guessing.
+    if (payment.status !== PaymentTransactionStatus.PENDING) {
+      return this.escalateReconcileConflict(payment, reference, actualFeeKobo);
+    }
 
     const { enrollment } = payment;
-    const newBalance = enrollment.remainingBalance; // already net of this deposit at initiation
-    const isCompleted = newBalance <= 0;
 
     // Concurrency: the webhook and the verify-on-return endpoint both call this.
     // Guard the SUCCESS flip with a conditional write so only the first one wins;
@@ -731,17 +993,16 @@ export class LedgerService {
         },
       });
       if (flipped.count === 0) {
-        return false; // already reconciled by a concurrent caller
+        return null; // already reconciled by a concurrent caller
       }
 
-      await tx.childEnrollment.update({
-        where: { id: enrollment.id },
-        data: {
-          paymentStatus: isCompleted
-            ? PaymentStatus.COMPLETED
-            : PaymentStatus.ACTIVE,
-        },
-      });
+      // The deposit is credited here, not at initiation — see
+      // creditFirstPaymentToBalance.
+      const credited = await this.creditFirstPaymentToBalance(
+        tx,
+        enrollment.id,
+        payment.schoolAmount,
+      );
 
       // Reconcile the estimated Paystack fee against the actual one Paystack
       // charged the platform account, so the book vs. bank discrepancy is
@@ -757,13 +1018,18 @@ export class LedgerService {
           entityId: payment.id,
           actor,
           schoolId: payment.schoolId,
-          before: { status: payment.status, isConfirmed: payment.isConfirmed },
+          before: {
+            status: payment.status,
+            isConfirmed: payment.isConfirmed,
+            remainingBalance: enrollment.remainingBalance,
+          },
           after: {
             status: PaymentTransactionStatus.SUCCESS,
             isConfirmed: true,
-            enrollmentStatus: isCompleted
+            enrollmentStatus: credited.isCompleted
               ? PaymentStatus.COMPLETED
               : PaymentStatus.ACTIVE,
+            remainingBalance: credited.remainingBalance,
           },
           metadata: {
             reference,
@@ -787,12 +1053,18 @@ export class LedgerService {
         );
       }
 
-      return true;
+      return { ...credited, feeDelta };
     });
 
     if (!processed) {
       return { reconciled: true, alreadyProcessed: true };
     }
+    const { isCompleted } = processed;
+
+    // Recorded outside the transaction so a rollback can't leave a phantom drift on
+    // the gauge. Sustained positive drift means our fee estimate is systematically
+    // low (e.g. an un-modelled VAT or a pricing change) — see common/paystack-fee.ts.
+    this.metrics.recordPaystackFeeDelta(processed.feeDelta);
 
     // Notify parent + school owner (post-transaction).
     await this.notificationsService.create({
@@ -1043,14 +1315,38 @@ export class LedgerService {
         throw new BadRequestException('Enrollment is not in pending status');
       }
 
-      // 2. Find Pending First Payment
+      // 2. Find the pending MANUAL first payment. A Paystack-collected first
+      // payment is PENDING from the moment the popup is opened, so without the
+      // `paystackReference: null` filter a school owner could approve a card
+      // payment the parent never completed — activating the enrollment and
+      // crediting the deposit against money that was never captured.
       const payment = await tx.payment.findFirst({
         where: {
           enrollmentId: enrollmentId,
           paymentType: PaymentType.FIRST_PAYMENT,
           isConfirmed: false,
+          paystackReference: null,
         },
       });
+
+      if (!payment) {
+        // Distinguish "nothing to approve" from "this one approves itself", so the
+        // owner isn't left thinking the enrollment is broken.
+        const cardPayment = await tx.payment.findFirst({
+          where: {
+            enrollmentId: enrollmentId,
+            paymentType: PaymentType.FIRST_PAYMENT,
+            isConfirmed: false,
+            paystackReference: { not: null },
+          },
+          select: { id: true },
+        });
+        if (cardPayment) {
+          throw new BadRequestException(
+            'This first payment is collected by card and is confirmed automatically once the payment provider settles it.',
+          );
+        }
+      }
 
       if (!payment) {
         throw new BadRequestException('No pending first payment found');
@@ -1070,11 +1366,14 @@ export class LedgerService {
         throw new BadRequestException('First payment already processed');
       }
 
-      // 4. Activate Enrollment (guarded on the PENDING precondition)
-      await tx.childEnrollment.updateMany({
-        where: { id: enrollmentId, paymentStatus: PaymentStatus.PENDING },
-        data: { paymentStatus: PaymentStatus.ACTIVE },
-      });
+      // 4. Credit the school share and activate (or settle) the enrollment. The
+      // payment flip above is the exactly-once guard for this decrement.
+      const { remainingBalance, isCompleted } =
+        await this.creditFirstPaymentToBalance(
+          tx,
+          enrollmentId,
+          payment.schoolAmount,
+        );
 
       // 4b. Audit (atomic with the confirmation/activation)
       await this.audit.record(
@@ -1087,10 +1386,14 @@ export class LedgerService {
           before: {
             paymentStatus: PaymentStatus.PENDING,
             isConfirmed: payment.isConfirmed,
+            remainingBalance: enrollment.remainingBalance,
           },
           after: {
-            paymentStatus: PaymentStatus.ACTIVE,
+            paymentStatus: isCompleted
+              ? PaymentStatus.COMPLETED
+              : PaymentStatus.ACTIVE,
             isConfirmed: true,
+            remainingBalance,
           },
           metadata: { enrollmentId, amount: payment.amountPaid },
         },

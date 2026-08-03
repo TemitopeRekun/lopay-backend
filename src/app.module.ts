@@ -1,4 +1,4 @@
-import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
+import { Module, MiddlewareConsumer, NestModule, Logger } from '@nestjs/common';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -11,6 +11,9 @@ import { RedisStore } from 'rate-limit-redis';
 import type { Request, Response, NextFunction } from 'express';
 import type Redis from 'ioredis';
 import { createAuth } from './auth/auth.config';
+import { AUTH_FLOOD_LIMIT_PER_MINUTE } from './auth/auth-rate-limit';
+import { clientIpKey, stampClientIp } from './common/client-ip';
+import { resolveSecurityPosture } from './common/security-posture';
 import { PrismaService } from './prisma/prisma.service';
 import { ConfigModule } from '@nestjs/config';
 import { RedisModule, REDIS_CLIENT } from './redis/redis.module';
@@ -108,6 +111,17 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
         // Reverse-proxy hop count for Express `trust proxy` (e.g. 1 behind Caddy).
         // Unset -> the app trusts no proxy (direct exposure).
         TRUST_PROXY: Joi.string().optional(),
+        // Serve Swagger UI (/api) and the OpenAPI document (/api-json). Defaults to
+        // OFF: this is a public internet host, and NODE_ENV cannot be used to gate
+        // it (the deploy runs NODE_ENV=development on purpose).
+        API_DOCS_ENABLED: Joi.string().optional(),
+        // Name of the request header carrying the true client IP at this
+        // deployment's edge, e.g. `cf-connecting-ip` behind Cloudflare. Used to key
+        // the auth rate limiters. Unset -> the socket address is used, which behind
+        // a proxy means ONE shared bucket for every caller. Only name a header the
+        // edge is known to overwrite; one it merely appends to is caller-spoofable.
+        // Confirm a candidate by watching the `clientIp` field in the request log.
+        CLIENT_IP_HEADER: Joi.string().optional(),
         // PII encryption at rest. Optional in dev (plaintext fallback), required
         // in production. Must be exactly 64 hex chars (32 bytes).
         ENCRYPTION_KEY: Joi.when('NODE_ENV', {
@@ -135,14 +149,48 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
       disableGlobalAuthGuard: true,
       inject: [PrismaService, REDIS_CLIENT],
       useFactory: (prisma: PrismaService, redis: Redis | null) => {
-        // Auth brute-force limiter. Shared Redis store when available so the
-        // 20/min cap is enforced across all instances (a per-instance in-memory
-        // limiter would let an attacker multiply attempts by the instance count).
+        // Coarse flood guard over the whole /api/auth handler. Shared Redis store
+        // when available so the cap is enforced across all instances (a
+        // per-instance in-memory limiter would let an attacker multiply attempts by
+        // the instance count).
+        //
+        // Two fixes here over the original 20/min:
+        //
+        //  - `keyGenerator`. The default keys on `req.ip`, which behind Render's
+        //    edge is the SAME value for every caller on the internet — one global
+        //    bucket. Verified against the live deploy: requests carrying different
+        //    X-Forwarded-For values all decremented one counter. Since the SPA calls
+        //    /get-session on every page load, ordinary traffic exhausted it, and an
+        //    attacker could lock every user out of signing in with a trickle of
+        //    requests. See common/client-ip.ts for why the header is declared rather
+        //    than inferred from a `trust proxy` hop count.
+        //  - The ceiling moves to 120/min, because per-IP it must absorb the burst
+        //    from a household or a carrier-NAT'd mobile network. Credential abuse is
+        //    now handled by Better Auth's far tighter per-path rules
+        //    (auth-rate-limit.ts) instead of by this one number.
+        const posture = resolveSecurityPosture(process.env);
+        const clientIpHeader = posture.clientIpHeader;
+
+        // A TLS-fronted deployment with no declared client-IP header cannot tell two
+        // callers apart, so the credential budgets widen to the flood ceiling to
+        // avoid handing an attacker a lockout primitive (see auth-rate-limit.ts).
+        // That trade-off must be visible: silently running looser limits than the
+        // code appears to promise is how the original bug survived unnoticed.
+        if (!posture.trustedPerClientIp) {
+          new Logger('AuthRateLimit').warn(
+            'CLIENT_IP_HEADER is not set on a TLS-fronted deployment: every caller ' +
+              'shares one rate-limit bucket, so per-path credential limits are ' +
+              'relaxed to the flood ceiling. Set CLIENT_IP_HEADER to the header your ' +
+              'edge overwrites (e.g. cf-connecting-ip) — confirm the value by ' +
+              'watching the `clientIp` field in the request log.',
+          );
+        }
         const limiter = rateLimit({
           windowMs: 60_000,
-          limit: 20,
+          limit: AUTH_FLOOD_LIMIT_PER_MINUTE,
           standardHeaders: true,
           legacyHeaders: false,
+          keyGenerator: (req: Request) => clientIpKey(req, clientIpHeader),
           ...(redis
             ? {
                 store: new RedisStore({
@@ -159,6 +207,12 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
           auth: createAuth(prisma),
           bodyParser: { rawBody: true },
           middleware: (req: Request, res: Response, next: NextFunction) => {
+            // Stamp the resolved client IP BEFORE anything else runs. Better Auth
+            // only sees headers, so this is how its limiter and session tracking get
+            // a client IP that the caller cannot forge — and it must happen upstream
+            // of both the limiter below and the auth handler. Overwrites any inbound
+            // value; see common/client-ip.ts.
+            stampClientIp(req, clientIpHeader);
             limiter(req, res, next);
           },
         };
