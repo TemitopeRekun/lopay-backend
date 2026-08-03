@@ -87,6 +87,8 @@ describe('Security boundaries (real DB)', () => {
           useValue: {
             recordPaymentOutcome: jest.fn(),
             setStalledConfirmations: jest.fn(),
+            recordPaystackFeeDelta: jest.fn(),
+            recordReconcileConflict: jest.fn(),
           },
         },
       ],
