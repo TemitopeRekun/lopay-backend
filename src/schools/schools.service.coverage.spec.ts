@@ -2,6 +2,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { SchoolPaymentsService } from './schools.service';
 import {
   PaymentStatus,
+  PaymentTransactionStatus,
   PaymentType,
   UserRole,
 } from '../generated/prisma/client';
@@ -38,6 +39,7 @@ describe('SchoolPaymentsService (coverage)', () => {
   };
   let onboarding: { provisionSchoolAndOwner: jest.Mock };
   let cache: { getOrSet: jest.Mock; del: jest.Mock };
+  let paystack: { resolveAccount: jest.Mock; updateSubaccount: jest.Mock };
   let service: SchoolPaymentsService;
 
   beforeEach(() => {
@@ -80,6 +82,12 @@ describe('SchoolPaymentsService (coverage)', () => {
       ),
       del: jest.fn().mockResolvedValue(undefined),
     };
+    paystack = {
+      resolveAccount: jest
+        .fn()
+        .mockResolvedValue({ accountName: 'ACME SCHOOLS LTD' }),
+      updateSubaccount: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new SchoolPaymentsService(
       prisma as never,
@@ -90,6 +98,7 @@ describe('SchoolPaymentsService (coverage)', () => {
       ledger as never,
       onboarding as never,
       cache as never,
+      paystack as never,
     );
   });
 
@@ -129,12 +138,22 @@ describe('SchoolPaymentsService (coverage)', () => {
     });
 
     it('maps the DTO fields onto the update payload', async () => {
-      prisma.school.findFirst.mockResolvedValue({ id: 's1', deletedAt: null });
+      // Same settlement account as the stored one, so this is a pure profile edit
+      // and no Paystack re-pointing is triggered (see schools.settlement.spec.ts).
+      prisma.school.findFirst.mockResolvedValue({
+        id: 's1',
+        deletedAt: null,
+        name: 'Old Name',
+        bankCode: '058',
+        accountNumber: '0001',
+        paystackSubaccountCode: null,
+      });
       await service.updateSchool('s1', {
         schoolName: 'New Name',
         address: 'Addr',
         phone: '080',
         bankName: 'GTB',
+        bankCode: '058',
         accountName: 'Acme',
         accountNumber: '0001',
       } as never);
@@ -146,10 +165,12 @@ describe('SchoolPaymentsService (coverage)', () => {
           address: 'Addr',
           phone: '080',
           bankName: 'GTB',
+          bankCode: '058',
           accountName: 'Acme',
           accountNumber: '0001',
         },
       });
+      expect(paystack.updateSubaccount).not.toHaveBeenCalled();
     });
   });
 
@@ -233,16 +254,29 @@ describe('SchoolPaymentsService (coverage)', () => {
     });
 
     it('updates only the bank fields', async () => {
-      prisma.school.findUnique.mockResolvedValue({ id: 's1' });
+      // Settlement account unchanged (same number + code) -> a display-only edit.
+      prisma.school.findUnique.mockResolvedValue({
+        id: 's1',
+        name: 'Acme',
+        bankCode: '033',
+        accountNumber: '0002',
+        paystackSubaccountCode: null,
+      });
       await service.updateSchoolBankDetails('s1', {
         bankName: 'UBA',
+        bankCode: '033',
         accountName: 'Acme',
         accountNumber: '0002',
       } as never);
 
       expect(prisma.school.update).toHaveBeenCalledWith({
         where: { id: 's1' },
-        data: { bankName: 'UBA', accountName: 'Acme', accountNumber: '0002' },
+        data: {
+          bankName: 'UBA',
+          bankCode: '033',
+          accountName: 'Acme',
+          accountNumber: '0002',
+        },
       });
     });
   });
@@ -309,11 +343,14 @@ describe('SchoolPaymentsService (coverage)', () => {
   });
 
   describe('getDashboardStats', () => {
-    it('sums revenue/pending/defaulted and returns Naira', async () => {
-      db.childEnrollment.count.mockResolvedValue(7);
+    it('sums revenue/pending/awaiting/defaulted and returns Naira', async () => {
+      db.childEnrollment.count
+        .mockResolvedValueOnce(7) // totalStudents
+        .mockResolvedValueOnce(5); // activeStudents
       prisma.payment.aggregate
         .mockResolvedValueOnce({ _sum: { schoolAmount: 300000 } }) // confirmed
-        .mockResolvedValueOnce({ _sum: { schoolAmount: 120000 } }); // pending
+        .mockResolvedValueOnce({ _sum: { schoolAmount: 120000 } }) // pending installments
+        .mockResolvedValueOnce({ _sum: { schoolAmount: 60000 } }); // pending first payments
       db.childEnrollment.findMany.mockResolvedValue([
         { remainingBalance: 40000 },
         { remainingBalance: 10000 },
@@ -323,8 +360,10 @@ describe('SchoolPaymentsService (coverage)', () => {
 
       expect(res).toEqual({
         totalStudents: 7,
+        activeStudents: 5,
         totalRevenue: 3000,
         pendingRevenue: 1200,
+        awaitingActivation: 600,
         defaultedAmount: 500,
       });
     });
@@ -333,22 +372,102 @@ describe('SchoolPaymentsService (coverage)', () => {
       db.childEnrollment.count.mockResolvedValue(0);
       prisma.payment.aggregate
         .mockResolvedValueOnce({ _sum: { schoolAmount: null } })
+        .mockResolvedValueOnce({ _sum: { schoolAmount: null } })
         .mockResolvedValueOnce({ _sum: { schoolAmount: null } });
       db.childEnrollment.findMany.mockResolvedValue([]);
 
       const res = await service.getDashboardStats('s1');
       expect(res).toEqual({
         totalStudents: 0,
+        activeStudents: 0,
         totalRevenue: 0,
         pendingRevenue: 0,
+        awaitingActivation: 0,
         defaultedAmount: 0,
+      });
+    });
+
+    /*
+     * Rejection sets FAILED and reversal sets REVERSED — both leave
+     * `isConfirmed: false`. Filtering on that flag alone counted declined and
+     * clawed-back money as still awaiting the school, with nothing in the
+     * approval queue that could ever clear it.
+     */
+    it('counts only PENDING rows as pending — never FAILED or REVERSED', async () => {
+      db.childEnrollment.count.mockResolvedValue(0);
+      prisma.payment.aggregate.mockResolvedValue({
+        _sum: { schoolAmount: 0 },
+      });
+      db.childEnrollment.findMany.mockResolvedValue([]);
+
+      await service.getDashboardStats('s1');
+
+      const [, pendingInstallmentCall, pendingFirstCall] =
+        prisma.payment.aggregate.mock.calls;
+      expect(pendingInstallmentCall[0].where).toEqual({
+        schoolId: 's1',
+        isConfirmed: false,
+        status: PaymentTransactionStatus.PENDING,
+        paymentType: PaymentType.INSTALLMENT,
+      });
+      expect(pendingFirstCall[0].where).toEqual({
+        schoolId: 's1',
+        isConfirmed: false,
+        status: PaymentTransactionStatus.PENDING,
+        paymentType: PaymentType.FIRST_PAYMENT,
+      });
+    });
+
+    it('counts revenue only from confirmed SUCCESS rows', async () => {
+      db.childEnrollment.count.mockResolvedValue(0);
+      prisma.payment.aggregate.mockResolvedValue({
+        _sum: { schoolAmount: 0 },
+      });
+      db.childEnrollment.findMany.mockResolvedValue([]);
+
+      await service.getDashboardStats('s1');
+
+      expect(prisma.payment.aggregate.mock.calls[0][0].where).toEqual({
+        schoolId: 's1',
+        isConfirmed: true,
+        status: PaymentTransactionStatus.SUCCESS,
+      });
+    });
+
+    it('keeps first payments out of the owner-actionable pending figure', async () => {
+      db.childEnrollment.count.mockResolvedValue(0);
+      prisma.payment.aggregate
+        .mockResolvedValueOnce({ _sum: { schoolAmount: 0 } })
+        .mockResolvedValueOnce({ _sum: { schoolAmount: 0 } }) // no installments
+        .mockResolvedValueOnce({ _sum: { schoolAmount: 5_000_000 } });
+      db.childEnrollment.findMany.mockResolvedValue([]);
+
+      const res = await service.getDashboardStats('s1');
+
+      expect(res.pendingRevenue).toBe(0);
+      expect(res.awaitingActivation).toBe(50000);
+    });
+
+    it('scopes the active-plan count to ACTIVE enrollments', async () => {
+      db.childEnrollment.count.mockResolvedValue(0);
+      prisma.payment.aggregate.mockResolvedValue({
+        _sum: { schoolAmount: 0 },
+      });
+      db.childEnrollment.findMany.mockResolvedValue([]);
+
+      await service.getDashboardStats('s1');
+
+      expect(db.childEnrollment.count.mock.calls[1][0]).toEqual({
+        where: { paymentStatus: PaymentStatus.ACTIVE },
       });
     });
   });
 
   describe('getStudents', () => {
     const baseEnrollment = {
+      id: 'e1',
       childId: 'c1',
+      schoolId: 's1',
       className: 'JSS1',
       totalSchoolFee: 1000000,
       paymentStatus: PaymentStatus.ACTIVE,
@@ -361,6 +480,8 @@ describe('SchoolPaymentsService (coverage)', () => {
           isConfirmed: true,
           amountPaid: 500000,
           paymentDate: new Date('2026-01-01'),
+          paymentType: PaymentType.INSTALLMENT,
+          status: PaymentTransactionStatus.SUCCESS,
         },
       ],
     };
@@ -385,13 +506,102 @@ describe('SchoolPaymentsService (coverage)', () => {
       );
       expect(res.items[0]).toEqual(
         expect.objectContaining({
-          id: 'c1',
+          id: 'e1',
+          enrollmentId: 'e1',
+          childId: 'c1',
           studentName: 'Kid A',
           parentName: 'Parent A',
           totalFee: 10000,
           paidAmount: 5000,
           nextDueDate: '2026-01-08',
         }),
+      );
+    });
+
+    /*
+     * The roster row is the only thing the school dashboard has to show a
+     * balance from. Deriving `totalFee - paidAmount` on the client came out
+     * short by the platform fee inside the first payment, so the enrollment's
+     * own balance has to travel with the row.
+     */
+    it('returns the enrollment balance rather than leaving it to be derived', async () => {
+      db.childEnrollment.findMany.mockResolvedValue([
+        {
+          ...baseEnrollment,
+          totalSchoolFee: 10_000_000, // ₦100,000
+          remainingBalance: 5_000_000, // ₦50,000
+          payments: [
+            {
+              // gross first payment: ₦27,500 deposit incl. ₦2,500 platform fee
+              isConfirmed: true,
+              amountPaid: 2_750_000,
+              paymentDate: new Date('2026-01-01'),
+              paymentType: PaymentType.FIRST_PAYMENT,
+              status: PaymentTransactionStatus.SUCCESS,
+            },
+            {
+              isConfirmed: true,
+              amountPaid: 2_500_000,
+              paymentDate: new Date('2026-02-01'),
+              paymentType: PaymentType.INSTALLMENT,
+              status: PaymentTransactionStatus.SUCCESS,
+            },
+          ],
+        },
+      ]);
+      db.childEnrollment.count.mockResolvedValue(1);
+
+      const row = (await service.getStudents('s1')).items[0];
+
+      expect(row.remainingBalance).toBe(50000);
+      // The derivation the client used to do lands ₦2,500 short.
+      expect(row.totalFee - row.paidAmount).toBe(47500);
+    });
+
+    it('excludes unapproved installments from the available balance', async () => {
+      db.childEnrollment.findMany.mockResolvedValue([
+        {
+          ...baseEnrollment,
+          remainingBalance: 5_000_000,
+          payments: [
+            {
+              isConfirmed: false,
+              amountPaid: 1_000_000,
+              paymentDate: new Date('2026-02-01'),
+              paymentType: PaymentType.INSTALLMENT,
+              status: PaymentTransactionStatus.PENDING,
+            },
+          ],
+        },
+      ]);
+      db.childEnrollment.count.mockResolvedValue(1);
+
+      const row = (await service.getStudents('s1')).items[0];
+
+      expect(row.remainingBalance).toBe(50000);
+      expect(row.availableBalance).toBe(40000);
+    });
+
+    it('never reports a negative available balance', async () => {
+      db.childEnrollment.findMany.mockResolvedValue([
+        {
+          ...baseEnrollment,
+          remainingBalance: 100_000,
+          payments: [
+            {
+              isConfirmed: false,
+              amountPaid: 900_000,
+              paymentDate: new Date('2026-02-01'),
+              paymentType: PaymentType.INSTALLMENT,
+              status: PaymentTransactionStatus.PENDING,
+            },
+          ],
+        },
+      ]);
+      db.childEnrollment.count.mockResolvedValue(1);
+
+      expect((await service.getStudents('s1')).items[0].availableBalance).toBe(
+        0,
       );
     });
 
@@ -493,14 +703,69 @@ describe('SchoolPaymentsService (coverage)', () => {
         paymentType: 'FIRST_PAYMENT',
       });
     });
+
+    /* The monthly collection ledger export needs a real period window. */
+    it('filters by the requested date window', async () => {
+      db.payment.findMany.mockResolvedValue([]);
+      const from = new Date('2026-02-01T00:00:00.000Z');
+      const to = new Date('2026-02-28T23:59:59.999Z');
+
+      await service.getHistory('s1', false, 'ALL', 1000, { from, to });
+
+      expect(db.payment.findMany.mock.calls[0][0].where).toEqual({
+        paymentDate: { gte: from, lte: to },
+      });
+    });
+
+    it('supports an open-ended window', async () => {
+      db.payment.findMany.mockResolvedValue([]);
+      const from = new Date('2026-02-01T00:00:00.000Z');
+
+      await service.getHistory('s1', false, 'ALL', 100, { from });
+
+      expect(db.payment.findMany.mock.calls[0][0].where).toEqual({
+        paymentDate: { gte: from },
+      });
+    });
+
+    it('combines the date window with the receiptType filter', async () => {
+      db.payment.findMany.mockResolvedValue([]);
+      const to = new Date('2026-02-28T23:59:59.999Z');
+
+      await service.getHistory('s1', false, 'INSTALLMENT', 100, { to });
+
+      expect(db.payment.findMany.mock.calls[0][0].where).toEqual({
+        paymentType: 'INSTALLMENT',
+        paymentDate: { lte: to },
+      });
+    });
+
+    it('leaves the query unfiltered when no window is given', async () => {
+      db.payment.findMany.mockResolvedValue([]);
+      await service.getHistory('s1');
+      expect(db.payment.findMany.mock.calls[0][0].where).toEqual({});
+    });
+
+    it('caps take at the export ceiling', async () => {
+      db.payment.findMany.mockResolvedValue([]);
+      await service.getHistory('s1', false, 'ALL', 99999);
+      expect(db.payment.findMany.mock.calls[0][0].take).toBe(
+        SchoolPaymentsService.HISTORY_MAX_TAKE,
+      );
+    });
   });
 
   describe('getPendingPayments', () => {
     const pendingRow = {
       id: 'p1',
+      enrollmentId: 'enr-1',
+      schoolId: 's1',
       amountPaid: 100000,
       platformAmount: 2500,
       schoolAmount: 97500,
+      receiver: 'SCHOOL',
+      isConfirmed: false,
+      status: PaymentTransactionStatus.PENDING,
       paymentDate: new Date('2026-01-01'),
       paymentType: PaymentType.INSTALLMENT,
       receiptUrl: 'r/1',
@@ -511,21 +776,85 @@ describe('SchoolPaymentsService (coverage)', () => {
       },
     };
 
+    it('defaults to the installments the owner can approve', async () => {
+      db.payment.findMany.mockResolvedValue([]);
+
+      await service.getPendingPayments('s1');
+
+      expect(db.payment.findMany.mock.calls[0][0].where).toEqual({
+        isConfirmed: false,
+        status: PaymentTransactionStatus.PENDING,
+        paymentType: PaymentType.INSTALLMENT,
+        // Card first payments confirm themselves from the Paystack webhook; an
+        // owner must never be offered one to approve.
+        NOT: {
+          paymentType: PaymentType.FIRST_PAYMENT,
+          paystackReference: { not: null },
+        },
+      });
+    });
+
+    it('can widen to first payments awaiting platform settlement', async () => {
+      db.payment.findMany.mockResolvedValue([]);
+
+      await service.getPendingPayments('s1', false, 'ALL', 100, 'ALL');
+
+      expect(db.payment.findMany.mock.calls[0][0].where).toEqual({
+        isConfirmed: false,
+        status: PaymentTransactionStatus.PENDING,
+        // Card first payments confirm themselves from the Paystack webhook; an
+        // owner must never be offered one to approve.
+        NOT: {
+          paymentType: PaymentType.FIRST_PAYMENT,
+          paystackReference: { not: null },
+        },
+      });
+    });
+
+    it('can isolate first payments', async () => {
+      db.payment.findMany.mockResolvedValue([]);
+
+      await service.getPendingPayments(
+        's1',
+        false,
+        'ALL',
+        100,
+        'FIRST_PAYMENT',
+      );
+
+      expect(db.payment.findMany.mock.calls[0][0].where).toEqual({
+        isConfirmed: false,
+        status: PaymentTransactionStatus.PENDING,
+        paymentType: PaymentType.FIRST_PAYMENT,
+        // Card first payments confirm themselves from the Paystack webhook; an
+        // owner must never be offered one to approve.
+        NOT: {
+          paymentType: PaymentType.FIRST_PAYMENT,
+          paystackReference: { not: null },
+        },
+      });
+    });
+
     it('maps pending installments with kobo→naira money fields (no signing)', async () => {
       db.payment.findMany.mockResolvedValue([pendingRow]);
 
       const res = await service.getPendingPayments('s1');
 
       expect(res).toHaveLength(1);
+      // The shared payment view names the platform's cut `platformFeeAmount`
+      // (what the client reads) rather than the raw column name.
       expect(res[0]).toEqual(
         expect.objectContaining({
-          platformAmount: 25,
+          platformFeeAmount: 25,
           schoolAmount: 975,
           childName: 'Kid A',
           amount: 1000,
         }),
       );
       expect('receiptSignedUrl' in res[0]).toBe(false);
+      // The owner's own settlement account is not payload for a payments list.
+      expect(res[0]).not.toHaveProperty('enrollment');
+      expect(res[0]).not.toHaveProperty('accountNumber');
     });
 
     it('signs receipts when requested and swallows signing errors', async () => {

@@ -75,17 +75,20 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   async handleConnection(client: Socket) {
     try {
-      const token = this.extractToken(client);
-      if (!token) {
-        this.logger.warn(`Socket ${client.id} rejected: missing token`);
+      // Accept EITHER auth path: a bearer token (native shell, and the current web
+      // default) or the httpOnly session cookie the browser sends with the
+      // handshake when the client connects `withCredentials`. Without the cookie
+      // branch, a deploy that switches the web client to cookie mode would keep
+      // authenticating its HTTP calls but silently lose realtime — every socket
+      // rejected for a missing token.
+      const headers = this.sessionHeaders(client);
+      if (!headers) {
+        this.logger.warn(`Socket ${client.id} rejected: no credentials`);
         client.disconnect(true);
         return;
       }
 
-      // Validate the bearer token against the Better Auth session.
-      const session = await this.authService.api.getSession({
-        headers: new Headers({ authorization: `Bearer ${token}` }),
-      });
+      const session = await this.authService.api.getSession({ headers });
       if (!session) {
         this.logger.warn(`Socket ${client.id} rejected: invalid session`);
         client.disconnect(true);
@@ -171,6 +174,24 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // emits happen in response to HTTP requests, long after startup.
     if (!this.server) return;
     this.server.to(room).emit('realtime', envelope);
+  }
+
+  /**
+   * Build the headers Better Auth needs to resolve this handshake's session, or
+   * null when the client presented no credentials at all. A bearer token wins when
+   * both are present (it is the explicit choice); the cookie is forwarded verbatim
+   * so Better Auth can verify its own signed session cookie.
+   */
+  private sessionHeaders(client: Socket): Headers | null {
+    const token = this.extractToken(client);
+    if (token) {
+      return new Headers({ authorization: `Bearer ${token}` });
+    }
+    const cookie = client.handshake.headers?.cookie;
+    if (typeof cookie === 'string' && cookie) {
+      return new Headers({ cookie });
+    }
+    return null;
   }
 
   private extractToken(client: Socket): string | null {

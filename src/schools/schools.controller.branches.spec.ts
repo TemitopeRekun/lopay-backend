@@ -108,17 +108,39 @@ describe('SchoolPaymentsController — guards & query defaults', () => {
   describe('query-param defaults vs supplied values', () => {
     it('getHistory defaults include=false, receiptType=ALL, take=100', async () => {
       await controller.getHistory(owner);
-      expect(service.getHistory).toHaveBeenCalledWith('s1', false, 'ALL', 100);
+      expect(service.getHistory).toHaveBeenCalledWith(
+        's1',
+        false,
+        'ALL',
+        100,
+        undefined,
+      );
     });
 
-    it('getHistory honours the flag, type and caps take at 200', async () => {
+    it('getHistory honours the flag, type and caps take at the ceiling', async () => {
       await controller.getHistory(owner, 'true', 'INSTALLMENT', '9999');
       expect(service.getHistory).toHaveBeenCalledWith(
         's1',
         true,
         'INSTALLMENT',
-        200,
+        1000,
+        undefined,
       );
+    });
+
+    it('getHistory forwards a parsed from/to window', async () => {
+      await controller.getHistory(
+        owner,
+        'false',
+        'ALL',
+        undefined,
+        '2026-05-01T00:00:00.000Z',
+        '2026-05-31T23:59:59.999Z',
+      );
+      expect(service.getHistory).toHaveBeenCalledWith('s1', false, 'ALL', 100, {
+        from: new Date('2026-05-01T00:00:00.000Z'),
+        to: new Date('2026-05-31T23:59:59.999Z'),
+      });
     });
 
     it('getHistoryAll applies the same defaults', async () => {
@@ -128,6 +150,7 @@ describe('SchoolPaymentsController — guards & query defaults', () => {
         true,
         'FIRST_PAYMENT',
         10,
+        undefined,
       );
     });
 
@@ -159,6 +182,8 @@ describe('SchoolPaymentsController — guards & query defaults', () => {
         's1',
         false,
         'ALL',
+        100,
+        'INSTALLMENT',
       );
     });
 
@@ -168,6 +193,19 @@ describe('SchoolPaymentsController — guards & query defaults', () => {
         's1',
         true,
         'INSTALLMENT',
+        100,
+        'INSTALLMENT',
+      );
+    });
+
+    it('getPendingPayments can include first payments', async () => {
+      await controller.getPendingPayments(owner, 'false', 'ALL', 'ALL');
+      expect(service.getPendingPayments).toHaveBeenCalledWith(
+        's1',
+        false,
+        'ALL',
+        100,
+        'ALL',
       );
     });
   });

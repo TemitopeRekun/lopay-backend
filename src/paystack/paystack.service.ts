@@ -11,6 +11,9 @@ import { errorMessage } from '../common/errors';
 const PAYSTACK_BASE_URL = 'https://api.paystack.co';
 const REQUEST_TIMEOUT_MS = 15_000;
 
+/** HTTP verbs this client issues against the Paystack REST API. */
+type HttpMethod = 'GET' | 'POST' | 'PUT';
+
 /** The `data` field of a Paystack `transaction/verify` response (fields we read). */
 export interface PaystackVerifyData {
   status: string;
@@ -91,7 +94,7 @@ export class PaystackService {
    * `errorFilter` so a bad account number can't trip the breaker.
    */
   private readonly breaker: CircuitBreaker<
-    [method: 'GET' | 'POST', path: string, body: unknown],
+    [method: HttpMethod, path: string, body: unknown],
     unknown
   >;
 
@@ -104,7 +107,7 @@ export class PaystackService {
     }
 
     this.breaker = new CircuitBreaker(
-      (method: 'GET' | 'POST', path: string, body: unknown) =>
+      (method: HttpMethod, path: string, body: unknown) =>
         this.doRequest(method, path, body),
       {
         name: 'paystack',
@@ -143,6 +146,31 @@ export class PaystackService {
       body,
     );
     return data.subaccount_code;
+  }
+
+  /**
+   * Point an existing subaccount at a different settlement account.
+   *
+   * A school that edits its bank details in the app changes where INSTALLMENTS are
+   * paid immediately (parents read those details from our DB), but first-payment
+   * splits keep settling wherever the subaccount points. Without this call the two
+   * destinations silently diverge and the school's card money lands in an account
+   * it may no longer control.
+   */
+  async updateSubaccount(
+    subaccountCode: string,
+    params: CreateSubaccountParams,
+  ): Promise<void> {
+    await this.request<unknown>(
+      'PUT',
+      `/subaccount/${encodeURIComponent(subaccountCode)}`,
+      {
+        business_name: params.businessName,
+        settlement_bank: params.settlementBank,
+        account_number: params.accountNumber,
+        percentage_charge: params.percentageCharge ?? 0,
+      },
+    );
   }
 
   /** List Nigerian banks (cached ~24h). Used to populate the onboarding dropdown. */
@@ -235,7 +263,7 @@ export class PaystackService {
    * piling up doomed calls.
    */
   private async request<T>(
-    method: 'GET' | 'POST',
+    method: HttpMethod,
     path: string,
     body?: unknown,
   ): Promise<T> {
@@ -262,7 +290,7 @@ export class PaystackService {
    * surfaces as a provider-outage error that DOES count toward the breaker.
    */
   private async doRequest<T>(
-    method: 'GET' | 'POST',
+    method: HttpMethod,
     path: string,
     body?: unknown,
   ): Promise<T> {

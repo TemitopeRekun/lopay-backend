@@ -30,6 +30,27 @@ export class EnrollmentController {
     return this.enrollmentService.getParentEnrollments(user.userId);
   }
 
+  /**
+   * The parent dashboard's headline figures, rolled up server-side.
+   *
+   * Declared before `:id/history` so `summary` can never be read as an id.
+   *
+   * The client used to compute this card itself: filter enrollments on a locally
+   * normalised status string, sum `nextInstallmentAmount` across them, and take
+   * the minimum `nextDueDate`. That put the busiest number in the app on an
+   * aggregate no endpoint validated, and it counted plans whose first payment had
+   * never been collected. The server owns it now.
+   */
+  @SkipThrottle()
+  @Get('summary')
+  @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
+  @ApiOperation({
+    summary: "The parent dashboard's next-collection and plan totals",
+  })
+  async getDashboardSummary(@CurrentUser() user: AuthUser) {
+    return this.enrollmentService.getParentDashboardSummary(user.userId);
+  }
+
   @SkipThrottle()
   @Get(':id/history')
   @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)

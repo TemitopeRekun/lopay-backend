@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { EnrollmentService } from './enrollment.service';
 import {
   InstallmentFrequency,
@@ -236,14 +240,18 @@ describe('EnrollmentService (coverage)', () => {
       expect(row.remainingBalance).toBe(500);
       expect(row.paidAmount).toBe(100);
       expect(row.studentName).toBe('Ada');
-      // 50_000 / (12 - 1) = 4545 kobo -> 45.45 naira
-      expect(row.nextInstallmentAmount).toBe(45.45);
-      expect(row.nextDueDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      // The plan opened at 60_000 kobo (50_000 left + 10_000 paid) over 12
+      // weekly slots of 5_000. The 10_000 paid closes two of them, so the next
+      // is one slot: 5_000 kobo -> 50 naira, due in week 3.
+      expect(row.installmentsPaid).toBe(2);
+      expect(row.installmentsTotal).toBe(12);
+      expect(row.nextInstallmentAmount).toBe(50);
+      expect(row.nextDueDate).toBe('2026-01-22');
       // enriched payment amounts converted to naira
       expect(row.payments[0].amount).toBe(100);
     });
 
-    it('falls back to termStartDate when there is no confirmed payment yet', async () => {
+    it('anchors the first installment one period after termStartDate', async () => {
       m.prisma.parent.findUnique.mockResolvedValueOnce({
         id: 'parent-1',
         children: [{ id: 'child-1' }],
@@ -271,7 +279,10 @@ describe('EnrollmentService (coverage)', () => {
 
       const [row] = await m.service.getParentEnrollments('u1');
       expect(row.paidAmount).toBe(0);
-      expect(row.nextDueDate).toBe('2026-03-01');
+      // Term starts 1 March; installment one falls due a month later. The
+      // unconfirmed payment must not advance the schedule.
+      expect(row.installmentsPaid).toBe(0);
+      expect(row.nextDueDate).toBe('2026-04-01');
     });
 
     it('falls back to createdAt when termStartDate is null', async () => {
@@ -294,10 +305,10 @@ describe('EnrollmentService (coverage)', () => {
       ]);
 
       const [row] = await m.service.getParentEnrollments('u1');
-      expect(row.nextDueDate).toBe('2026-01-15');
+      expect(row.nextDueDate).toBe('2026-02-15');
     });
 
-    it('uses the whole remaining balance when all installments are already paid', async () => {
+    it('does not collapse the schedule when payments outnumber the slots', async () => {
       m.prisma.parent.findUnique.mockResolvedValueOnce({
         id: 'parent-1',
         children: [{ id: 'child-1' }],
@@ -327,8 +338,13 @@ describe('EnrollmentService (coverage)', () => {
       ]);
 
       const [row] = await m.service.getParentEnrollments('u1');
-      // remainingInstallments <= 0 -> nextInstallmentAmount = full balance
-      expect(row.nextInstallmentAmount).toBe(300);
+      // Three tiny payments against a 3-slot plan. Counting rows drove the
+      // divisor to zero and demanded the WHOLE ₦300 balance in one go; counting
+      // money leaves the parent part-way through slot one, owing the ₦80 that
+      // closes it.
+      expect(row.installmentsPaid).toBe(0);
+      expect(row.creditTowardNextInstallment).toBe(30);
+      expect(row.nextInstallmentAmount).toBe(80);
     });
 
     it('leaves next-due null and amount 0 when the balance is cleared (unknown frequency branch)', async () => {
@@ -457,14 +473,14 @@ describe('EnrollmentService (coverage)', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
-    it('rejects a caller who owns neither the child nor the school', async () => {
+    it('rejects a caller who is not the child’s parent', async () => {
       m.prisma.childEnrollment.findUnique.mockResolvedValueOnce({
         ...enrollmentRow,
         child: { fullName: 'Ada', parent: { userId: 'someone-else' } },
       });
       await expect(
         m.service.submitInstallmentPayment('enr-1', 500, parentUser),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
     it('rejects a non-positive amount', async () => {
@@ -532,10 +548,31 @@ describe('EnrollmentService (coverage)', () => {
       expect(res.schoolName).toBe('Acme');
     });
 
-    it('authorizes a school owner acting within their own school', async () => {
+    it('BLOCKS a school owner recording a payment on a family’s enrollment', async () => {
+      // This used to be allowed, which let one person both submit a payment and
+      // approve it from the school dashboard — clearing a balance nobody paid.
+      // See enrollment.installment-authz.spec.ts for the full rule.
+      m.prisma.childEnrollment.findUnique.mockResolvedValueOnce({
+        ...enrollmentRow,
+        school: { ownerId: 'owner-1', name: 'Acme' },
+      });
+
+      const owner = {
+        userId: 'owner-1',
+        role: UserRole.SCHOOL_OWNER,
+        schoolId: SCHOOL_ID,
+      };
+      await expect(
+        m.service.submitInstallmentPayment('enr-1', 500, owner),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(m.tx.payment.create).not.toHaveBeenCalled();
+    });
+
+    it('lets a school owner pay for their OWN child (no notify branch)', async () => {
       m.prisma.childEnrollment.findUnique.mockResolvedValueOnce({
         ...enrollmentRow,
         school: { ownerId: null, name: 'Acme' }, // no ownerId -> skip notify branch
+        child: { fullName: 'Ada', parent: { userId: 'owner-1' } },
       });
       m.tx.$queryRaw.mockResolvedValueOnce([{ remainingBalance: 100_000 }]);
       m.tx.payment.create.mockResolvedValueOnce({

@@ -19,10 +19,9 @@ import { AuditService, AuditActor } from '../audit/audit.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { SchoolOnboardingService } from '../school-onboarding/school-onboarding.service';
 import { Money } from '../common/money';
-import { PLATFORM_FEE_RATE } from '../common/fees';
 import { computeArrears } from '../common/arrears';
 import { errorMessage } from '../common/errors';
-import { paymentCommonFields } from '../common/payment-dto';
+import { toPaymentView, type PaymentView } from '../common/payment-dto';
 import { PaystackService } from '../paystack/paystack.service';
 import {
   parsePagination,
@@ -30,6 +29,17 @@ import {
   type Paginated,
 } from '../common/pagination';
 import { CacheService, CacheKeys } from '../cache/cache.service';
+
+/**
+ * The only enrollment columns a payment list needs: a class name, a child name
+ * and a school name. Selecting `school: true` here is what previously carried
+ * settlement details into admin payloads — keep this narrow.
+ */
+const ADMIN_ENROLLMENT_SELECT = {
+  className: true,
+  child: { select: { fullName: true } },
+  school: { select: { name: true } },
+} satisfies Prisma.ChildEnrollmentSelect;
 
 @Injectable()
 export class AdminService {
@@ -154,24 +164,39 @@ export class AdminService {
     };
   }
 
-  /** Get first payments waiting to be settled (paginated). */
+  /**
+   * Get first payments waiting to be settled (paginated).
+   *
+   * `schoolId` narrows to one school so the dashboard's "review this school's
+   * first payments" row lands on that school's queue. The filter is applied here
+   * rather than in the client because the list is paginated — filtering a page
+   * after the fact pages over the wrong set.
+   */
   async getPendingFirstPayments(
     includeReceiptSignedUrls = false,
     page?: string | number,
     limit?: string | number,
-  ): Promise<Paginated<unknown>> {
+    schoolId?: string,
+  ): Promise<Paginated<PaymentView>> {
     const { page: p, limit: l, skip } = parsePagination(page, limit);
+    // MANUAL first payments only. A Paystack first payment row is created PENDING
+    // at initiation — before the parent has paid — and reconciles itself from the
+    // webhook, so listing it here as an admin action offered a "Settle" button that
+    // would activate an enrollment for uncollected money (and silence the real
+    // charge.success that arrives later). See LedgerService.settleFirstPayment.
     const where = {
       paymentType: PaymentType.FIRST_PAYMENT,
       receiver: PaymentReceiver.PLATFORM,
       isConfirmed: false,
       status: PaymentTransactionStatus.PENDING,
+      paystackReference: null,
+      ...(schoolId ? { schoolId } : {}),
     } satisfies Prisma.PaymentWhereInput;
 
     const [payments, total] = await Promise.all([
       this.prisma.payment.findMany({
         where,
-        include: { enrollment: { include: { child: true, school: true } } },
+        include: { enrollment: { select: ADMIN_ENROLLMENT_SELECT } },
         orderBy: { paymentDate: 'desc' },
         skip,
         take: l,
@@ -181,35 +206,33 @@ export class AdminService {
 
     // Signing fans out at most `l` (<= MAX_PAGE_SIZE) URLs — bounded to this page.
     const items = await Promise.all(
-      payments.map(async (p) => {
-        let receiptSignedUrl: string | null = null;
-        if (includeReceiptSignedUrls && p.receiptUrl) {
-          try {
-            receiptSignedUrl = (
-              await this.documentsService.createSignedUrlForPath(p.receiptUrl)
-            ).signedUrl;
-          } catch {
-            // If the object no longer exists in storage, don't fail the whole list.
-            receiptSignedUrl = null;
-          }
-        }
-
-        return {
-          ...p,
-          studentName: p.enrollment?.child?.fullName,
-          childName: p.enrollment?.child?.fullName,
-          schoolName: p.enrollment?.school?.name,
-          className: p.enrollment?.className,
-          amount: Money.fromKobo(p.amountPaid).toNaira(),
-          amountPaid: Money.fromKobo(p.amountPaid).toNaira(),
-          date: p.paymentDate,
-          type: p.paymentType,
-          receiptSignedUrl,
-        };
-      }),
+      payments.map(async (p) =>
+        toPaymentView(p, await this.signReceipt(p, includeReceiptSignedUrls)),
+      ),
     );
 
     return paginate(items, total, p, l);
+  }
+
+  /**
+   * Best-effort signed URL for a payment's receipt.
+   *
+   * Returns `undefined` when the caller didn't ask for signed URLs (so the field
+   * is omitted rather than rendered as a missing receipt) and `null` when signing
+   * was attempted but the object is gone — a dead receipt must not fail the list.
+   */
+  private async signReceipt(
+    p: { receiptUrl: string | null },
+    include: boolean,
+  ): Promise<string | null | undefined> {
+    if (!include) return undefined;
+    if (!p.receiptUrl) return null;
+    try {
+      return (await this.documentsService.createSignedUrlForPath(p.receiptUrl))
+        .signedUrl;
+    } catch {
+      return null;
+    }
   }
 
   /** Thin caller — settle logic lives in LedgerService (Milestone 3). */
@@ -221,7 +244,7 @@ export class AdminService {
   async getPendingInstallments(
     page?: string | number,
     limit?: string | number,
-  ): Promise<Paginated<unknown>> {
+  ): Promise<Paginated<PaymentView>> {
     const { page: p, limit: l, skip } = parsePagination(page, limit);
     const where = {
       paymentType: PaymentType.INSTALLMENT,
@@ -232,7 +255,7 @@ export class AdminService {
     const [payments, total] = await Promise.all([
       this.prisma.payment.findMany({
         where,
-        include: { enrollment: { include: { child: true, school: true } } },
+        include: { enrollment: { select: ADMIN_ENROLLMENT_SELECT } },
         orderBy: { paymentDate: 'desc' },
         skip,
         take: l,
@@ -240,16 +263,7 @@ export class AdminService {
       this.prisma.payment.count({ where }),
     ]);
 
-    const items = payments.map((p) => ({
-      ...p,
-      date: p.paymentDate,
-      amount: Money.fromKobo(p.amountPaid).toNaira(),
-      amountPaid: Money.fromKobo(p.amountPaid).toNaira(),
-      studentName: p.enrollment?.child?.fullName,
-      childName: p.enrollment?.child?.fullName,
-      className: p.enrollment?.className,
-      schoolName: p.enrollment?.school?.name,
-    }));
+    const items = payments.map((p) => toPaymentView(p));
 
     return paginate(items, total, p, l);
   }
@@ -366,7 +380,7 @@ export class AdminService {
     receiptType: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT' = 'ALL',
     page?: string | number,
     limit?: string | number,
-  ): Promise<Paginated<unknown>> {
+  ): Promise<Paginated<PaymentView>> {
     const { page: p, limit: l, skip } = parsePagination(page, limit);
     const where: Prisma.PaymentWhereInput = {};
     if (receiptType !== 'ALL') {
@@ -376,7 +390,7 @@ export class AdminService {
     const [payments, total] = await Promise.all([
       this.prisma.payment.findMany({
         where,
-        include: { enrollment: { include: { child: true, school: true } } },
+        include: { enrollment: { select: ADMIN_ENROLLMENT_SELECT } },
         orderBy: { paymentDate: 'desc' },
         skip,
         take: l,
@@ -386,40 +400,12 @@ export class AdminService {
 
     // Sign at most one page of receipts — the fan-out is bounded by `l`.
     const items = await Promise.all(
-      payments.map(async (p) => {
-        let receiptSignedUrl: string | null = null;
-        if (includeReceiptSignedUrls && p.receiptUrl) {
-          try {
-            receiptSignedUrl = (
-              await this.documentsService.createSignedUrlForPath(p.receiptUrl)
-            ).signedUrl;
-          } catch {
-            // If the object no longer exists in storage, don't fail the whole list.
-            receiptSignedUrl = null;
-          }
-        }
-        return { ...this.mapTransaction(p), receiptSignedUrl };
-      }),
+      payments.map(async (p) =>
+        toPaymentView(p, await this.signReceipt(p, includeReceiptSignedUrls)),
+      ),
     );
 
     return paginate(items, total, p, l);
-  }
-
-  /** Shape a payment row into the admin transaction view (no signed URL). */
-  private mapTransaction(
-    p: Prisma.PaymentGetPayload<{
-      include: { enrollment: { include: { child: true; school: true } } };
-    }>,
-  ) {
-    return {
-      ...p,
-      ...paymentCommonFields(p),
-      date: p.paymentDate,
-      type: p.paymentType,
-      childName: p.enrollment?.child?.fullName,
-      platformFeeAmount: Money.fromKobo(p.platformAmount).toNaira(),
-      platformFeePercentage: PLATFORM_FEE_RATE,
-    };
   }
 
   /**
@@ -428,14 +414,11 @@ export class AdminService {
    */
   private async recentTransactions(take: number) {
     const payments = await this.prisma.payment.findMany({
-      include: { enrollment: { include: { child: true, school: true } } },
+      include: { enrollment: { select: ADMIN_ENROLLMENT_SELECT } },
       orderBy: { paymentDate: 'desc' },
       take,
     });
-    return payments.map((p) => ({
-      ...this.mapTransaction(p),
-      receiptSignedUrl: null,
-    }));
+    return payments.map((p) => toPaymentView(p, null));
   }
 
   /** Global student summary for admin dashboard (cached, short TTL). */
@@ -507,7 +490,7 @@ export class AdminService {
    * The per-school view passes false so the Students tab can list every student,
    * settled ones included.
    */
-  private async enrollmentsWithPaidCounts(schoolId?: string, openOnly = true) {
+  private async enrollmentsWithPaidValue(schoolId?: string, openOnly = true) {
     const where: Prisma.ChildEnrollmentWhereInput = {
       ...(openOnly
         ? {
@@ -549,23 +532,26 @@ export class AdminService {
 
     if (enrollments.length === 0) return [];
 
-    const paidCounts = await this.prisma.payment.groupBy({
+    // Sum, not count. Schedule progress is derived from how much installment
+    // money landed, so one transfer covering five slots reads the same as five
+    // separate transfers — see `common/installment-schedule.ts`.
+    const paidValues = await this.prisma.payment.groupBy({
       by: ['enrollmentId'],
       where: {
         enrollmentId: { in: enrollments.map((e) => e.id) },
         paymentType: PaymentType.INSTALLMENT,
         isConfirmed: true,
       },
-      _count: { _all: true },
+      _sum: { amountPaid: true },
     });
 
     const paidMap = new Map(
-      paidCounts.map((p) => [p.enrollmentId, p._count._all]),
+      paidValues.map((p) => [p.enrollmentId, p._sum.amountPaid ?? 0]),
     );
 
     return enrollments.map((e) => ({
       enrollment: e,
-      paidInstallments: paidMap.get(e.id) ?? 0,
+      installmentsPaidKobo: paidMap.get(e.id) ?? 0,
     }));
   }
 
@@ -592,7 +578,7 @@ export class AdminService {
     // Enrollment totals come from a groupBy (indexed, cheap) so the expensive
     // materialisation below is limited to plans that still owe money.
     const [rows, enrollmentCounts] = await Promise.all([
-      this.enrollmentsWithPaidCounts(),
+      this.enrollmentsWithPaidValue(),
       this.prisma.childEnrollment.groupBy({
         by: ['schoolId'],
         _count: { _all: true },
@@ -618,14 +604,14 @@ export class AdminService {
     let overdueKobo = 0;
     let overdueStudents = 0;
 
-    for (const { enrollment, paidInstallments } of rows) {
+    for (const { enrollment, installmentsPaidKobo } of rows) {
       const arrears = computeArrears(
         {
           remainingBalance: enrollment.remainingBalance,
           installmentFrequency: enrollment.installmentFrequency,
           termStartDate: enrollment.termStartDate,
           termEndDate: enrollment.termEndDate,
-          paidInstallments,
+          installmentsPaidKobo,
         },
         now,
       );
@@ -719,20 +705,20 @@ export class AdminService {
     if (!school) throw new NotFoundException('School not found');
 
     // The Students tab lists everyone; the money tabs only need open plans.
-    const rows = await this.enrollmentsWithPaidCounts(
+    const rows = await this.enrollmentsWithPaidValue(
       schoolId,
       tab !== 'students',
     );
     const now = new Date();
 
-    const computed = rows.map(({ enrollment, paidInstallments }) => {
+    const computed = rows.map(({ enrollment, installmentsPaidKobo }) => {
       const arrears = computeArrears(
         {
           remainingBalance: enrollment.remainingBalance,
           installmentFrequency: enrollment.installmentFrequency,
           termStartDate: enrollment.termStartDate,
           termEndDate: enrollment.termEndDate,
-          paidInstallments,
+          installmentsPaidKobo,
         },
         now,
       );
@@ -746,7 +732,10 @@ export class AdminService {
         totalFee: Money.fromKobo(enrollment.totalSchoolFee).toNaira(),
         outstanding: Money.fromKobo(enrollment.remainingBalance).toNaira(),
         overdue: Money.fromKobo(arrears.overdueAmount).toNaira(),
-        paidInstallments,
+        // Slots the money has closed, not transfers received — a parent who
+        // settled three months in one payment reads as 3, matching what that
+        // parent is shown.
+        paidInstallments: arrears.paidInstallments,
         missedInstallments: arrears.missedInstallments,
         daysOverdue: arrears.daysOverdue,
         termExpired: arrears.termExpired,

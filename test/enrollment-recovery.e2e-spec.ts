@@ -80,6 +80,8 @@ describe('Enrollment & installment integration (real DB)', () => {
           useValue: {
             recordPaymentOutcome: jest.fn(),
             setStalledConfirmations: jest.fn(),
+            recordPaystackFeeDelta: jest.fn(),
+            recordReconcileConflict: jest.fn(),
           },
         },
       ],

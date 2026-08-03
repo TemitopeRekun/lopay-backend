@@ -17,6 +17,18 @@ describe('EnrollmentController', () => {
     initiateFirstPayment: jest.fn().mockResolvedValue({ accessCode: 'ac_1' }),
     submitInstallmentPayment: jest.fn().mockResolvedValue({ id: 'p2' }),
     confirmFirstPayment: jest.fn().mockResolvedValue({ confirmed: true }),
+    getParentDashboardSummary: jest.fn().mockResolvedValue({
+      nextCollection: {
+        amount: 250,
+        dueDate: '2026-03-01',
+        enrollmentCount: 2,
+        enrollmentId: null,
+        childName: null,
+      },
+      activePlans: 2,
+      totalPlans: 3,
+      totalOutstanding: 900,
+    }),
   };
 
   const parent: AuthUser = {
@@ -99,6 +111,25 @@ describe('EnrollmentController', () => {
         controller.confirmFirstPayment(dto, ownerNoSchool),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(service.confirmFirstPayment).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('GET /enrollments/summary', () => {
+    it("scopes the dashboard summary to the caller's own session", async () => {
+      const res = await controller.getDashboardSummary(parent);
+
+      // No id in the path and none accepted from the body: a parent can only
+      // ever roll up their own plans.
+      expect(service.getParentDashboardSummary).toHaveBeenCalledWith(
+        'parent-1',
+      );
+      expect(res.nextCollection.amount).toBe(250);
+      expect(res.nextCollection.enrollmentCount).toBe(2);
+    });
+
+    it('is available to a school owner paying for their own child', async () => {
+      await controller.getDashboardSummary(owner);
+      expect(service.getParentDashboardSummary).toHaveBeenCalledWith('owner-1');
     });
   });
 });

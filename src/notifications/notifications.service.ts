@@ -88,11 +88,39 @@ export class NotificationsService {
     return { recipients: parents.length };
   }
 
-  async getUserNotifications(userId: string) {
-    return this.prisma.notification.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-    });
+  /**
+   * A user's notifications, newest first.
+   *
+   * Bounded. This was the one list endpoint the pagination work missed: it
+   * returned a user's ENTIRE history, and every client polls it on a five-minute
+   * fallback from every screen, so a long-lived account's dashboard load grew
+   * without limit. The window is generous enough that the notification screen
+   * still shows everything anyone scrolls to, and `unreadCount` is counted
+   * server-side so the badge stays exact regardless of the window.
+   */
+  static readonly LIST_LIMIT = 100;
+  static readonly MAX_LIST_LIMIT = 200;
+
+  async getUserNotifications(userId: string, limit?: number) {
+    // A malformed limit (NaN from `Number('abc')`, zero, a negative) falls back
+    // to the DEFAULT, not to 1 — same contract as `parseTake` on the history
+    // endpoint. Clamping garbage to a single row silently starves the screen.
+    const requested =
+      limit !== undefined && Number.isFinite(limit) && Math.trunc(limit) > 0
+        ? Math.trunc(limit)
+        : NotificationsService.LIST_LIMIT;
+    const take = Math.min(requested, NotificationsService.MAX_LIST_LIMIT);
+
+    const [items, unreadCount] = await Promise.all([
+      this.prisma.notification.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take,
+      }),
+      this.prisma.notification.count({ where: { userId, isRead: false } }),
+    ]);
+
+    return { items, unreadCount, limit: take };
   }
 
   async markAsRead(notificationId: string, userId: string) {

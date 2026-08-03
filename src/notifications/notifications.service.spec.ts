@@ -16,6 +16,7 @@ describe('NotificationsService', () => {
       findFirst: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
+      count: jest.fn(),
     },
     user: {
       findMany: jest.fn(),
@@ -287,5 +288,70 @@ describe('NotificationsService', () => {
       });
       expect(result).toEqual({ id: 'notif-1', isRead: true });
     });
+  });
+
+  /**
+   * The notification list was the one endpoint the pagination work missed: it
+   * returned a user's entire history, and every client polls it on a five-minute
+   * fallback from every screen.
+   */
+  describe('getUserNotifications', () => {
+    it('bounds the list and counts unread separately from the window', async () => {
+      mockPrisma.notification.findMany.mockResolvedValue([{ id: 'n1' }]);
+      mockPrisma.notification.count.mockResolvedValue(7);
+
+      const res = await service.getUserNotifications('u1');
+
+      expect(mockPrisma.notification.findMany).toHaveBeenCalledWith({
+        where: { userId: 'u1' },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      });
+      // Counted server-side, so the badge stays exact even when the unread rows
+      // fall outside the returned window.
+      expect(mockPrisma.notification.count).toHaveBeenCalledWith({
+        where: { userId: 'u1', isRead: false },
+      });
+      expect(res).toEqual({
+        items: [{ id: 'n1' }],
+        unreadCount: 7,
+        limit: 100,
+      });
+    });
+
+    it('honours a smaller caller limit', async () => {
+      mockPrisma.notification.findMany.mockResolvedValue([]);
+      mockPrisma.notification.count.mockResolvedValue(0);
+
+      await service.getUserNotifications('u1', 10);
+
+      expect(mockPrisma.notification.findMany.mock.calls[0][0].take).toBe(10);
+    });
+
+    it('caps an over-large limit rather than serving the whole table', async () => {
+      mockPrisma.notification.findMany.mockResolvedValue([]);
+      mockPrisma.notification.count.mockResolvedValue(0);
+
+      await service.getUserNotifications('u1', 100_000);
+
+      expect(mockPrisma.notification.findMany.mock.calls[0][0].take).toBe(200);
+    });
+
+    it.each([-5, 0, Number.NaN])(
+      'falls back to the default for the nonsense limit %p',
+      async (limit) => {
+        // `?limit=abc` reaches the service as NaN. Clamping garbage to a single
+        // row would silently starve the notification screen; the default is the
+        // only safe reading of an unintelligible request.
+        mockPrisma.notification.findMany.mockResolvedValue([]);
+        mockPrisma.notification.count.mockResolvedValue(0);
+
+        await service.getUserNotifications('u1', limit);
+
+        expect(mockPrisma.notification.findMany.mock.calls[0][0].take).toBe(
+          100,
+        );
+      },
+    );
   });
 });

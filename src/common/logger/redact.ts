@@ -58,6 +58,29 @@ export function fingerprint(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 12);
 }
 
+/**
+ * Email-shaped substrings anywhere in free text. Intentionally loose on the local
+ * part (anything but whitespace, `@` and a trailing `'`/`"`/`,`) because the goal is
+ * to catch what a *logger* emitted, not to validate an address — a near-miss that
+ * still identifies a person is exactly what must not survive.
+ */
+const EMAIL_IN_TEXT = /[^\s@'"<>,;]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+
+/**
+ * Mask every email inside an arbitrary string.
+ *
+ * `redactFields` can only protect a bag of keys we assembled ourselves. Third-party
+ * code does not cooperate: Better Auth logs `User not found` with the raw address
+ * attached, at error level, on every failed sign-in — which put plaintext parent
+ * emails into the Render log stream and straight past the discipline the rest of
+ * this module enforces. So text from outside gets scanned rather than trusted.
+ *
+ * `'ada@x.com' is taken` → `'a***a@x.com' is taken`
+ */
+export function redactText(text: string): string {
+  return text.replace(EMAIL_IN_TEXT, (match) => maskEmail(match));
+}
+
 /** Field names whose values are replaced wholesale by `redactFields`. */
 const SENSITIVE_KEYS: ReadonlySet<string> = new Set([
   'password',

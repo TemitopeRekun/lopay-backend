@@ -15,7 +15,7 @@ import {
   WEEKLY_INSTALLMENTS,
   MONTHLY_INSTALLMENTS,
 } from '../common/fees';
-import { paymentCommonFields } from '../common/payment-dto';
+import { toPaymentView } from '../common/payment-dto';
 
 export type InstallmentPlan = 'WEEKLY' | 'MONTHLY';
 export type ChildPaymentStatus =
@@ -281,13 +281,17 @@ export class PaymentService {
     const take = Math.min(Math.max(Math.trunc(limit) || 1, 1), 200);
     const skip = (Math.max(Math.trunc(page) || 1, 1) - 1) * take;
 
+    // Only the three joined columns the DTO actually denormalizes. Selecting the
+    // whole `school` row here is what let its settlement account reach the wire;
+    // narrowing the query means the sensitive columns never leave Postgres.
     const payments = await this.prisma.payment.findMany({
       where: whereClause,
       include: {
         enrollment: {
-          include: {
-            child: true,
-            school: true,
+          select: {
+            className: true,
+            child: { select: { fullName: true } },
+            school: { select: { name: true } },
           },
         },
       },
@@ -296,17 +300,13 @@ export class PaymentService {
       skip,
     });
 
-    // DB stores kobo; API consumers expect naira. The frontend reads
-    // `amount ?? amountPaid` as naira, so both must be converted here.
+    // Explicit projection (see toPaymentView). The rows are joined to
+    // `enrollment → school` for the school NAME; spreading them shipped the
+    // school's settlement account to the parent alongside it.
     const toDto = (
       p: (typeof payments)[number],
       receiptSignedUrl?: string | null,
-    ) => ({
-      ...p,
-      ...paymentCommonFields(p),
-      status: p.status,
-      ...(receiptSignedUrl !== undefined ? { receiptSignedUrl } : {}),
-    });
+    ) => toPaymentView(p, receiptSignedUrl);
 
     if (!includeReceiptSignedUrls) {
       return payments.map((p) => toDto(p));

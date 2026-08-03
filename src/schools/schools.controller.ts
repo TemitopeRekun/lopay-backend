@@ -22,6 +22,30 @@ import { CreateClassFeeDto } from './dto/create-class-fee.dto';
 import { SetClassFeesDto } from './dto/set-class-fees.dto';
 import { UpdateSchoolDto } from './dto/update.school.dto';
 
+/** `?take=` → a bounded positive integer, falling back to the caller's default. */
+const parseTake = (take: string | undefined, fallback: number): number => {
+  if (!take) return fallback;
+  const parsed = parseInt(take, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, SchoolPaymentsService.HISTORY_MAX_TAKE);
+};
+
+/** `?from=&to=` → a date window, ignoring unparseable values. */
+const parseRange = (
+  from: string | undefined,
+  to: string | undefined,
+): { from?: Date; to?: Date } | undefined => {
+  const parse = (value?: string): Date | undefined => {
+    if (!value) return undefined;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  };
+  const parsedFrom = parse(from);
+  const parsedTo = parse(to);
+  if (!parsedFrom && !parsedTo) return undefined;
+  return { from: parsedFrom, to: parsedTo };
+};
+
 @ApiTags('school-payments')
 @ApiBearerAuth()
 @Controller('school-payments')
@@ -158,6 +182,8 @@ export class SchoolPaymentsController {
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
     @Query('receiptType') receiptType?: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT',
     @Query('take') take?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
@@ -167,7 +193,8 @@ export class SchoolPaymentsController {
       user.schoolId,
       include,
       receiptType ?? 'ALL',
-      take ? Math.min(parseInt(take, 10), 200) : 100,
+      parseTake(take, 100),
+      parseRange(from, to),
     );
   }
 
@@ -183,6 +210,8 @@ export class SchoolPaymentsController {
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
     @Query('receiptType') receiptType?: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT',
     @Query('take') take?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
@@ -192,7 +221,8 @@ export class SchoolPaymentsController {
       user.schoolId,
       include,
       receiptType ?? 'ALL',
-      take ? Math.min(parseInt(take, 10), 200) : 100,
+      parseTake(take, 100),
+      parseRange(from, to),
     );
   }
 
@@ -243,6 +273,7 @@ export class SchoolPaymentsController {
     @CurrentUser() user: AuthUser,
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
     @Query('receiptType') receiptType?: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT',
+    @Query('paymentType') paymentType?: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT',
   ) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
@@ -252,6 +283,8 @@ export class SchoolPaymentsController {
       user.schoolId,
       include,
       receiptType ?? 'ALL',
+      100,
+      paymentType ?? 'INSTALLMENT',
     );
   }
 

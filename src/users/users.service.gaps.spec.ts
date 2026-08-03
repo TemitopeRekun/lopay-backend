@@ -27,7 +27,9 @@ describe('UsersService (findAll/findOne/update/remove)', () => {
       const args = prisma.user.findMany.mock.calls[0][0];
       expect(args.where).toEqual({ deletedAt: null });
       expect(args.orderBy).toEqual({ createdAt: 'desc' });
-      expect(result).toEqual([{ id: 'u1' }]);
+      // Every row now carries a server-side plan count (see the
+      // `findAll — enrollmentCount` suite); a non-parent gets 0.
+      expect(result).toEqual([{ id: 'u1', enrollmentCount: 0 }]);
     });
   });
 

@@ -9,6 +9,7 @@ import { EventsModule } from '../events/events.module';
 import { AuditModule } from '../audit/audit.module';
 import { LedgerModule } from '../ledger/ledger.module';
 import { SchoolOnboardingModule } from '../school-onboarding/school-onboarding.module';
+import { PaystackModule } from '../paystack/paystack.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { SchoolOnboardingModule } from '../school-onboarding/school-onboarding.m
     AuditModule,
     LedgerModule,
     SchoolOnboardingModule,
+    PaystackModule,
   ],
   controllers: [SchoolPaymentsController, SchoolsManagementController],
   providers: [SchoolPaymentsService],

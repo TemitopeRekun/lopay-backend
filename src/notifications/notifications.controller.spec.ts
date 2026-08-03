@@ -29,7 +29,15 @@ describe('NotificationsController', () => {
 
   it('scopes getUserNotifications to the authenticated user', async () => {
     await controller.getUserNotifications(user);
-    expect(service.getUserNotifications).toHaveBeenCalledWith('user-1');
+    expect(service.getUserNotifications).toHaveBeenCalledWith(
+      'user-1',
+      undefined,
+    );
+  });
+
+  it('passes a caller-supplied limit through as a number', async () => {
+    await controller.getUserNotifications(user, '25');
+    expect(service.getUserNotifications).toHaveBeenCalledWith('user-1', 25);
   });
 
   it('scopes markAllAsRead to the authenticated user', async () => {

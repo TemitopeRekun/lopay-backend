@@ -134,6 +134,13 @@ model Account {
   user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  // One row per (provider, provider-side account). Better Auth looks an account up
+  // by exactly this pair on every social sign-in and only inserts when the lookup
+  // misses, so without the constraint two concurrent Google callbacks can both miss
+  // and both insert — leaving a duplicate link that later reads resolve
+  // arbitrarily. Also the pair that must be unique for "is this Google identity
+  // already attached to someone else?" to be answerable at all.
+  @@unique([providerId, accountId])
 }
 
 model Verification {

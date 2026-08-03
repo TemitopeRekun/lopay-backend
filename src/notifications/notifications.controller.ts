@@ -1,5 +1,18 @@
-import { Controller, Get, Patch, Post, Param, Body } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Patch,
+  Post,
+  Param,
+  Body,
+  Query,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
 import { CurrentUser, AuthUser } from '../common/decorators/user.decorator';
 import { Roles } from '../auth/roles.decorator';
@@ -26,9 +39,22 @@ export class NotificationsController {
   }
 
   @Get()
-  @ApiOperation({ summary: "List the current user's notifications" })
-  async getUserNotifications(@CurrentUser() user: AuthUser) {
-    return this.notificationsService.getUserNotifications(user.userId);
+  @ApiOperation({
+    summary: "List the current user's notifications (bounded, newest first)",
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Rows to return (default 100, max 200).',
+  })
+  async getUserNotifications(
+    @CurrentUser() user: AuthUser,
+    @Query('limit') limit?: string,
+  ) {
+    return this.notificationsService.getUserNotifications(
+      user.userId,
+      limit ? Number(limit) : undefined,
+    );
   }
 
   // Declared before the parameterised ':id/read' route so 'read-all' is not

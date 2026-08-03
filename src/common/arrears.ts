@@ -15,20 +15,29 @@
  *
  * Lopay does not persist a per-installment schedule, but the schedule is fully
  * determined by data already on the enrollment: `termStartDate`,
- * `installmentFrequency`, and the fixed count for that cadence
- * (`WEEKLY_INSTALLMENTS` / `MONTHLY_INSTALLMENTS`). Counting confirmed
- * INSTALLMENT payments therefore tells us how many are missing.
+ * `installmentFrequency`, and the fixed count for that cadence. How far through
+ * that schedule the parent has got is derived from the VALUE of their confirmed
+ * installments by `common/installment-schedule.ts` — see that module for why
+ * counting payment rows instead reported a parent who paid five weeks ahead as
+ * four installments in arrears.
  *
  * Deliberately the same arithmetic the parent-facing enrollment view uses to
  * derive its next-due date and installment size, so an admin chasing a parent
- * quotes the number that parent is looking at. If that derivation changes, both
- * must change together.
+ * quotes the number that parent is looking at. Both now go through
+ * `derivePlanProgress` / `installmentDueDate`, so they cannot drift apart.
  *
  * All money is integer kobo in and out; conversion to Naira stays at the DTO
  * boundary (ADR 0001).
  */
 
-import { WEEKLY_INSTALLMENTS, MONTHLY_INSTALLMENTS } from './fees';
+// Deliberately not re-exported. Callers import the schedule helpers from
+// `installment-schedule` directly — a second path to the same function is how
+// the parent view and this module drifted apart in the first place.
+import {
+  cumulativeTarget,
+  derivePlanProgress,
+  installmentDueDate,
+} from './installment-schedule';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
@@ -41,8 +50,13 @@ export interface ArrearsInput {
   installmentFrequency: ArrearsFrequency;
   termStartDate: Date;
   termEndDate: Date;
-  /** Confirmed payments of type INSTALLMENT recorded against this enrollment. */
-  paidInstallments: number;
+  /**
+   * Kobo of CONFIRMED INSTALLMENT payments recorded against this enrollment.
+   *
+   * Value, not a row count: one transfer covering five slots has to land a
+   * parent in the same place as five separate transfers of the same size.
+   */
+  installmentsPaidKobo: number;
 }
 
 export interface ArrearsResult {
@@ -50,45 +64,14 @@ export interface ArrearsResult {
   overdueAmount: number;
   /** Scheduled installments that should have been paid by `now` but weren't. */
   missedInstallments: number;
+  /** Scheduled installments the parent's money has actually closed. */
+  paidInstallments: number;
   /** Days since the earliest missed installment fell due; 0 when not overdue. */
   daysOverdue: number;
   /** When the next unpaid installment is/was due. Null once the plan is settled. */
   nextDueDate: Date | null;
   /** True once the term has ended with a balance still outstanding. */
   termExpired: boolean;
-}
-
-/** Total scheduled installments for a cadence. */
-export function installmentCountFor(frequency: ArrearsFrequency): number {
-  return frequency === 'WEEKLY' ? WEEKLY_INSTALLMENTS : MONTHLY_INSTALLMENTS;
-}
-
-/**
- * The due date of the Nth installment (1-indexed) counted from term start.
- *
- * Month arithmetic goes through setMonth so a 31st-of-the-month term start
- * clamps to a real date rather than rolling into the following month.
- */
-export function installmentDueDate(
-  termStartDate: Date,
-  frequency: ArrearsFrequency,
-  n: number,
-): Date {
-  const due = new Date(termStartDate);
-  if (frequency === 'WEEKLY') {
-    due.setDate(due.getDate() + 7 * n);
-  } else {
-    const targetDay = due.getDate();
-    due.setDate(1);
-    due.setMonth(due.getMonth() + n);
-    const lastDayOfTargetMonth = new Date(
-      due.getFullYear(),
-      due.getMonth() + 1,
-      0,
-    ).getDate();
-    due.setDate(Math.min(targetDay, lastDayOfTargetMonth));
-  }
-  return due;
 }
 
 /**
@@ -136,18 +119,28 @@ export function computeArrears(
   const { remainingBalance, installmentFrequency, termStartDate, termEndDate } =
     input;
 
-  if (remainingBalance <= 0) {
+  const progress = derivePlanProgress({
+    remainingBalance,
+    installmentsPaidKobo: input.installmentsPaidKobo,
+    installmentFrequency,
+  });
+  const total = progress.totalInstallments;
+  const paidInstallments = progress.paidInstallments;
+
+  // A settled plan is never in arrears — but it has still closed every slot its
+  // money paid for. Reporting 0 here made the admin's Students tab render
+  // "0 paid" against a fully-paid plan.
+  if (progress.settled) {
     return {
       overdueAmount: 0,
       missedInstallments: 0,
+      paidInstallments,
       daysOverdue: 0,
       nextDueDate: null,
       termExpired: false,
     };
   }
 
-  const total = installmentCountFor(installmentFrequency);
-  const paidInstallments = Math.max(0, Math.min(input.paidInstallments, total));
   const termExpired = now > termEndDate;
 
   const elapsed = elapsedPeriods(termStartDate, installmentFrequency, now);
@@ -176,6 +169,7 @@ export function computeArrears(
         missedInstallments,
         total - paidInstallments,
       ),
+      paidInstallments,
       daysOverdue: Math.floor((now.getTime() - reference.getTime()) / DAY_MS),
       nextDueDate,
       termExpired: true,
@@ -186,18 +180,25 @@ export function computeArrears(
     return {
       overdueAmount: 0,
       missedInstallments: 0,
+      paidInstallments,
       daysOverdue: 0,
       nextDueDate,
       termExpired: false,
     };
   }
 
-  // Installment size is the remaining balance spread over the installments that
-  // are still outstanding — matching the parent view, which recomputes the
-  // per-installment figure from the *current* balance rather than the original.
-  const remainingInstallments = Math.max(1, total - paidInstallments);
-  const installmentAmount = Math.round(
-    remainingBalance / remainingInstallments,
+  // What is past due is the gap between the schedule's cumulative target for the
+  // slots that have already come round and what the parent has actually paid.
+  //
+  // The old form — missed slots × (balance ÷ slots still open) — re-derived a
+  // notional installment size from the CURRENT balance, so it neither credited a
+  // part-paid slot nor agreed with the figure the parent was quoted. Measuring
+  // against the cumulative target does both: pay half a slot late and only the
+  // half is in arrears.
+  const expectedValue = cumulativeTarget(
+    progress.planStartBalance,
+    total,
+    expectedPaid,
   );
 
   const firstMissedDue = installmentDueDate(
@@ -207,12 +208,14 @@ export function computeArrears(
   );
 
   return {
-    // Can't be past due for more than is owed.
+    // Can't be past due for more than is owed. Uses the schedule's normalised
+    // paid figure so this subtraction and `planStartBalance` above agree.
     overdueAmount: Math.min(
-      missedInstallments * installmentAmount,
+      Math.max(0, expectedValue - progress.installmentsPaidKobo),
       remainingBalance,
     ),
     missedInstallments,
+    paidInstallments,
     daysOverdue: Math.max(
       0,
       Math.floor((now.getTime() - firstMissedDue.getTime()) / DAY_MS),
