@@ -8,13 +8,18 @@ import {
   ForbiddenException,
   Query,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { SchoolPaymentsService } from './schools.service';
 import { ConfirmPaymentDto } from './dto/confim.payment.dto';
 import { MarkDefaultedDto } from './dto/mark-defaulted.dto';
 import { ReversePaymentDto } from './dto/reverse.payment.dto';
 import { Roles } from '../auth/roles.decorator';
-import { UserRole } from '../generated/prisma/client';
+import { UserRole, PaymentTransactionStatus } from '../generated/prisma/client';
 import { CurrentUser, AuthUser } from '../common/decorators/user.decorator';
 import { SkipThrottle } from '@nestjs/throttler';
 
@@ -28,6 +33,27 @@ const parseTake = (take: string | undefined, fallback: number): number => {
   const parsed = parseInt(take, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
   return Math.min(parsed, SchoolPaymentsService.HISTORY_MAX_TAKE);
+};
+
+/**
+ * `?status=` → a known status, or undefined.
+ *
+ * An unrecognised value is ignored rather than rejected: narrowing the ledger
+ * to an empty page on a typo would read as "no payments" on screen.
+ */
+const parseStatus = (
+  status: string | undefined,
+): PaymentTransactionStatus | undefined =>
+  status && status in PaymentTransactionStatus
+    ? (status as PaymentTransactionStatus)
+    : undefined;
+
+/** `?page=` → a row offset for the given page size (1-based, clamped). */
+const parsePage = (page: string | undefined, pageSize: number): number => {
+  if (!page) return 0;
+  const parsed = parseInt(page, 10);
+  if (!Number.isFinite(parsed) || parsed <= 1) return 0;
+  return (parsed - 1) * pageSize;
 };
 
 /** `?from=&to=` → a date window, ignoring unparseable values. */
@@ -177,6 +203,19 @@ export class SchoolPaymentsController {
   @Get('history')
   @Roles(UserRole.SCHOOL_OWNER)
   @ApiOperation({ summary: "Get the school's payment history" })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: PaymentTransactionStatus,
+    description:
+      'Filter by payment status. Applied in SQL so the history tabs page over the matching set, not over one already-fetched page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number for the paged history screen (1-based).',
+  })
   async getHistory(
     @CurrentUser() user: AuthUser,
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
@@ -184,17 +223,22 @@ export class SchoolPaymentsController {
     @Query('take') take?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('status') status?: string,
+    @Query('page') page?: string,
   ) {
     if (!user.schoolId) {
       throw new ForbiddenException('User is not associated with any school');
     }
     const include = includeReceiptSignedUrls === 'true';
+    const pageSize = parseTake(take, 100);
     return this.schoolPaymentsService.getHistory(
       user.schoolId,
       include,
       receiptType ?? 'ALL',
-      parseTake(take, 100),
+      pageSize,
       parseRange(from, to),
+      parseStatus(status),
+      parsePage(page, pageSize),
     );
   }
 

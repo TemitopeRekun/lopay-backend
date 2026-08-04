@@ -38,6 +38,7 @@ describe('TransactionsController', () => {
       'ALL', // receiptType default
       undefined, // page
       undefined, // limit
+      undefined, // status
     );
   });
 
@@ -51,11 +52,45 @@ describe('TransactionsController', () => {
       'INSTALLMENT',
       2,
       50,
+      undefined, // status
     );
   });
 
   it('treats any non-"true" flag value as false', async () => {
     await controller.getTransactions(parent, 'yes');
     expect(service.getHistory.mock.calls[0][3]).toBe(false);
+  });
+
+  /*
+   * The status tabs must narrow the SQL query, not a fetched page — so the
+   * controller has to forward the param rather than let the client filter.
+   */
+  it('forwards a recognised status to the service', async () => {
+    await controller.getTransactions(
+      parent,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'FAILED',
+    );
+    expect(service.getHistory.mock.calls[0][7]).toBe('FAILED');
+  });
+
+  /*
+   * An unrecognised status must not reach the query. Narrowing on a typo would
+   * return an empty page, which the history screen renders as "no transactions"
+   * — indistinguishable from a genuinely empty ledger.
+   */
+  it('ignores an unrecognised status instead of filtering on it', async () => {
+    await controller.getTransactions(
+      parent,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'NOT_A_STATUS',
+    );
+    expect(service.getHistory.mock.calls[0][7]).toBeUndefined();
   });
 });

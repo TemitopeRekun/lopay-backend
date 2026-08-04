@@ -14,7 +14,7 @@ import {
  */
 describe('SchoolPaymentsService (coverage)', () => {
   let db: {
-    payment: { findMany: jest.Mock };
+    payment: { findMany: jest.Mock; count: jest.Mock };
     childEnrollment: { count: jest.Mock; findMany: jest.Mock };
     classFee: { findFirst: jest.Mock; findMany: jest.Mock };
   };
@@ -46,7 +46,16 @@ describe('SchoolPaymentsService (coverage)', () => {
     jest.clearAllMocks();
 
     db = {
-      payment: { findMany: jest.fn() },
+      payment: {
+        findMany: jest.fn(),
+        // `getHistory` returns a pagination envelope, so it counts the matching
+        // set alongside the page. Default to the page length.
+        count: jest.fn(async () => {
+          const last = db.payment.findMany.mock.results.at(-1)?.value;
+          const rows = (await last) as unknown[] | undefined;
+          return Array.isArray(rows) ? rows.length : 0;
+        }),
+      },
       childEnrollment: { count: jest.fn(), findMany: jest.fn() },
       classFee: { findFirst: jest.fn(), findMany: jest.fn() },
     };
@@ -665,8 +674,8 @@ describe('SchoolPaymentsService (coverage)', () => {
 
       const res = await service.getHistory('s1');
 
-      expect(res).toHaveLength(1);
-      expect(res[0]).toEqual(
+      expect(res.items).toHaveLength(1);
+      expect(res.items[0]).toEqual(
         expect.objectContaining({
           id: 'p1',
           childName: 'Kid A',
@@ -677,7 +686,7 @@ describe('SchoolPaymentsService (coverage)', () => {
         }),
       );
       // receiptSignedUrl key omitted when not requested.
-      expect('receiptSignedUrl' in res[0]).toBe(false);
+      expect('receiptSignedUrl' in res.items[0]).toBe(false);
       expect(documents.createSignedUrlForPath).not.toHaveBeenCalled();
     });
 
@@ -692,8 +701,8 @@ describe('SchoolPaymentsService (coverage)', () => {
 
       const res = await service.getHistory('s1', true, 'ALL');
 
-      expect(res[0].receiptSignedUrl).toBe('https://signed/1');
-      expect(res[1].receiptSignedUrl).toBeNull();
+      expect(res.items[0].receiptSignedUrl).toBe('https://signed/1');
+      expect(res.items[1].receiptSignedUrl).toBeNull();
     });
 
     it('applies the receiptType filter to the query', async () => {
@@ -702,6 +711,50 @@ describe('SchoolPaymentsService (coverage)', () => {
       expect(db.payment.findMany.mock.calls[0][0].where).toEqual({
         paymentType: 'FIRST_PAYMENT',
       });
+    });
+
+    /*
+     * The history screen's status tabs filter in SQL. Filtering a fetched page
+     * client-side searches only that page, so a school owner on "Pending" would
+     * see the pending rows among the last 100 payments and read it as all of them.
+     */
+    it('applies a status filter to the query', async () => {
+      db.payment.findMany.mockResolvedValue([]);
+      await service.getHistory(
+        's1',
+        false,
+        'ALL',
+        100,
+        undefined,
+        PaymentTransactionStatus.PENDING,
+      );
+      expect(db.payment.findMany.mock.calls[0][0].where).toEqual({
+        status: PaymentTransactionStatus.PENDING,
+      });
+    });
+
+    it('pages via skip and reports the full filtered total', async () => {
+      db.payment.findMany.mockResolvedValue([historyRow]);
+      db.payment.count.mockResolvedValue(250);
+
+      const res = await service.getHistory(
+        's1',
+        false,
+        'ALL',
+        100,
+        undefined,
+        undefined,
+        100,
+      );
+
+      expect(db.payment.findMany.mock.calls[0][0].skip).toBe(100);
+      // The count must describe the same set the page was drawn from.
+      expect(db.payment.count.mock.calls[0][0].where).toEqual(
+        db.payment.findMany.mock.calls[0][0].where,
+      );
+      expect(res.total).toBe(250);
+      expect(res.page).toBe(2);
+      expect(res.totalPages).toBe(3);
     });
 
     /* The monthly collection ledger export needs a real period window. */

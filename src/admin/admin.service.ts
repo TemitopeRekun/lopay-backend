@@ -374,17 +374,28 @@ export class AdminService {
     );
   }
 
-  /** Global transactions for the admin dashboard (paginated). */
+  /**
+   * Global transactions for the admin dashboard (paginated).
+   *
+   * `status` is applied in SQL, not by the caller. The admin history screen
+   * offers status tabs, and filtering a fetched page client-side would search
+   * only that page — an admin on "Failed" would see the failures among the 50
+   * most recent payments and read it as the complete set.
+   */
   async getTransactions(
     includeReceiptSignedUrls = false,
     receiptType: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT' = 'ALL',
     page?: string | number,
     limit?: string | number,
+    status?: PaymentTransactionStatus,
   ): Promise<Paginated<PaymentView>> {
     const { page: p, limit: l, skip } = parsePagination(page, limit);
     const where: Prisma.PaymentWhereInput = {};
     if (receiptType !== 'ALL') {
       where.paymentType = receiptType as Prisma.EnumPaymentTypeFilter;
+    }
+    if (status) {
+      where.status = status;
     }
 
     const [payments, total] = await Promise.all([

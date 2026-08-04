@@ -24,6 +24,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { SchoolOnboardingService } from '../school-onboarding/school-onboarding.service';
 import { Money } from '../common/money';
 import { toPaymentView } from '../common/payment-dto';
+import { paginate } from '../common/pagination';
 import { CacheService, CacheKeys } from '../cache/cache.service';
 import { PaystackService } from '../paystack/paystack.service';
 import { errorMessage } from '../common/errors';
@@ -691,16 +692,31 @@ export class SchoolPaymentsService {
     };
   }
 
+  /**
+   * The school's payment history.
+   *
+   * Serves two callers with different needs, so it returns rows plus the total
+   * match count and takes both a window (`take`, for the monthly CSV export,
+   * which wants every row in a date range) and an optional `skip` for the
+   * paged history screen. `status` is applied in SQL — the history screen's
+   * status tabs must page over the matching set, not over one fetched page.
+   */
   async getHistory(
     schoolId: string,
     includeReceiptSignedUrls = false,
     receiptType: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT' = 'ALL',
     take = 100,
     range?: { from?: Date; to?: Date },
+    status?: PaymentTransactionStatus,
+    skip = 0,
   ) {
     const cappedTake = Math.min(take, SchoolPaymentsService.HISTORY_MAX_TAKE);
     const baseWhere: Prisma.PaymentWhereInput =
       receiptType !== 'ALL' ? { paymentType: receiptType as PaymentType } : {};
+
+    if (status) {
+      baseWhere.status = status;
+    }
 
     // Date window for period exports (the owner's monthly collection ledger).
     if (range?.from || range?.to) {
@@ -710,20 +726,25 @@ export class SchoolPaymentsService {
       };
     }
 
-    const payments = await this.prisma.withTenant(schoolId).payment.findMany({
-      where: baseWhere,
-      include: {
-        enrollment: {
-          select: {
-            className: true,
-            child: { select: { fullName: true } },
-            school: { select: { name: true } },
+    const tenant = this.prisma.withTenant(schoolId);
+    const [payments, total] = await Promise.all([
+      tenant.payment.findMany({
+        where: baseWhere,
+        include: {
+          enrollment: {
+            select: {
+              className: true,
+              child: { select: { fullName: true } },
+              school: { select: { name: true } },
+            },
           },
         },
-      },
-      orderBy: { paymentDate: 'desc' },
-      take: cappedTake,
-    });
+        orderBy: { paymentDate: 'desc' },
+        take: cappedTake,
+        skip: Math.max(skip, 0),
+      }),
+      tenant.payment.count({ where: baseWhere }),
+    ]);
 
     const toPaymentDto = (
       payment: (typeof payments)[0],
@@ -731,7 +752,12 @@ export class SchoolPaymentsService {
     ) => toPaymentView(payment, receiptSignedUrl);
 
     if (!includeReceiptSignedUrls) {
-      return payments.map((payment) => toPaymentDto(payment));
+      return paginate(
+        payments.map((payment) => toPaymentDto(payment)),
+        total,
+        Math.floor(Math.max(skip, 0) / cappedTake) + 1,
+        cappedTake,
+      );
     }
 
     const shouldSign = (paymentType: string) =>
@@ -756,7 +782,12 @@ export class SchoolPaymentsService {
       }),
     );
 
-    return enriched;
+    return paginate(
+      enriched,
+      total,
+      Math.floor(Math.max(skip, 0) / cappedTake) + 1,
+      cappedTake,
+    );
   }
 
   /**

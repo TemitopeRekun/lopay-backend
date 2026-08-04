@@ -6,16 +6,21 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma, UserRole } from '../generated/prisma/client';
+import {
+  Prisma,
+  UserRole,
+  PaymentTransactionStatus,
+} from '../generated/prisma/client';
 import { DocumentsService } from '../documents/documents.service';
 import { Money } from '../common/money';
+import { paginate, type Paginated } from '../common/pagination';
 import {
   PLATFORM_FEE_RATE,
   FIRST_PAYMENT_DEPOSIT_RATE,
   WEEKLY_INSTALLMENTS,
   MONTHLY_INSTALLMENTS,
 } from '../common/fees';
-import { toPaymentView } from '../common/payment-dto';
+import { toPaymentView, type PaymentView } from '../common/payment-dto';
 
 export type InstallmentPlan = 'WEEKLY' | 'MONTHLY';
 export type ChildPaymentStatus =
@@ -246,6 +251,13 @@ export class PaymentService {
     return 'PENDING';
   }
 
+  /**
+   * The caller's own payment history, as a pagination envelope.
+   *
+   * `status` is applied in SQL. The history screen has status tabs, and
+   * filtering a fetched page client-side searches only that page — on a history
+   * longer than one page it under-reports every tab while looking complete.
+   */
   async getHistory(
     userId: string,
     role: UserRole,
@@ -254,7 +266,8 @@ export class PaymentService {
     receiptType: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT' = 'ALL',
     page = 1,
     limit = 100,
-  ) {
+    status?: PaymentTransactionStatus,
+  ): Promise<Paginated<PaymentView>> {
     // Default-deny: this endpoint only serves a parent's own payments or a
     // school owner's tenant. Any other role (incl. an unexpected/undefined role)
     // must NOT fall through to an unscoped `where: {}` that would leak every
@@ -275,6 +288,10 @@ export class PaymentService {
       );
     }
 
+    if (status) {
+      whereClause = { ...whereClause, status };
+    }
+
     // Bound the query so a large history can never load the whole table in one
     // request. Defaults serve a parent's full realistic history in one page; a
     // client can page via ?page=&limit= for larger (school-owner) result sets.
@@ -284,21 +301,24 @@ export class PaymentService {
     // Only the three joined columns the DTO actually denormalizes. Selecting the
     // whole `school` row here is what let its settlement account reach the wire;
     // narrowing the query means the sensitive columns never leave Postgres.
-    const payments = await this.prisma.payment.findMany({
-      where: whereClause,
-      include: {
-        enrollment: {
-          select: {
-            className: true,
-            child: { select: { fullName: true } },
-            school: { select: { name: true } },
+    const [payments, total] = await Promise.all([
+      this.prisma.payment.findMany({
+        where: whereClause,
+        include: {
+          enrollment: {
+            select: {
+              className: true,
+              child: { select: { fullName: true } },
+              school: { select: { name: true } },
+            },
           },
         },
-      },
-      orderBy: { paymentDate: 'desc' },
-      take,
-      skip,
-    });
+        orderBy: { paymentDate: 'desc' },
+        take,
+        skip,
+      }),
+      this.prisma.payment.count({ where: whereClause }),
+    ]);
 
     // Explicit projection (see toPaymentView). The rows are joined to
     // `enrollment → school` for the school NAME; spreading them shipped the
@@ -308,8 +328,15 @@ export class PaymentService {
       receiptSignedUrl?: string | null,
     ) => toPaymentView(p, receiptSignedUrl);
 
+    const pageNum = Math.max(Math.trunc(page) || 1, 1);
+
     if (!includeReceiptSignedUrls) {
-      return payments.map((p) => toDto(p));
+      return paginate(
+        payments.map((p) => toDto(p)),
+        total,
+        pageNum,
+        take,
+      );
     }
 
     const shouldSign = (paymentType: string) =>
@@ -333,6 +360,6 @@ export class PaymentService {
       }),
     );
 
-    return enriched;
+    return paginate(enriched, total, pageNum, take);
   }
 }

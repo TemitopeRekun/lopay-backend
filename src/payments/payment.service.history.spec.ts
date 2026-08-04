@@ -3,7 +3,7 @@ import { ForbiddenException } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DocumentsService } from '../documents/documents.service';
-import { UserRole } from '../generated/prisma/client';
+import { UserRole, PaymentTransactionStatus } from '../generated/prisma/client';
 
 /**
  * Branch coverage for the two methods the base spec doesn't exercise:
@@ -13,14 +13,22 @@ import { UserRole } from '../generated/prisma/client';
 describe('PaymentService.getHistory', () => {
   let service: PaymentService;
   const findMany = jest.fn();
+  const count = jest.fn();
   const createSignedUrlForPath = jest.fn();
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // `getHistory` returns a pagination envelope, so it counts the matching set
+    // alongside the page. Default the count to whatever the page holds.
+    count.mockImplementation(async () => {
+      const last = findMany.mock.results.at(-1)?.value;
+      const rows = (await last) as unknown[] | undefined;
+      return Array.isArray(rows) ? rows.length : 0;
+    });
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentService,
-        { provide: PrismaService, useValue: { payment: { findMany } } },
+        { provide: PrismaService, useValue: { payment: { findMany, count } } },
         { provide: DocumentsService, useValue: { createSignedUrlForPath } },
       ],
     }).compile();
@@ -69,7 +77,7 @@ describe('PaymentService.getHistory', () => {
     expect(findMany.mock.calls[0][0].where).toEqual({
       enrollment: { child: { parent: { userId: 'u1' } } },
     });
-    expect(res[0].amount).toBe(250); // 25_000 kobo → ₦250
+    expect(res.items[0].amount).toBe(250); // 25_000 kobo → ₦250
   });
 
   it('selects only the three joined columns the DTO denormalizes', () => {
@@ -115,7 +123,9 @@ describe('PaymentService.getHistory', () => {
       }),
     ]);
 
-    const [dto] = await service.getHistory('u1', UserRole.PARENT);
+    const {
+      items: [dto],
+    } = await service.getHistory('u1', UserRole.PARENT);
 
     expect(dto.schoolName).toBe('Acme');
     expect(dto).not.toHaveProperty('enrollment');
@@ -182,6 +192,50 @@ describe('PaymentService.getHistory', () => {
     expect(arg.skip).toBe(20);
   });
 
+  /*
+   * The history screen's status tabs must filter in SQL. Filtering a fetched
+   * page client-side searches only that page, so on a history longer than one
+   * page every tab under-reports while looking like the complete set.
+   */
+  it('applies a status filter in SQL, alongside the role scope', async () => {
+    findMany.mockResolvedValue([]);
+    await service.getHistory(
+      'u1',
+      UserRole.PARENT,
+      undefined,
+      false,
+      'ALL',
+      1,
+      100,
+      PaymentTransactionStatus.FAILED,
+    );
+    expect(findMany.mock.calls[0][0].where).toEqual({
+      enrollment: { child: { parent: { userId: 'u1' } } },
+      status: PaymentTransactionStatus.FAILED,
+    });
+  });
+
+  it('counts the filtered set, not the page, so totalPages is right', async () => {
+    findMany.mockResolvedValue([row()]);
+    count.mockResolvedValue(137);
+    const res = await service.getHistory(
+      'u1',
+      UserRole.PARENT,
+      undefined,
+      false,
+      'ALL',
+      1,
+      50,
+    );
+    // The count must use the same where-clause as the page query, or paging
+    // walks off the end of a total that describes a different set.
+    expect(count.mock.calls[0][0].where).toEqual(
+      findMany.mock.calls[0][0].where,
+    );
+    expect(res.total).toBe(137);
+    expect(res.totalPages).toBe(3);
+  });
+
   it('omits receiptSignedUrl entirely when signed URLs are not requested', async () => {
     findMany.mockResolvedValue([row({ receiptUrl: 'r/1' })]);
     const res = await service.getHistory(
@@ -190,7 +244,7 @@ describe('PaymentService.getHistory', () => {
       undefined,
       false,
     );
-    expect(res[0]).not.toHaveProperty('receiptSignedUrl');
+    expect(res.items[0]).not.toHaveProperty('receiptSignedUrl');
     expect(createSignedUrlForPath).not.toHaveBeenCalled();
   });
 
@@ -207,7 +261,7 @@ describe('PaymentService.getHistory', () => {
       'INSTALLMENT',
     );
     expect(createSignedUrlForPath).toHaveBeenCalledWith('r/1');
-    expect(res[0].receiptSignedUrl).toBe('https://signed');
+    expect(res.items[0].receiptSignedUrl).toBe('https://signed');
   });
 
   it('skips signing when the receiptType filter excludes the payment', async () => {
@@ -222,7 +276,7 @@ describe('PaymentService.getHistory', () => {
       'FIRST_PAYMENT',
     );
     expect(createSignedUrlForPath).not.toHaveBeenCalled();
-    expect(res[0].receiptSignedUrl).toBeNull();
+    expect(res.items[0].receiptSignedUrl).toBeNull();
   });
 
   it('leaves the signed URL null when the payment has no receipt', async () => {
@@ -235,7 +289,7 @@ describe('PaymentService.getHistory', () => {
       'ALL',
     );
     expect(createSignedUrlForPath).not.toHaveBeenCalled();
-    expect(res[0].receiptSignedUrl).toBeNull();
+    expect(res.items[0].receiptSignedUrl).toBeNull();
   });
 
   it('degrades gracefully to null when signing throws (object gone)', async () => {
@@ -250,7 +304,7 @@ describe('PaymentService.getHistory', () => {
       true,
       'ALL',
     );
-    expect(res[0].receiptSignedUrl).toBeNull();
+    expect(res.items[0].receiptSignedUrl).toBeNull();
   });
 });
 
