@@ -168,6 +168,8 @@ describe('SchoolPaymentsController', () => {
         'ALL',
         100,
         undefined,
+        undefined,
+        0,
       );
     });
 
@@ -179,6 +181,8 @@ describe('SchoolPaymentsController', () => {
         'INSTALLMENT',
         500,
         undefined,
+        undefined,
+        0,
       );
     });
 
@@ -190,6 +194,8 @@ describe('SchoolPaymentsController', () => {
         'FIRST_PAYMENT',
         50,
         undefined,
+        undefined,
+        0,
       );
     });
 
@@ -201,6 +207,8 @@ describe('SchoolPaymentsController', () => {
         'ALL',
         1000,
         undefined,
+        undefined,
+        0,
       );
     });
 
@@ -212,6 +220,8 @@ describe('SchoolPaymentsController', () => {
         'ALL',
         100,
         undefined,
+        undefined,
+        0,
       );
       await controller.getHistory(owner, 'false', 'ALL', '0');
       expect(service.getHistory).toHaveBeenLastCalledWith(
@@ -220,6 +230,8 @@ describe('SchoolPaymentsController', () => {
         'ALL',
         100,
         undefined,
+        undefined,
+        0,
       );
     });
 
@@ -242,6 +254,8 @@ describe('SchoolPaymentsController', () => {
           from: new Date('2026-02-01T00:00:00.000Z'),
           to: new Date('2026-02-28T23:59:59.999Z'),
         },
+        undefined,
+        0,
       );
     });
 
@@ -259,6 +273,8 @@ describe('SchoolPaymentsController', () => {
         'ALL',
         100,
         { from: new Date('2026-02-01T00:00:00.000Z'), to: undefined },
+        undefined,
+        0,
       );
     });
 
@@ -276,7 +292,83 @@ describe('SchoolPaymentsController', () => {
         'ALL',
         100,
         undefined,
+        undefined,
+        0,
       );
+    });
+
+    /*
+     * The history screen's status tabs narrow the SQL query. Filtering a fetched
+     * page client-side would search only that page, so a long history would
+     * under-report every tab while looking complete.
+     */
+    it('forwards a recognised status', async () => {
+      await controller.getHistory(
+        owner,
+        'false',
+        'ALL',
+        undefined,
+        undefined,
+        undefined,
+        'PENDING',
+      );
+      expect(service.getHistory).toHaveBeenLastCalledWith(
+        'school-1',
+        false,
+        'ALL',
+        100,
+        undefined,
+        'PENDING',
+        0,
+      );
+    });
+
+    /*
+     * A typo must not narrow the ledger: an empty page renders as "no
+     * transactions", which is indistinguishable from an empty history.
+     */
+    it('ignores an unrecognised status', async () => {
+      await controller.getHistory(
+        owner,
+        'false',
+        'ALL',
+        undefined,
+        undefined,
+        undefined,
+        'NOPE',
+      );
+      expect(service.getHistory.mock.calls.at(-1)?.[5]).toBeUndefined();
+    });
+
+    it('converts ?page= into a row offset for the page size', async () => {
+      await controller.getHistory(
+        owner,
+        'false',
+        'ALL',
+        '50',
+        undefined,
+        undefined,
+        undefined,
+        '3',
+      );
+      // page 3 at 50/page starts at row 100.
+      expect(service.getHistory.mock.calls.at(-1)?.[6]).toBe(100);
+    });
+
+    it('treats a missing or sub-1 page as the first page', async () => {
+      await controller.getHistory(owner);
+      expect(service.getHistory.mock.calls.at(-1)?.[6]).toBe(0);
+      await controller.getHistory(
+        owner,
+        'false',
+        'ALL',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        '0',
+      );
+      expect(service.getHistory.mock.calls.at(-1)?.[6]).toBe(0);
     });
 
     it('throws when the owner has no school', async () => {

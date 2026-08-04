@@ -371,6 +371,30 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Filter by payment status. Applied in SQL so the history tabs page over the matching set, not over one already-fetched page.",
+            "schema": {
+              "enum": [
+                "PENDING",
+                "SUCCESS",
+                "FAILED",
+                "REVERSED"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "Page number for the paged history screen (1-based).",
+            "schema": {
+              "type": "number"
+            }
           }
         ],
         "responses": {
@@ -1237,6 +1261,21 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Filter by payment status. Applied in SQL so the history tabs page over the matching set, not over one already-fetched page.",
+            "schema": {
+              "enum": [
+                "PENDING",
+                "SUCCESS",
+                "FAILED",
+                "REVERSED"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1824,6 +1863,21 @@
             "required": true,
             "in": "query",
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Filter by payment status. Applied in SQL so the admin history tabs page over the matching set, not over one already-fetched page.",
+            "schema": {
+              "enum": [
+                "PENDING",
+                "SUCCESS",
+                "FAILED",
+                "REVERSED"
+              ],
               "type": "string"
             }
           }

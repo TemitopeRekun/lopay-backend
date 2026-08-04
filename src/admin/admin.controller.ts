@@ -7,7 +7,7 @@ import {
 } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { Roles } from '../auth/roles.decorator';
-import { UserRole } from '../generated/prisma/client';
+import { UserRole, PaymentTransactionStatus } from '../generated/prisma/client';
 import { CreateSchoolDto } from './dto/create.school.dto';
 import { CurrentUser, AuthUser } from '../common/decorators/user.decorator';
 
@@ -153,18 +153,33 @@ export class AdminController {
   @ApiOperation({
     summary: 'List global transactions across all schools (paginated)',
   })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: PaymentTransactionStatus,
+    description:
+      'Filter by payment status. Applied in SQL so the admin history tabs page over the matching set, not over one already-fetched page.',
+  })
   getTransactions(
     @Query('includeReceiptSignedUrls') includeReceiptSignedUrls?: string,
     @Query('receiptType') receiptType?: 'ALL' | 'FIRST_PAYMENT' | 'INSTALLMENT',
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('status') status?: string,
   ) {
     const include = includeReceiptSignedUrls === 'true';
+    // Ignore an unrecognised status rather than 400-ing: an unknown value must
+    // never silently narrow the ledger to an empty page that reads as "none".
+    const parsedStatus =
+      status && status in PaymentTransactionStatus
+        ? (status as PaymentTransactionStatus)
+        : undefined;
     return this.adminService.getTransactions(
       include,
       receiptType ?? 'ALL',
       page,
       limit,
+      parsedStatus,
     );
   }
 

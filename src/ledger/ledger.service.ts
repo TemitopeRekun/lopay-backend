@@ -464,11 +464,21 @@ export class LedgerService {
         tx,
       );
 
-      // 4. Notify Parent
+      /*
+       * 4. Notify Parent.
+       *
+       * Worded as "confirmation withdrawn", not "payment reversed". An
+       * installment is a bank transfer straight to the school (receiver:
+       * SCHOOL, platformAmount: 0) — the platform never holds the money, so a
+       * reversal refunds nothing. What the school undid is its own confirmation
+       * of the receipt. The old wording told a parent who had transferred real
+       * money that their payment "has been reversed", which reads as the school
+       * sending it back and sends them chasing a refund that does not exist.
+       */
       await this.notificationsService.create({
         userId: payment.enrollment.child.parent.userId,
-        title: 'Payment Reversed',
-        message: `A confirmed payment of ${Money.fromKobo(payment.amountPaid).formatNaira()} for ${payment.enrollment.child.fullName} (${payment.enrollment.className}) at ${payment.enrollment.school.name} has been reversed.${reason ? ` Reason: ${reason}` : ''} Please contact the school.`,
+        title: 'Payment Confirmation Withdrawn',
+        message: `${payment.enrollment.school.name} has withdrawn its confirmation of a ${Money.fromKobo(payment.amountPaid).formatNaira()} payment for ${payment.enrollment.child.fullName} (${payment.enrollment.className}), so that amount is showing as owed again.${reason ? ` Reason: ${reason}` : ''} No money has been refunded — please contact the school.`,
         type: NotificationType.ALERT,
         link: '/history',
       });

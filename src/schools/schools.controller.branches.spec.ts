@@ -114,6 +114,8 @@ describe('SchoolPaymentsController — guards & query defaults', () => {
         'ALL',
         100,
         undefined,
+        undefined, // status — unfiltered
+        0, // first page
       );
     });
 
@@ -125,6 +127,8 @@ describe('SchoolPaymentsController — guards & query defaults', () => {
         'INSTALLMENT',
         1000,
         undefined,
+        undefined,
+        0,
       );
     });
 
@@ -137,10 +141,18 @@ describe('SchoolPaymentsController — guards & query defaults', () => {
         '2026-05-01T00:00:00.000Z',
         '2026-05-31T23:59:59.999Z',
       );
-      expect(service.getHistory).toHaveBeenCalledWith('s1', false, 'ALL', 100, {
-        from: new Date('2026-05-01T00:00:00.000Z'),
-        to: new Date('2026-05-31T23:59:59.999Z'),
-      });
+      expect(service.getHistory).toHaveBeenCalledWith(
+        's1',
+        false,
+        'ALL',
+        100,
+        {
+          from: new Date('2026-05-01T00:00:00.000Z'),
+          to: new Date('2026-05-31T23:59:59.999Z'),
+        },
+        undefined,
+        0,
+      );
     });
 
     it('getHistoryAll applies the same defaults', async () => {
