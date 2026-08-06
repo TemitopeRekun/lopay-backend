@@ -29,6 +29,10 @@ import {
   type ParentDashboardSummary,
 } from './enrollment-view';
 import {
+  derivePaymentOutcomeState,
+  type PaymentOutcomeView,
+} from './payment-outcome';
+import {
   PaystackService,
   PaystackWebhookEvent,
 } from '../paystack/paystack.service';
@@ -436,6 +440,22 @@ export class EnrollmentService {
     return school as typeof school & { paystackSubaccountCode: string };
   }
 
+  /**
+   * Whether an existing payment for a reused idempotency key still represents a
+   * live intent worth replaying instead of charging again.
+   *
+   * PENDING is in flight (resuming its single-use reference is exactly what
+   * prevents a double charge) and SUCCESS is already paid. FAILED and REVERSED
+   * are settled the other way: there is nothing to resume, so the key must be
+   * released and a fresh charge created.
+   */
+  private static isReplayableIntent(status: PaymentTransactionStatus): boolean {
+    return (
+      status === PaymentTransactionStatus.PENDING ||
+      status === PaymentTransactionStatus.SUCCESS
+    );
+  }
+
   /** Shape the "replay an existing Paystack intent" response (no new charge). */
   private buildIdempotentInitiationResponse(existing: {
     paystackReference: string | null;
@@ -656,12 +676,29 @@ export class EnrollmentService {
     this.assertOwnedReceiptPath(dto.receiptUrl, userId);
 
     // Idempotency: replay an in-flight/completed intent rather than double-charging.
+    //
+    // Only a LIVE intent may be replayed. Replaying a dead one was a retry trap:
+    // the client mints one key per checkout screen, and a declined charge leaves
+    // the parent sitting on that same screen, so pressing "Pay" again arrived
+    // with the same key and was answered with the FAILED payment's spent
+    // reference and access code — no new Paystack transaction, the popup
+    // re-opened on a consumed one, and an amount the parent had since edited was
+    // silently ignored. A terminal payment releases its key so the retry becomes
+    // a real charge; the release is guarded on the row still being terminal, so
+    // two concurrent retries can't both claim it (the loser hits the unique
+    // constraint below and replays the winner).
     if (dto.idempotencyKey) {
       const existing = await this.findPaymentByIdempotencyKey(
         dto.idempotencyKey,
       );
       if (existing) {
-        return this.buildIdempotentInitiationResponse(existing);
+        if (EnrollmentService.isReplayableIntent(existing.status)) {
+          return this.buildIdempotentInitiationResponse(existing);
+        }
+        await this.prisma.payment.updateMany({
+          where: { id: existing.id, status: existing.status },
+          data: { idempotencyKey: null },
+        });
       }
     }
 
@@ -998,9 +1035,22 @@ export class EnrollmentService {
     this.assertOwnedReceiptPath(receiptUrl, user.userId);
 
     // Idempotency: replay the original payment if this submission already ran.
+    // A payment the school has since REJECTED is not a replayable submission —
+    // echoing it back would answer a fresh attempt with a rejected one and
+    // report it as accepted. Release the key so the retry records a real
+    // payment (the balance it was reserving is already free — see the PENDING
+    // filter in enrollment-view).
     if (idempotencyKey) {
       const existing = await this.findPaymentByIdempotencyKey(idempotencyKey);
-      if (existing) return this.buildInstallmentResponse(existing);
+      if (existing) {
+        if (EnrollmentService.isReplayableIntent(existing.status)) {
+          return this.buildInstallmentResponse(existing);
+        }
+        await this.prisma.payment.updateMany({
+          where: { id: existing.id, status: existing.status },
+          data: { idempotencyKey: null },
+        });
+      }
     }
 
     const enrollment = await this.prisma.childEnrollment.findUnique({
@@ -1118,8 +1168,14 @@ export class EnrollmentService {
       });
     }
 
-    // Push the new pending installment to the school dashboard + admins.
+    // Push the new pending installment to the school dashboard + admins, and to
+    // the parent: submitting reserves the amount against the plan's available
+    // balance (see the PENDING filter in enrollment-view), so their own other
+    // devices must stop offering money that is already spoken for. The tab that
+    // submitted refreshes via the mutation's own invalidation; every other
+    // session of theirs only learns about it here.
     this.events.emitPaymentsChanged({
+      parentUserId: enrollment.child.parent.userId,
       schoolId: enrollment.schoolId,
       notifyAdmins: true,
     });
@@ -1135,6 +1191,122 @@ export class EnrollmentService {
       studentName: enrollment.child.fullName,
       childName: enrollment.child.fullName,
       schoolName: enrollment.school.name,
+    };
+  }
+
+  /**
+   * Everything the post-payment screen renders, for either rail.
+   *
+   * Locate the payment by Paystack reference (first payment) or by id
+   * (installment — it has no reference), authorize it against the caller, and
+   * project it. An unsettled Paystack charge is verified and reconciled first,
+   * because the screen loads the moment the popup closes and the webhook may
+   * not have landed yet: without it the parent would be shown "processing" for
+   * a charge that already succeeded. Reconciliation is idempotent and
+   * status-guarded, so it is a no-op when the webhook won the race — this is
+   * the same call the old verify-on-return made, just answering with something
+   * renderable instead of a bare status string.
+   */
+  async getPaymentOutcome(
+    locator: { reference?: string; paymentId?: string },
+    user: AuthUser,
+  ): Promise<PaymentOutcomeView> {
+    const { reference, paymentId } = locator;
+    if (!reference && !paymentId) {
+      throw new BadRequestException('reference or paymentId is required');
+    }
+
+    const load = () =>
+      this.prisma.payment.findFirst({
+        where: reference ? { paystackReference: reference } : { id: paymentId },
+        include: {
+          enrollment: {
+            include: {
+              child: { select: { fullName: true, parent: true } },
+              school: { select: { name: true } },
+              payments: { orderBy: { paymentDate: 'desc' } },
+            },
+          },
+        },
+      });
+
+    let payment = await load();
+    if (!payment) throw new NotFoundException('Payment not found');
+
+    // Authorize before anything else — including before touching Paystack, so
+    // the endpoint can't be used to probe references the caller doesn't own.
+    const isParentOwner =
+      payment.enrollment?.child?.parent?.userId === user.userId;
+    const isSchoolOwner =
+      user.role === UserRole.SCHOOL_OWNER &&
+      !!user.schoolId &&
+      payment.schoolId === user.schoolId;
+    if (!isParentOwner && !isSchoolOwner) {
+      throw new ForbiddenException('You do not have access to this payment');
+    }
+
+    /*
+     * Only ask Paystack when our own books can't already answer.
+     *
+     * The screen mounts the instant the popup closes, usually before the
+     * webhook lands, so a PENDING charge genuinely has to be verified — that is
+     * what stops a parent being shown "processing" for money that has already
+     * moved. But a payment we have already settled needs nothing: re-verifying
+     * it on every refresh spends an external call (behind a circuit breaker,
+     * with retries) to be told what the row already says, and puts that latency
+     * in front of the screen.
+     *
+     * FAILED still verifies, because the decline reason lives only on
+     * Paystack's side and is the whole point of showing one.
+     */
+    let gatewayReason: string | null = null;
+    const alreadySettled =
+      payment.status === PaymentTransactionStatus.SUCCESS ||
+      payment.status === PaymentTransactionStatus.REVERSED;
+
+    if (reference && !alreadySettled) {
+      try {
+        const verified = await this.paystack.verifyTransaction(reference);
+        gatewayReason = verified.gatewayResponse;
+        if (verified.status === 'success') {
+          await this.reconcilePaystackPayment(reference, verified.fees, null);
+        } else if (verified.status === 'failed') {
+          await this.failPaystackPayment(reference);
+        }
+        // Re-read so the projection reflects whatever we just settled. A
+        // gateway failure must not blank the screen — we keep the row we have
+        // and "processing" stays the honest answer while Paystack is silent.
+        payment = (await load()) ?? payment;
+      } catch (err) {
+        this.logger.warn(
+          `Outcome verify failed for ${reference}: ${String(err)}`,
+        );
+      }
+    }
+
+    // Reuse the dashboard's own projection so the figures on this screen and
+    // the figures on the plan card cannot disagree — they are the same code.
+    const view = payment.enrollment
+      ? toEnrollmentView(payment.enrollment, payment.enrollment.payments)
+      : null;
+
+    return {
+      state: derivePaymentOutcomeState(payment),
+      paymentType: payment.paymentType,
+      // What the parent parted with: the gross charge for a card payment
+      // (amountCharged includes Paystack's fee), the transfer for an installment.
+      amount: Money.fromKobo(
+        payment.amountCharged ?? payment.amountPaid,
+      ).toNaira(),
+      reference: payment.paystackReference ?? payment.id,
+      childName: view?.childName ?? null,
+      schoolName: view?.schoolName ?? null,
+      className: view?.className ?? null,
+      reason: gatewayReason,
+      enrollmentStatus: view?.paymentStatus ?? null,
+      remainingBalance: view?.remainingBalance ?? null,
+      nextInstallmentAmount: view?.nextInstallmentAmount ?? null,
+      nextDueDate: view?.nextDueDate ?? null,
     };
   }
 

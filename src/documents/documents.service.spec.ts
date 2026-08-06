@@ -75,7 +75,11 @@ describe('DocumentsService', () => {
         {} as never,
         supabase as never,
       );
-      const up = await service.createReceiptUploadUrl('u1', 'f.png');
+      const up = await service.createReceiptUploadUrl(
+        'u1',
+        'f.png',
+        'image/png',
+      );
       expect(up.maxUploadBytes).toBe(2048);
       const down = await service.createSignedUrlForPath('receipts/a.png');
       expect(down.expiresIn).toBe(900);
@@ -91,10 +95,55 @@ describe('DocumentsService', () => {
         {} as never,
         supabase as never,
       );
-      const up = await service.createReceiptUploadUrl('u1', 'f.png');
+      const up = await service.createReceiptUploadUrl(
+        'u1',
+        'f.png',
+        'image/png',
+      );
       expect(up.maxUploadBytes).toBe(DEFAULT_MAX);
       const down = await service.createSignedUrlForPath('receipts/a.png');
       expect(down.expiresIn).toBe(600);
+    });
+  });
+
+  /**
+   * `createSignedUrlForPath` performs NO ownership check — it is the batch
+   * helper admin reporting uses on payment rows it has already authorized. The
+   * prefix guard is a backstop that keeps any future misuse inside the receipts
+   * namespace instead of handing out a read URL for the whole bucket.
+   */
+  describe('createSignedUrlForPath (internal, unauthorized-by-design)', () => {
+    const build = () => {
+      const parts = makeSupabase();
+      return {
+        service: new DocumentsService(
+          makeConfig() as never,
+          {} as never,
+          parts.supabase as never,
+        ),
+        ...parts,
+      };
+    };
+
+    it.each([
+      ['   ', 'blank'],
+      ['private/keys.json', 'outside the receipts namespace'],
+      ['receipts/../private/keys.json', 'traversing out of it'],
+    ])('rejects %s (%s)', async (badPath) => {
+      const { service, createSignedUrl } = build();
+      await expect(
+        service.createSignedUrlForPath(badPath),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(createSignedUrl).not.toHaveBeenCalled();
+    });
+
+    it('signs a genuine receipt path', async () => {
+      const { service, createSignedUrl } = build();
+      await service.createSignedUrlForPath('receipts/u1/abc_receipt.jpg');
+      expect(createSignedUrl).toHaveBeenCalledWith(
+        'receipts/u1/abc_receipt.jpg',
+        600,
+      );
     });
   });
 
@@ -112,7 +161,7 @@ describe('DocumentsService', () => {
     it('throws when fileName is blank', async () => {
       const { service } = build();
       await expect(
-        service.createReceiptUploadUrl('u1', '   '),
+        service.createReceiptUploadUrl('u1', '   ', 'image/png'),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -121,6 +170,31 @@ describe('DocumentsService', () => {
       await expect(
         service.createReceiptUploadUrl('u1', 'f.png', 'application/zip'),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    /**
+     * The allow-list used to be `if (contentType && ...)`, so the one request
+     * shape that declared nothing about its payload was the one that skipped
+     * the check — leaving the bucket's own config as the sole gate.
+     */
+    it('throws when contentType is absent rather than skipping the allow-list', async () => {
+      const { service, createSignedUploadUrl } = build();
+      for (const missing of [undefined, '']) {
+        await expect(
+          service.createReceiptUploadUrl('u1', 'f.png', missing as never),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      }
+      expect(createSignedUploadUrl).not.toHaveBeenCalled();
+    });
+
+    it('accepts a PDF receipt (bank apps export them)', async () => {
+      const { service } = build();
+      const res = await service.createReceiptUploadUrl(
+        'u1',
+        'statement.pdf',
+        'application/pdf',
+      );
+      expect(res.path).toMatch(/^receipts\/u1\/.*_statement\.pdf$/);
     });
 
     it('creates a signed upload URL under receipts/<userId>/, returning token + path', async () => {
@@ -142,7 +216,7 @@ describe('DocumentsService', () => {
 
     it('falls back to "receipt" when the sanitized name is empty', async () => {
       const { service, createSignedUploadUrl } = build();
-      await service.createReceiptUploadUrl('u1', '/');
+      await service.createReceiptUploadUrl('u1', '/', 'image/png');
       const objectPath = createSignedUploadUrl.mock.calls[0][0] as string;
       expect(objectPath).toMatch(/_receipt$/);
     });
@@ -155,7 +229,7 @@ describe('DocumentsService', () => {
         }),
       });
       await expect(
-        service.createReceiptUploadUrl('u1', 'f.png'),
+        service.createReceiptUploadUrl('u1', 'f.png', 'image/png'),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -166,7 +240,7 @@ describe('DocumentsService', () => {
         null as never,
       );
       await expect(
-        service.createReceiptUploadUrl('u1', 'f.png'),
+        service.createReceiptUploadUrl('u1', 'f.png', 'image/png'),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });

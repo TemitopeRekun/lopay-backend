@@ -4,6 +4,7 @@ import {
   Get,
   Body,
   Param,
+  Query,
   ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -95,6 +96,30 @@ export class EnrollmentController {
       { userId: user.userId, role: user.role, schoolId: user.schoolId },
       dto.receiptUrl,
       dto.idempotencyKey,
+    );
+  }
+
+  /**
+   * Everything the post-payment screen renders, for either payment rail.
+   *
+   * Locate by `reference` (Paystack first payment) or `paymentId`
+   * (installment). Both are ownership-scoped in the service. The reference path
+   * reconciles first, so this doubles as the verify-on-return the frontend used
+   * to call separately — one round trip instead of two, and it answers with
+   * something renderable rather than a bare status string.
+   */
+  @SkipThrottle()
+  @Get('payment-outcome')
+  @Roles(UserRole.PARENT, UserRole.SCHOOL_OWNER)
+  @ApiOperation({ summary: 'Resolve a payment outcome for the result screen' })
+  async getPaymentOutcome(
+    @Query('reference') reference: string | undefined,
+    @Query('paymentId') paymentId: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.enrollmentService.getPaymentOutcome(
+      { reference, paymentId },
+      user,
     );
   }
 

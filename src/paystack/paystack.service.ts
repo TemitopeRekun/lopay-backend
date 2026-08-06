@@ -20,6 +20,12 @@ export interface PaystackVerifyData {
   reference: string;
   amount: number;
   fees?: number | null;
+  /**
+   * Paystack's human-readable outcome, e.g. "Successful",
+   * "Insufficient funds", "Declined by financial institution". The only source
+   * of WHY a charge failed — `status` alone is just "failed".
+   */
+  gateway_response?: string | null;
   subaccount?: { subaccount_code?: string } | null;
   metadata?: Record<string, unknown> | null;
 }
@@ -70,6 +76,8 @@ export interface VerifyTransactionResult {
   reference: string;
   amount: number; // kobo
   fees: number | null; // kobo — authoritative Paystack fee
+  /** Paystack's reason for the outcome; null when it sent none. */
+  gatewayResponse: string | null;
   subaccount?: { subaccount_code?: string } | null;
   metadata?: Record<string, unknown> | null;
   raw: unknown;
@@ -250,6 +258,10 @@ export class PaystackService {
       reference: data.reference,
       amount: data.amount,
       fees: typeof data.fees === 'number' ? data.fees : null,
+      gatewayResponse:
+        typeof data.gateway_response === 'string' && data.gateway_response
+          ? data.gateway_response
+          : null,
       subaccount: data.subaccount ?? null,
       metadata: data.metadata ?? null,
       raw: data,

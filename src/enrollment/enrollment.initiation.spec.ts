@@ -34,7 +34,7 @@ describe('EnrollmentService — initiation (characterization)', () => {
     classFee: { findFirst: jest.Mock };
     school: { findUnique: jest.Mock };
     user: { findUnique: jest.Mock; findMany: jest.Mock };
-    payment: { update: jest.Mock };
+    payment: { update: jest.Mock; updateMany: jest.Mock };
     $transaction: jest.Mock;
   };
   let paymentService: { calculateInitialPayment: jest.Mock };
@@ -108,7 +108,10 @@ describe('EnrollmentService — initiation (characterization)', () => {
         findUnique: jest.fn().mockResolvedValue({ email: 'parent@x.test' }),
         findMany: jest.fn().mockResolvedValue([{ id: 'admin-1' }]),
       },
-      payment: { update: jest.fn().mockResolvedValue({}) },
+      payment: {
+        update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       $transaction: jest.fn(async (cb: (t: typeof tx) => unknown) => cb(tx)),
     };
     paymentService = {
@@ -298,6 +301,66 @@ describe('EnrollmentService — initiation (characterization)', () => {
       );
       expect(paystack.initializeTransaction).not.toHaveBeenCalled();
       expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The client mints ONE idempotency key per checkout screen, and a declined
+     * charge leaves the parent on that screen. So the retry arrives with the
+     * same key against a FAILED payment — and replaying it handed back a spent
+     * reference and access code, re-opening the popup on a consumed Paystack
+     * transaction. A terminal payment is not a live intent: it releases the key
+     * and the retry becomes a real charge.
+     */
+    it('charges again (does not replay) when the key belongs to a FAILED payment', async () => {
+      (
+        service as never as Record<string, unknown>
+      ).findPaymentByIdempotencyKey = jest.fn().mockResolvedValue({
+        id: 'pay-dead',
+        paystackReference: 'lopay_dead',
+        paystackAccessCode: 'AC_dead',
+        amountCharged: 28_000,
+        status: PaymentTransactionStatus.FAILED,
+      });
+
+      const result = await service.initiateFirstPayment(
+        baseDto({ idempotencyKey: 'key-1' } as Partial<CreateEnrollmentDto>),
+        'parent-user-1',
+      );
+
+      // The dead row gives up the key, guarded on it still being FAILED so two
+      // concurrent retries cannot both claim it.
+      expect(prisma.payment.updateMany).toHaveBeenCalledWith({
+        where: { id: 'pay-dead', status: PaymentTransactionStatus.FAILED },
+        data: { idempotencyKey: null },
+      });
+      expect(paystack.initializeTransaction).toHaveBeenCalledTimes(1);
+      expect(result).toEqual(
+        expect.objectContaining({ reference: 'lopay_ref', accessCode: 'AC_1' }),
+      );
+      expect(result).not.toHaveProperty('idempotent', true);
+    });
+
+    it('still replays a SUCCESS intent rather than charging twice', async () => {
+      (
+        service as never as Record<string, unknown>
+      ).findPaymentByIdempotencyKey = jest.fn().mockResolvedValue({
+        id: 'pay-done',
+        paystackReference: 'lopay_done',
+        paystackAccessCode: 'AC_done',
+        amountCharged: 28_000,
+        status: PaymentTransactionStatus.SUCCESS,
+      });
+
+      const result = await service.initiateFirstPayment(
+        baseDto({ idempotencyKey: 'key-1' } as Partial<CreateEnrollmentDto>),
+        'parent-user-1',
+      );
+
+      expect(result).toEqual(
+        expect.objectContaining({ idempotent: true, reference: 'lopay_done' }),
+      );
+      expect(prisma.payment.updateMany).not.toHaveBeenCalled();
+      expect(paystack.initializeTransaction).not.toHaveBeenCalled();
     });
 
     it('rejects a school that is not set up for online payments', async () => {
