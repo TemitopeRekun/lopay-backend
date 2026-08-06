@@ -728,6 +728,27 @@ describe('LedgerService (characterization)', () => {
         expect(result).toEqual({ updated: true });
       });
 
+      /**
+       * Failure moves BOTH the payment and the enrollment, so it owes the same
+       * push every other transition in this service sends. It used to send
+       * none: the parent got a "Payment Failed" toast (notifications push their
+       * own event) while the dashboard behind it kept rendering the charge as
+       * still in flight, because nothing invalidated the enrollment queries.
+       */
+      it('pushes the change to the parent, school and admins', async () => {
+        prisma.payment.findUnique.mockResolvedValueOnce(makePayment());
+
+        await service.failPaystackPayment('ref-1');
+
+        const targets = {
+          parentUserId: 'parent-1',
+          schoolId: 'school-1',
+          notifyAdmins: true,
+        };
+        expect(events.emitEnrollmentsChanged).toHaveBeenCalledWith(targets);
+        expect(events.emitPaymentsChanged).toHaveBeenCalledWith(targets);
+      });
+
       it('no-ops a non-PENDING payment (replayed charge.failed cannot un-succeed)', async () => {
         prisma.payment.findUnique.mockResolvedValueOnce(
           makePayment({ status: PaymentTransactionStatus.SUCCESS }),
@@ -737,6 +758,7 @@ describe('LedgerService (characterization)', () => {
 
         expect(result).toEqual({ updated: false });
         expect(prisma.$transaction).not.toHaveBeenCalled();
+        expect(events.emitPaymentsChanged).not.toHaveBeenCalled();
       });
     });
   });

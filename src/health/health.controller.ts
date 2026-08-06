@@ -40,6 +40,12 @@ export class HealthController {
 
     let storageOk = false;
     let storageError: string | undefined;
+    // Receipts are uploaded straight from the browser to Supabase via a signed
+    // URL, so the bucket's own configuration — not any code in this repo — is
+    // what actually enforces size and MIME limits, and what decides whether the
+    // objects are world-readable. Nothing else asserts it, so an unlimited or
+    // public receipts bucket would be invisible until it mattered. Report it.
+    const storageConfigIssues: string[] = [];
     if (!this.supabase) {
       storageError = 'not_configured';
     } else {
@@ -52,25 +58,50 @@ export class HealthController {
         ]);
         storageOk = !error && !!data;
         if (error) storageError = errorMessage(error, 'storage_error');
+        if (data) {
+          if (data.public) {
+            storageConfigIssues.push(
+              'bucket_is_public (receipts expose payer bank details)',
+            );
+          }
+          if (!data.file_size_limit) {
+            storageConfigIssues.push('no_file_size_limit');
+          }
+          if (!data.allowed_mime_types?.length) {
+            storageConfigIssues.push('no_allowed_mime_types');
+          }
+        }
       } catch (e: unknown) {
         storageOk = false;
         storageError = errorMessage(e, 'storage_error');
       }
     }
+    const storageConfigOk = storageOk && storageConfigIssues.length === 0;
 
     if (!dbOk) {
       res.status(503);
     }
 
     return {
-      status: dbOk && storageOk ? 'ok' : 'degraded',
+      // Config issues do not gate reachability: uploads still work, so this
+      // stays out of `storage.ok` and out of the 503 above. It is reported so a
+      // misconfigured bucket is visible on the same page everything else is.
+      status: dbOk && storageConfigOk ? 'ok' : 'degraded',
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
       nodeEnv,
       checks: {
         app: { ok: appOk },
         db: { ok: dbOk, error: dbError },
-        storage: { ok: storageOk, bucket: bucketName, error: storageError },
+        storage: {
+          ok: storageOk,
+          bucket: bucketName,
+          error: storageError,
+          config: {
+            ok: storageConfigOk,
+            issues: storageConfigIssues,
+          },
+        },
       },
     };
   }

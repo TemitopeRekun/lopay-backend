@@ -69,4 +69,73 @@ describe('PaystackService circuit breaker', () => {
     }
     expect(breakerOf(service).opened).toBe(false);
   });
+
+  /**
+   * `gateway_response` is Paystack's own reason for the outcome, and the only
+   * source of WHY a charge failed — `status` alone is just "failed". It is
+   * rendered verbatim to the parent on the post-payment screen, so the mapping
+   * (and its absence) has to be exact.
+   */
+  describe('verifyTransaction', () => {
+    const respondWith = (data: Record<string, unknown>) => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: true, data }),
+      }) as unknown as typeof fetch;
+    };
+
+    it("carries Paystack's decline reason through", async () => {
+      respondWith({
+        status: 'failed',
+        reference: 'lopay_1',
+        amount: 2_800_000,
+        gateway_response: 'Insufficient funds',
+      });
+
+      const result = await service.verifyTransaction('lopay_1');
+
+      expect(result.status).toBe('failed');
+      expect(result.gatewayResponse).toBe('Insufficient funds');
+    });
+
+    /**
+     * Null, not "" — the screen renders the reason box on truthiness, so an
+     * empty string would draw an empty "Reason from your bank" panel.
+     */
+    it.each([
+      ['absent', undefined],
+      ['empty', ''],
+      ['not a string', 42],
+    ])('reports a %s reason as null', async (_label, value) => {
+      respondWith({
+        status: 'failed',
+        reference: 'lopay_1',
+        amount: 2_800_000,
+        gateway_response: value,
+      });
+
+      await expect(service.verifyTransaction('lopay_1')).resolves.toMatchObject(
+        { gatewayResponse: null },
+      );
+    });
+
+    it('still reports the authoritative fee alongside it', async () => {
+      respondWith({
+        status: 'success',
+        reference: 'lopay_1',
+        amount: 2_800_000,
+        fees: 42_000,
+        gateway_response: 'Successful',
+      });
+
+      const result = await service.verifyTransaction('lopay_1');
+
+      expect(result).toMatchObject({
+        status: 'success',
+        fees: 42_000,
+        gatewayResponse: 'Successful',
+      });
+    });
+  });
 });

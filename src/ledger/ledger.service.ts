@@ -1142,15 +1142,34 @@ export class LedgerService {
 
     if (!flipped) return { updated: false };
 
-    if (payment.enrollment?.child?.parent?.userId) {
+    const parentUserId = payment.enrollment?.child?.parent?.userId;
+
+    if (parentUserId) {
       await this.notificationsService.create({
-        userId: payment.enrollment.child.parent.userId,
+        userId: parentUserId,
         title: 'Payment Failed',
         message: 'Your first payment did not go through. Please try again.',
         type: NotificationType.ALERT,
         link: '/history',
       });
     }
+
+    // Every other money transition in this file pushes these; failure was the
+    // one that did not, and it moved BOTH the payment and the enrollment
+    // (PENDING → FAILED). The notification push only invalidates the
+    // notifications query, so without these an open dashboard kept rendering the
+    // plan as PENDING — the parent read "Payment Failed" in a toast while the
+    // card behind it still showed the charge in flight.
+    this.events.emitEnrollmentsChanged({
+      parentUserId,
+      schoolId: payment.schoolId,
+      notifyAdmins: true,
+    });
+    this.events.emitPaymentsChanged({
+      parentUserId,
+      schoolId: payment.schoolId,
+      notifyAdmins: true,
+    });
 
     this.metrics.recordPaymentOutcome('failed', {
       type: PaymentType.FIRST_PAYMENT,

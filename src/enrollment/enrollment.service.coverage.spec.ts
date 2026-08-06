@@ -124,6 +124,7 @@ function buildMocks() {
       findUnique: jest.fn().mockResolvedValue(null),
       findFirst: jest.fn().mockResolvedValue(null),
       update: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       aggregate: jest.fn().mockResolvedValue({ _sum: { amountPaid: 0 } }),
     },
     webhookEvent: {
@@ -449,6 +450,7 @@ describe('EnrollmentService (coverage)', () => {
       m.prisma.payment.findUnique.mockResolvedValueOnce({
         id: 'old-pay',
         amountPaid: 50_000,
+        status: PaymentTransactionStatus.PENDING,
         paymentDate: new Date('2026-02-01'),
         paymentType: PaymentType.INSTALLMENT,
         enrollment: { child: { fullName: 'Ada' }, school: { name: 'Acme' } },
@@ -464,6 +466,53 @@ describe('EnrollmentService (coverage)', () => {
       expect(res.amount).toBe(500);
       expect(res.studentName).toBe('Ada');
       expect(m.prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    /**
+     * A payment the school has REJECTED is not a replayable submission. Echoing
+     * it back would answer a fresh attempt with a rejected one and report it as
+     * accepted — the parent would be told their money was recorded while no
+     * payment existed. The balance it was reserving is already free (the
+     * reservation filter in enrollment-view only counts PENDING), so the retry
+     * is safe to record for real.
+     */
+    it('records a new payment when the key belongs to a REJECTED one', async () => {
+      m.prisma.payment.findUnique.mockResolvedValueOnce({
+        id: 'rejected-pay',
+        amountPaid: 50_000,
+        status: PaymentTransactionStatus.FAILED,
+        paymentDate: new Date('2026-02-01'),
+        paymentType: PaymentType.INSTALLMENT,
+        enrollment: { child: { fullName: 'Ada' }, school: { name: 'Acme' } },
+      });
+      m.prisma.childEnrollment.findUnique.mockResolvedValueOnce(enrollmentRow);
+      m.tx.$queryRaw.mockResolvedValueOnce([{ remainingBalance: 100_000 }]);
+      m.tx.payment.create.mockResolvedValueOnce({
+        id: 'pay-new',
+        amountPaid: 50_000,
+        platformAmount: 0,
+        schoolAmount: 50_000,
+        paymentDate: new Date('2026-02-02'),
+        paymentType: PaymentType.INSTALLMENT,
+      });
+
+      const res = await m.service.submitInstallmentPayment(
+        'enr-1',
+        500,
+        parentUser,
+        undefined,
+        'idem-1',
+      );
+
+      expect(m.prisma.payment.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'rejected-pay',
+          status: PaymentTransactionStatus.FAILED,
+        },
+        data: { idempotencyKey: null },
+      });
+      expect(m.tx.payment.create).toHaveBeenCalled();
+      expect(res.id).toBe('pay-new');
     });
 
     it('404s when the enrollment does not exist', async () => {
@@ -540,6 +589,7 @@ describe('EnrollmentService (coverage)', () => {
       );
       expect(m.notifications.create).toHaveBeenCalledTimes(1);
       expect(m.events.emitPaymentsChanged).toHaveBeenCalledWith({
+        parentUserId: parentUser.userId,
         schoolId: SCHOOL_ID,
         notifyAdmins: true,
       });
@@ -601,6 +651,7 @@ describe('EnrollmentService (coverage)', () => {
       m.prisma.payment.findUnique.mockResolvedValueOnce({
         id: 'old-pay',
         amountPaid: 50_000,
+        status: PaymentTransactionStatus.PENDING,
         paymentDate: new Date('2026-02-01'),
         paymentType: PaymentType.INSTALLMENT,
         enrollment: { child: { fullName: 'Ada' }, school: { name: 'Acme' } },
@@ -629,6 +680,224 @@ describe('EnrollmentService (coverage)', () => {
           'idem-1',
         ),
       ).rejects.toThrow('db down');
+    });
+  });
+
+  // ---------------------------------------------------------- getPaymentOutcome
+  describe('getPaymentOutcome', () => {
+    const PARENT = {
+      userId: 'user-1',
+      role: UserRole.PARENT,
+      schoolId: null,
+    } as never;
+
+    /** A payment row shaped as the outcome projection consumes it. */
+    function outcomeRow(over: Record<string, unknown> = {}) {
+      return {
+        id: 'pay-1',
+        schoolId: SCHOOL_ID,
+        enrollmentId: 'enr-1',
+        paystackReference: 'lopay_ref',
+        status: PaymentTransactionStatus.PENDING,
+        isConfirmed: false,
+        amountPaid: 27_500_00,
+        amountCharged: 28_000_00,
+        paymentType: PaymentType.FIRST_PAYMENT,
+        paymentDate: new Date('2026-02-01'),
+        receiptUrl: null,
+        enrollment: {
+          id: 'enr-1',
+          childId: 'child-1',
+          schoolId: SCHOOL_ID,
+          className: 'Basic 1',
+          totalSchoolFee: 100_000_00,
+          remainingBalance: 72_500_00,
+          paymentStatus: PaymentStatus.ACTIVE,
+          installmentFrequency: InstallmentFrequency.MONTHLY,
+          termStartDate: new Date('2026-01-01'),
+          termEndDate: new Date('2026-04-01'),
+          createdAt: new Date('2026-01-01'),
+          child: { fullName: 'Ada', parent: { userId: 'user-1' } },
+          school: { name: 'Acme' },
+          payments: [],
+        },
+        ...over,
+      };
+    }
+
+    it('rejects a call with neither locator', async () => {
+      await expect(
+        m.service.getPaymentOutcome({}, PARENT),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('404s an unknown payment', async () => {
+      m.prisma.payment.findFirst.mockResolvedValueOnce(null);
+      await expect(
+        m.service.getPaymentOutcome({ paymentId: 'nope' }, PARENT),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    /**
+     * Authorization runs BEFORE the gateway call, so the endpoint cannot be
+     * used to probe whether an arbitrary reference exists at Paystack.
+     */
+    it("refuses someone else's payment without touching Paystack", async () => {
+      m.prisma.payment.findFirst.mockResolvedValueOnce(
+        outcomeRow({
+          enrollment: {
+            ...outcomeRow().enrollment,
+            child: { fullName: 'Ada', parent: { userId: 'someone-else' } },
+          },
+        }),
+      );
+      await expect(
+        m.service.getPaymentOutcome({ reference: 'lopay_ref' }, PARENT),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(m.paystack.verifyTransaction).not.toHaveBeenCalled();
+    });
+
+    it('lets the school owner read a payment at their own school', async () => {
+      m.prisma.payment.findFirst.mockResolvedValue(
+        outcomeRow({
+          status: PaymentTransactionStatus.SUCCESS,
+          isConfirmed: true,
+          enrollment: {
+            ...outcomeRow().enrollment,
+            child: { fullName: 'Ada', parent: { userId: 'someone-else' } },
+          },
+        }),
+      );
+      const res = await m.service.getPaymentOutcome({ paymentId: 'pay-1' }, {
+        userId: 'owner-1',
+        role: UserRole.SCHOOL_OWNER,
+        schoolId: SCHOOL_ID,
+      } as never);
+      expect(res.state).toBe('succeeded');
+    });
+
+    /**
+     * The screen loads the instant the popup closes, usually before the
+     * webhook. Verifying here is what stops a parent being shown "processing"
+     * for money that has already moved.
+     */
+    it('verifies and reconciles an unsettled charge, then reports the settled row', async () => {
+      m.paystack.verifyTransaction.mockResolvedValueOnce({
+        status: 'success',
+        fees: 150,
+        gatewayResponse: 'Successful',
+      });
+      m.prisma.payment.findFirst
+        .mockResolvedValueOnce(outcomeRow())
+        .mockResolvedValueOnce(
+          outcomeRow({
+            status: PaymentTransactionStatus.SUCCESS,
+            isConfirmed: true,
+          }),
+        );
+
+      const res = await m.service.getPaymentOutcome(
+        { reference: 'lopay_ref' },
+        PARENT,
+      );
+
+      expect(m.ledger.reconcilePaystackPayment).toHaveBeenCalledWith(
+        'lopay_ref',
+        150,
+        null,
+      );
+      // Re-read after settling — the first row said PENDING.
+      expect(res.state).toBe('succeeded');
+      expect(res.childName).toBe('Ada');
+      expect(res.schoolName).toBe('Acme');
+      expect(res.amount).toBe(28_000); // gross charge, not the credited amount
+    });
+
+    it('fails an unsettled charge Paystack reports as failed, and surfaces the reason', async () => {
+      m.paystack.verifyTransaction.mockResolvedValueOnce({
+        status: 'failed',
+        fees: null,
+        gatewayResponse: 'Insufficient funds',
+      });
+      m.prisma.payment.findFirst
+        .mockResolvedValueOnce(outcomeRow())
+        .mockResolvedValueOnce(
+          outcomeRow({ status: PaymentTransactionStatus.FAILED }),
+        );
+
+      const res = await m.service.getPaymentOutcome(
+        { reference: 'lopay_ref' },
+        PARENT,
+      );
+
+      expect(m.ledger.failPaystackPayment).toHaveBeenCalledWith('lopay_ref');
+      expect(res.state).toBe('failed');
+      expect(res.reason).toBe('Insufficient funds');
+    });
+
+    /**
+     * Re-verifying a payment we have already settled spends an external call
+     * (behind a circuit breaker, with retries) to be told what the row already
+     * says, and puts that latency in front of the screen on every refresh.
+     */
+    it('does not re-verify a payment already settled in our books', async () => {
+      m.prisma.payment.findFirst.mockResolvedValue(
+        outcomeRow({
+          status: PaymentTransactionStatus.SUCCESS,
+          isConfirmed: true,
+        }),
+      );
+
+      const res = await m.service.getPaymentOutcome(
+        { reference: 'lopay_ref' },
+        PARENT,
+      );
+
+      expect(m.paystack.verifyTransaction).not.toHaveBeenCalled();
+      expect(res.state).toBe('succeeded');
+    });
+
+    /**
+     * Paystack being unreachable is not a failed payment. The row we already
+     * hold stays authoritative and the parent keeps seeing "processing" —
+     * telling them it failed is what pushes them into paying twice.
+     */
+    it('degrades to the known row when Paystack is unreachable', async () => {
+      m.paystack.verifyTransaction.mockRejectedValueOnce(new Error('offline'));
+      m.prisma.payment.findFirst.mockResolvedValue(outcomeRow());
+
+      const res = await m.service.getPaymentOutcome(
+        { reference: 'lopay_ref' },
+        PARENT,
+      );
+
+      expect(res.state).toBe('processing');
+      expect(res.reason).toBeNull();
+    });
+
+    /** An installment has no reference, so the gateway is never involved. */
+    it('projects an installment awaiting school confirmation', async () => {
+      m.prisma.payment.findFirst.mockResolvedValue(
+        outcomeRow({
+          paystackReference: null,
+          amountCharged: null,
+          amountPaid: 50_000_00,
+          paymentType: PaymentType.INSTALLMENT,
+        }),
+      );
+
+      const res = await m.service.getPaymentOutcome(
+        { paymentId: 'pay-1' },
+        PARENT,
+      );
+
+      expect(m.paystack.verifyTransaction).not.toHaveBeenCalled();
+      expect(res.state).toBe('processing');
+      expect(res.paymentType).toBe(PaymentType.INSTALLMENT);
+      // No amountCharged on a bank transfer — falls back to what was paid.
+      expect(res.amount).toBe(50_000);
+      // The id is the only locator an installment has; support quotes it.
+      expect(res.reference).toBe('pay-1');
     });
   });
 

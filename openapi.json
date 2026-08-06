@@ -1423,6 +1423,26 @@
         ]
       }
     },
+    "/api/v1/enrollments/payment-outcome": {
+      "get": {
+        "operationId": "EnrollmentController_getPaymentOutcome",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Resolve a payment outcome for the result screen",
+        "tags": [
+          "enrollments"
+        ]
+      }
+    },
     "/api/v1/enrollments/confirm-first-payment": {
       "post": {
         "operationId": "EnrollmentController_confirmFirstPayment",
@@ -2181,11 +2201,12 @@
           "contentType": {
             "type": "string",
             "example": "image/jpeg",
-            "description": "MIME type of the file"
+            "description": "MIME type of the file. Must be one of: image/jpeg, image/png, image/webp, application/pdf."
           }
         },
         "required": [
-          "fileName"
+          "fileName",
+          "contentType"
         ]
       },
       "CreateReceiptDownloadDto": {

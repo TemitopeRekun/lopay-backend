@@ -41,7 +41,19 @@ describe('HealthController', () => {
       return undefined;
     });
     prisma.$queryRaw.mockResolvedValue([{ '?column?': 1 }]);
-    getBucket.mockResolvedValue({ data: { name: 'my-bucket' }, error: null });
+    // A correctly configured receipts bucket: private, size-capped, MIME-capped.
+    // Those three are the only enforcement receipt uploads have — the browser
+    // PUTs straight to storage on a signed URL, so no code in this repo sees
+    // the bytes.
+    getBucket.mockResolvedValue({
+      data: {
+        name: 'my-bucket',
+        public: false,
+        file_size_limit: 10 * 1024 * 1024,
+        allowed_mime_types: ['image/jpeg', 'image/png', 'application/pdf'],
+      },
+      error: null,
+    });
     controller = await build();
   });
 
@@ -60,9 +72,42 @@ describe('HealthController', () => {
       ok: true,
       bucket: 'my-bucket',
       error: undefined,
+      config: { ok: true, issues: [] },
     });
     expect(res.status).not.toHaveBeenCalled();
     expect(getBucket).toHaveBeenCalledWith('my-bucket');
+  });
+
+  /**
+   * The bucket's own settings are the ONLY thing enforcing receipt size/type,
+   * and the only thing keeping payer bank details out of public URLs. Nothing
+   * in this repo can assert them at upload time, so surfacing them here is the
+   * whole mechanism — a silent `ok` on a wide-open bucket is the failure.
+   */
+  it('flags a public or unbounded receipts bucket as degraded', async () => {
+    getBucket.mockResolvedValue({
+      data: {
+        name: 'my-bucket',
+        public: true,
+        file_size_limit: null,
+        allowed_mime_types: [],
+      },
+      error: null,
+    });
+    const res = makeRes();
+
+    const result = await controller.getHealth(res);
+
+    expect(result.status).toBe('degraded');
+    // Reachability is unaffected — uploads still work, so this is not a 503.
+    expect(result.checks.storage.ok).toBe(true);
+    expect(res.status).not.toHaveBeenCalled();
+    expect(result.checks.storage.config.ok).toBe(false);
+    expect(result.checks.storage.config.issues).toEqual([
+      expect.stringContaining('bucket_is_public'),
+      'no_file_size_limit',
+      'no_allowed_mime_types',
+    ]);
   });
 
   it('returns 503 and degraded when the DB check fails', async () => {

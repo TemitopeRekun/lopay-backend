@@ -107,13 +107,16 @@ export class DocumentsService {
   async createReceiptUploadUrl(
     userId: string,
     fileName: string,
-    contentType?: string,
+    contentType: string,
   ) {
     if (!fileName?.trim()) {
       throw new BadRequestException('fileName is required');
     }
 
-    if (contentType && !ALLOWED_RECEIPT_CONTENT_TYPES.has(contentType)) {
+    // Unconditional. This used to be `if (contentType && ...)`, so omitting the
+    // field skipped the allow-list rather than failing it — the one input shape
+    // that most needed checking was the one that bypassed the check.
+    if (!ALLOWED_RECEIPT_CONTENT_TYPES.has(contentType)) {
       throw new BadRequestException(
         `Unsupported contentType. Allowed: ${[
           ...ALLOWED_RECEIPT_CONTENT_TYPES,
@@ -191,9 +194,25 @@ export class DocumentsService {
     };
   }
 
+  /**
+   * Mint a read URL for a receipt path that has ALREADY been authorized.
+   *
+   * INTERNAL — server-side callers only, and never with a client-supplied path.
+   * Unlike `createReceiptDownloadUrl`, this performs no ownership check: it
+   * exists for batch paths (admin reporting) where the caller has already
+   * proven access by loading the payment rows itself. Wiring it to a route
+   * would hand any caller a read URL for an arbitrary object, which is the IDOR
+   * `assertOwnedReceiptPath` exists to prevent on the write side.
+   *
+   * The prefix guard is a backstop, not the authorization: it keeps a future
+   * misuse inside the receipts namespace instead of the whole bucket.
+   */
   async createSignedUrlForPath(filePath: string) {
     if (!filePath?.trim()) {
       throw new BadRequestException('Path is required');
+    }
+    if (!filePath.startsWith('receipts/') || filePath.includes('..')) {
+      throw new BadRequestException('Path is not a receipt object');
     }
 
     const bucket = this.bucket();
