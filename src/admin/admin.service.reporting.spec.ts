@@ -39,12 +39,18 @@ describe('AdminService (reporting)', () => {
     school: { findUnique: jest.Mock; update: jest.Mock; findMany: jest.Mock };
   };
   let documents: { createSignedUrlForPath: jest.Mock };
-  let paystack: { createSubaccount: jest.Mock };
+  let paystack: { createSubaccount: jest.Mock; getSubaccount: jest.Mock };
   let ledger: {
     settleFirstPayment: jest.Mock;
     rejectFirstPayment: jest.Mock;
   };
   let onboarding: { provisionSchoolAndOwner: jest.Mock };
+  let cache: {
+    getOrSet: (k: string, ttl: number, loader: () => unknown) => unknown;
+    get: jest.Mock;
+    set: jest.Mock;
+    del: jest.Mock;
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -69,12 +75,22 @@ describe('AdminService (reporting)', () => {
       },
     };
     documents = { createSignedUrlForPath: jest.fn() };
-    paystack = { createSubaccount: jest.fn() };
+    paystack = {
+      createSubaccount: jest.fn(),
+      // Default: nothing on the integration, so the retry path provisions.
+      getSubaccount: jest.fn().mockResolvedValue(null),
+    };
     ledger = {
       settleFirstPayment: jest.fn().mockResolvedValue({ settled: true }),
       rejectFirstPayment: jest.fn().mockResolvedValue({ rejected: true }),
     };
     onboarding = { provisionSchoolAndOwner: jest.fn() };
+    cache = {
+      getOrSet: (_k: string, _ttl: number, loader: () => unknown) => loader(),
+      get: jest.fn(),
+      set: jest.fn(),
+      del: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -86,16 +102,7 @@ describe('AdminService (reporting)', () => {
         { provide: PaystackService, useValue: paystack },
         { provide: LedgerService, useValue: ledger },
         { provide: SchoolOnboardingService, useValue: onboarding },
-        {
-          provide: CacheService,
-          useValue: {
-            getOrSet: (_k: string, _ttl: number, loader: () => unknown) =>
-              loader(),
-            get: jest.fn(),
-            set: jest.fn(),
-            del: jest.fn(),
-          },
-        },
+        { provide: CacheService, useValue: cache },
       ],
     }).compile();
     service = module.get<AdminService>(AdminService);
@@ -211,6 +218,7 @@ describe('AdminService (reporting)', () => {
       await expect(service.createSubaccountForSchool('s1')).resolves.toEqual({
         subaccountCode: 'SUB_777',
         active: true,
+        created: true,
       });
     });
 
@@ -225,6 +233,159 @@ describe('AdminService (reporting)', () => {
         service.createSubaccountForSchool('s1'),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(paystack.createSubaccount).not.toHaveBeenCalled();
+    });
+
+    /*
+     * This backs a retry button, so pressing it twice must not orphan the first
+     * subaccount on Paystack and repoint the school at a second one. It used to
+     * do exactly that: provisioning ran unconditionally.
+     */
+    it('keeps an existing subaccount that is still valid on this integration', async () => {
+      prisma.school.findUnique.mockResolvedValue({
+        id: 's1',
+        name: 'Acme',
+        bankCode: '058',
+        accountNumber: '0001',
+        paystackSubaccountCode: 'SUB_LIVE',
+      });
+      paystack.getSubaccount.mockResolvedValue({ subaccount_code: 'SUB_LIVE' });
+
+      await expect(service.createSubaccountForSchool('s1')).resolves.toEqual({
+        subaccountCode: 'SUB_LIVE',
+        active: true,
+        created: false,
+      });
+      expect(paystack.createSubaccount).not.toHaveBeenCalled();
+      // The stored flag is re-synced — it may have been switched off by a failed
+      // settlement re-point even though the subaccount itself is fine.
+      expect(prisma.school.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { paystackSubaccountActive: true } }),
+      );
+    });
+
+    it('replaces a subaccount that belongs to a different integration', async () => {
+      prisma.school.findUnique.mockResolvedValue({
+        id: 's1',
+        name: 'Acme',
+        bankCode: '058',
+        accountNumber: '0001',
+        paystackSubaccountCode: 'SUB_TESTMODE',
+      });
+      paystack.getSubaccount.mockResolvedValue(null); // not on this integration
+      paystack.createSubaccount.mockResolvedValue('SUB_NEW');
+
+      await expect(service.createSubaccountForSchool('s1')).resolves.toEqual({
+        subaccountCode: 'SUB_NEW',
+        active: true,
+        created: true,
+      });
+    });
+
+    /*
+     * A stale "broken" verdict would send the admin straight back to the button
+     * they have just successfully pressed.
+     */
+    it('drops the cached payout statuses after repairing a school', async () => {
+      prisma.school.findUnique.mockResolvedValue({
+        id: 's1',
+        name: 'Acme',
+        bankCode: '058',
+        accountNumber: '0001',
+      });
+      paystack.createSubaccount.mockResolvedValue('SUB_777');
+
+      await service.createSubaccountForSchool('s1');
+
+      expect(cache.del).toHaveBeenCalledWith(
+        'cache:admin:schools-payout-status',
+      );
+    });
+  });
+
+  /*
+   * The check our own `paystackSubaccountActive` column cannot perform. That
+   * column only records that a create call once succeeded, so a school whose
+   * subaccount was made in test mode kept advertising itself as healthy after the
+   * switch to live keys — right up until a parent tried to pay.
+   */
+  describe('getSchoolsPayoutStatus', () => {
+    const school = (over: Record<string, unknown> = {}) => ({
+      id: 's1',
+      name: 'Acme',
+      bankCode: '058',
+      paystackSubaccountCode: 'SUB_1',
+      paystackSubaccountActive: true,
+      ...over,
+    });
+
+    it('reports ACTIVE when Paystack confirms the subaccount', async () => {
+      prisma.school.findMany.mockResolvedValue([school()]);
+      paystack.getSubaccount.mockResolvedValue({ subaccount_code: 'SUB_1' });
+
+      const [status] = await service.getSchoolsPayoutStatus();
+      expect(status).toEqual(
+        expect.objectContaining({
+          schoolId: 's1',
+          state: 'ACTIVE',
+          canRetry: true,
+        }),
+      );
+    });
+
+    it('reports NOT_ON_INTEGRATION even though our own column says active', async () => {
+      prisma.school.findMany.mockResolvedValue([school()]);
+      paystack.getSubaccount.mockResolvedValue(null);
+
+      const [status] = await service.getSchoolsPayoutStatus();
+      expect(status.state).toBe('NOT_ON_INTEGRATION');
+      // The disagreement is the whole point — surface both sides.
+      expect(status.storedActive).toBe(true);
+      expect(status.detail).toMatch(/test mode/i);
+    });
+
+    it('reports MISSING when no subaccount was ever created', async () => {
+      prisma.school.findMany.mockResolvedValue([
+        school({
+          paystackSubaccountCode: null,
+          paystackSubaccountActive: false,
+        }),
+      ]);
+
+      const [status] = await service.getSchoolsPayoutStatus();
+      expect(status.state).toBe('MISSING');
+      expect(status.canRetry).toBe(true);
+      expect(paystack.getSubaccount).not.toHaveBeenCalled();
+    });
+
+    it('cannot be retried without a settlement bank on file', async () => {
+      prisma.school.findMany.mockResolvedValue([
+        school({ paystackSubaccountCode: null, bankCode: null }),
+      ]);
+
+      const [status] = await service.getSchoolsPayoutStatus();
+      expect(status.canRetry).toBe(false);
+      expect(status.detail).toMatch(/no settlement bank/i);
+    });
+
+    /*
+     * An outage must not read as "broken". Rendering UNKNOWN as a failure would
+     * push an admin to re-provision a perfectly healthy school and orphan its
+     * real payout account.
+     */
+    it('reports UNKNOWN — never broken — when Paystack cannot be reached', async () => {
+      prisma.school.findMany.mockResolvedValue([school()]);
+      paystack.getSubaccount.mockRejectedValue(new Error('paystack down'));
+
+      const [status] = await service.getSchoolsPayoutStatus();
+      expect(status.state).toBe('UNKNOWN');
+    });
+
+    it('excludes delisted schools', async () => {
+      prisma.school.findMany.mockResolvedValue([]);
+      await service.getSchoolsPayoutStatus();
+      expect(prisma.school.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { deletedAt: null } }),
+      );
     });
   });
 

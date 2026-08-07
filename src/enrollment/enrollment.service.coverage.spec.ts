@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { EnrollmentService } from './enrollment.service';
+import { PaystackApiError } from '../paystack/paystack.service';
 import {
   InstallmentFrequency,
   PaymentReceiver,
@@ -1369,6 +1370,132 @@ describe('EnrollmentService (coverage)', () => {
         expect.objectContaining({ idempotent: true, amountCharged: null }),
       );
       expect(m.paystack.initializeTransaction).not.toHaveBeenCalled();
+    });
+
+    /*
+     * The trap this pair of tests exists to prevent (seen in production after the
+     * live cutover): a school's subaccount existed only on the test integration,
+     * so initialize was refused and the payment row was left PENDING with no
+     * access code. Every retry then resolved that dead row, verify answered
+     * "Transaction reference not found", the catch read that as an outage, and the
+     * client was handed `accessCode: null` — which the Paystack popup reports as
+     * an invalid *key*. The enrollment could never be paid again.
+     */
+    it('fails a pending payment Paystack has never heard of, then charges afresh', async () => {
+      m.prisma.child.findFirst.mockResolvedValueOnce({ id: 'child-1' });
+      m.prisma.childEnrollment.findUnique.mockResolvedValueOnce({
+        id: 'enr-pending',
+        schoolId: SCHOOL_ID,
+        paymentStatus: PaymentStatus.PENDING,
+      });
+      m.prisma.payment.findFirst.mockResolvedValueOnce({
+        paystackReference: 'lopay_ghost',
+        paystackAccessCode: 'AC_ghost',
+        amountCharged: 28_000,
+        status: PaymentTransactionStatus.PENDING,
+      });
+      m.paystack.verifyTransaction.mockRejectedValueOnce(
+        new PaystackApiError(400, 'Transaction reference not found.'),
+      );
+
+      const res = await m.service.initiateFirstPayment(baseDto(), 'u1');
+
+      expect(m.ledger.failPaystackPayment).toHaveBeenCalledWith('lopay_ghost');
+      expect(m.paystack.initializeTransaction).toHaveBeenCalled();
+      expect(res.reference).toBe('lopay_ref');
+      expect(res.accessCode).toBe('AC_1');
+    });
+
+    /*
+     * The other half of the same guard. A 401 is ALSO a 4xx, but it means our key
+     * is wrong — not that the transaction is fake. Failing on it would mark real,
+     * paid charges FAILED the moment a key was misconfigured, so anything that
+     * isn't an explicit "unknown reference" must stay conservative.
+     */
+    it('resumes (never fails) a pending payment when verify fails on auth', async () => {
+      m.prisma.child.findFirst.mockResolvedValueOnce({ id: 'child-1' });
+      m.prisma.childEnrollment.findUnique.mockResolvedValueOnce({
+        id: 'enr-pending',
+        schoolId: SCHOOL_ID,
+        paymentStatus: PaymentStatus.PENDING,
+      });
+      m.prisma.payment.findFirst.mockResolvedValueOnce({
+        paystackReference: 'lopay_real',
+        paystackAccessCode: 'AC_real',
+        amountCharged: 28_000,
+        status: PaymentTransactionStatus.PENDING,
+      });
+      m.paystack.verifyTransaction.mockRejectedValueOnce(
+        new PaystackApiError(401, 'Invalid key'),
+      );
+
+      const res = await m.service.initiateFirstPayment(baseDto(), 'u1');
+
+      expect(m.ledger.failPaystackPayment).not.toHaveBeenCalled();
+      expect(m.paystack.initializeTransaction).not.toHaveBeenCalled();
+      expect(res).toEqual(
+        expect.objectContaining({
+          idempotent: true,
+          reference: 'lopay_real',
+          accessCode: 'AC_real',
+        }),
+      );
+    });
+
+    it('fails a pending payment that never got an access code, without asking Paystack', async () => {
+      m.prisma.child.findFirst.mockResolvedValueOnce({ id: 'child-1' });
+      m.prisma.childEnrollment.findUnique.mockResolvedValueOnce({
+        id: 'enr-pending',
+        schoolId: SCHOOL_ID,
+        paymentStatus: PaymentStatus.PENDING,
+      });
+      m.prisma.payment.findFirst.mockResolvedValueOnce({
+        paystackReference: 'lopay_orphan',
+        paystackAccessCode: null, // initialize never completed
+        amountCharged: 28_000,
+        status: PaymentTransactionStatus.PENDING,
+      });
+
+      const res = await m.service.initiateFirstPayment(baseDto(), 'u1');
+
+      // No transaction exists, so there is nothing to verify and nothing to
+      // double-charge — the doomed external call is skipped entirely.
+      expect(m.paystack.verifyTransaction).not.toHaveBeenCalled();
+      expect(m.ledger.failPaystackPayment).toHaveBeenCalledWith('lopay_orphan');
+      expect(res.accessCode).toBe('AC_1');
+    });
+
+    /*
+     * The payment row is written BEFORE Paystack is called, so a refusal here is
+     * exactly what minted the orphaned PENDING rows above. Failing it on the way
+     * out keeps the next attempt clean and stops the reconciliation sweep
+     * re-verifying a reference that was never created.
+     */
+    it('fails the payment it just wrote when Paystack refuses to initialize', async () => {
+      m.prisma.child.findFirst.mockResolvedValueOnce({ id: 'child-1' });
+      const refusal = new PaystackApiError(400, 'Invalid subaccount');
+      m.paystack.initializeTransaction.mockRejectedValueOnce(refusal);
+
+      await expect(
+        m.service.initiateFirstPayment(baseDto(), 'u1'),
+      ).rejects.toBe(refusal);
+
+      expect(m.ledger.failPaystackPayment).toHaveBeenCalledWith(
+        expect.stringMatching(/^lopay_/),
+      );
+      // The access code is never written, so no half-live row is left behind.
+      expect(m.prisma.payment.update).not.toHaveBeenCalled();
+    });
+
+    it('surfaces the initialize failure even if the cleanup itself fails', async () => {
+      m.prisma.child.findFirst.mockResolvedValueOnce({ id: 'child-1' });
+      const refusal = new PaystackApiError(400, 'Invalid subaccount');
+      m.paystack.initializeTransaction.mockRejectedValueOnce(refusal);
+      m.ledger.failPaystackPayment.mockRejectedValueOnce(new Error('db down'));
+
+      await expect(
+        m.service.initiateFirstPayment(baseDto(), 'u1'),
+      ).rejects.toBe(refusal);
     });
 
     it('frees a pending enrollment for a fresh charge when verify says failed', async () => {

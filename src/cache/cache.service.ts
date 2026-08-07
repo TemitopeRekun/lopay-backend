@@ -97,5 +97,6 @@ export const CacheKeys = {
   adminRevenue: () => 'cache:admin:revenue',
   adminStudentsSummary: () => 'cache:admin:students-summary',
   adminSchoolsSummary: () => 'cache:admin:schools-summary',
+  adminSchoolsPayoutStatus: () => 'cache:admin:schools-payout-status',
   adminBreakdownSummary: () => 'cache:admin:breakdown-summary',
 } as const;
