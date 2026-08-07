@@ -45,10 +45,25 @@ export class AdminController {
     return this.adminService.resolveAccount(body.accountNumber, body.bankCode);
   }
 
-  /** (Re)create a Paystack subaccount for a school missing one */
+  /**
+   * Payout readiness per school, VERIFIED against Paystack rather than read from
+   * our own `paystackSubaccountActive` column — which only records that a create
+   * call once succeeded and so cannot see a subaccount belonging to a different
+   * integration (e.g. one left behind in test mode).
+   */
+  @Get('schools/payout-status')
+  @ApiOperation({
+    summary: 'Per-school payout readiness, verified against Paystack',
+  })
+  getSchoolsPayoutStatus() {
+    return this.adminService.getSchoolsPayoutStatus();
+  }
+
+  /** Repair a school's Paystack payout account. Idempotent — safe to press twice. */
   @Post('schools/:schoolId/paystack-subaccount')
   @ApiOperation({
-    summary: 'Create a Paystack subaccount for a school missing one',
+    summary:
+      'Create or repair a school’s Paystack subaccount (idempotent: keeps an existing one that is still valid on this integration)',
   })
   createSubaccount(@Param('schoolId') schoolId: string) {
     return this.adminService.createSubaccountForSchool(schoolId);

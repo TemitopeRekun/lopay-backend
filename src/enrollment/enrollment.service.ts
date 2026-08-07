@@ -33,6 +33,7 @@ import {
   type PaymentOutcomeView,
 } from './payment-outcome';
 import {
+  PaystackApiError,
   PaystackService,
   PaystackWebhookEvent,
 } from '../paystack/paystack.service';
@@ -288,13 +289,40 @@ export class EnrollmentService {
       return { resolved: false };
     }
 
+    // An access code is written only AFTER Paystack accepts the transaction, so a
+    // PENDING row without one means initialize never succeeded: no transaction
+    // exists, no money can be in flight, and there is nothing for the popup to
+    // open. Resuming it anyway returned `accessCode: null` to the client, the
+    // checkout answered with its generic "enter a valid key" error, and because
+    // the dead row was still PENDING the very next attempt found it again — the
+    // enrollment was trapped for good. Fail it and let the caller charge afresh.
+    if (!payment.paystackAccessCode) {
+      this.logger.warn(
+        `Pending first payment ${payment.paystackReference} has no access code — initialize never completed; failing it so the parent can retry.`,
+      );
+      await this.failPaystackPayment(payment.paystackReference);
+      return { resolved: false };
+    }
+
     let verified: Awaited<ReturnType<PaystackService['verifyTransaction']>>;
     try {
       verified = await this.paystack.verifyTransaction(
         payment.paystackReference,
       );
     } catch (err) {
-      // Can't reach Paystack — never risk a double charge. Resume the same txn.
+      // Paystack answered, and it has never heard of this reference — a verdict,
+      // not an outage. The transaction cannot be resumed or charged, so treating
+      // it as "unreachable" below would loop the parent forever on a dead row.
+      if (err instanceof PaystackApiError && err.isUnknownReference) {
+        this.logger.warn(
+          `Pending first payment ${payment.paystackReference} is unknown to Paystack; failing it so the parent can retry.`,
+        );
+        await this.failPaystackPayment(payment.paystackReference);
+        return { resolved: false };
+      }
+      // Anything else — a timeout, a 5xx, an open circuit, or an auth failure we
+      // must not read as "no such transaction" — leaves the outcome genuinely
+      // unknown. Never risk a double charge: resume the same single-use txn.
       this.logger.warn(
         `Pending first-payment verify failed for ${payment.paystackReference}: ${String(err)}`,
       );
@@ -812,20 +840,44 @@ export class EnrollmentService {
     }
 
     // Initialize the Paystack split transaction.
-    const init = await this.paystack.initializeTransaction({
-      email: user.email,
-      amountKobo: amountCharged,
-      reference,
-      subaccount: school.paystackSubaccountCode,
-      transactionChargeKobo: transactionCharge,
-      callbackUrl: process.env.PAYSTACK_CALLBACK_URL,
-      metadata: {
-        paymentId: payment.id,
-        enrollmentId: payment.enrollmentId,
-        schoolId: dto.schoolId,
-        childId,
-      },
-    });
+    //
+    // The PENDING enrollment + payment above are written BEFORE this call, so a
+    // refusal here (a subaccount that doesn't exist on this integration, a bad
+    // key, an outage) leaves a payment row for a transaction Paystack never
+    // created. Left PENDING, that row is indistinguishable from a real in-flight
+    // charge: every later attempt resolved it instead of charging, and the stale
+    // reference was re-verified by the reconciliation sweep forever. Mark it
+    // terminal — the parent's own retry then starts clean — and let the original
+    // error surface so the caller still learns why it failed.
+    let init: Awaited<ReturnType<PaystackService['initializeTransaction']>>;
+    try {
+      init = await this.paystack.initializeTransaction({
+        email: user.email,
+        amountKobo: amountCharged,
+        reference,
+        subaccount: school.paystackSubaccountCode,
+        transactionChargeKobo: transactionCharge,
+        callbackUrl: process.env.PAYSTACK_CALLBACK_URL,
+        metadata: {
+          paymentId: payment.id,
+          enrollmentId: payment.enrollmentId,
+          schoolId: dto.schoolId,
+          childId,
+        },
+      });
+    } catch (err) {
+      this.logger.error(
+        `Paystack initialize failed for ${reference} (school ${dto.schoolId}): ${String(err)}`,
+      );
+      // Best-effort cleanup: the caller must see the initialize failure, not a
+      // secondary error from the tidy-up.
+      await this.failPaystackPayment(reference).catch((cleanupErr) =>
+        this.logger.error(
+          `Could not fail orphaned payment ${reference}: ${String(cleanupErr)}`,
+        ),
+      );
+      throw err;
+    }
 
     await this.prisma.payment.update({
       where: { id: payment.id },

@@ -11,6 +11,51 @@ import { errorMessage } from '../common/errors';
 const PAYSTACK_BASE_URL = 'https://api.paystack.co';
 const REQUEST_TIMEOUT_MS = 15_000;
 
+/**
+ * A 4xx from Paystack: the provider answered and rejected the call.
+ *
+ * Extends `BadGatewayException` so nothing downstream changes — the client still
+ * sees a 502 and the circuit breaker still excludes it via `errorFilter` — while
+ * carrying the provider's status and raw message so a caller can act on a
+ * SPECIFIC verdict. Without that, the only way to tell "this reference does not
+ * exist" from "your key is wrong" was to parse a formatted string, so callers
+ * lumped every failure together as "Paystack is unreachable".
+ */
+export class PaystackApiError extends BadGatewayException {
+  constructor(
+    /** Paystack's OWN HTTP status — not this exception's (which is 502). */
+    readonly providerStatus: number,
+    readonly paystackMessage: string,
+  ) {
+    super(`Paystack error (${providerStatus}): ${paystackMessage}`);
+  }
+
+  /**
+   * Paystack could not find the resource on this integration. Note the status is
+   * NOT reliably 404 — verifying an unknown transaction reference answers `400`
+   * with "Transaction reference not found" — so the message counts too.
+   */
+  get isNotFound(): boolean {
+    return (
+      this.providerStatus === 404 || /not found/i.test(this.paystackMessage)
+    );
+  }
+
+  /**
+   * True when Paystack is telling us the TRANSACTION reference does not exist on
+   * this integration — a definitive "there is no such transaction", not a
+   * transport problem. Deliberately narrower than `isNotFound`: an auth failure
+   * (`401`, wrong key) looks identical at the HTTP layer but must NEVER be read
+   * as "no such transaction", or a misconfigured key would fail real, paid
+   * charges.
+   */
+  get isUnknownReference(): boolean {
+    return (
+      this.isNotFound && /reference|transaction/i.test(this.paystackMessage)
+    );
+  }
+}
+
 /** HTTP verbs this client issues against the Paystack REST API. */
 type HttpMethod = 'GET' | 'POST' | 'PUT';
 
@@ -46,6 +91,15 @@ export interface PaystackBank {
   name: string;
   code: string;
   currency: string;
+}
+
+/** A subaccount as it exists on the integration (only the fields we read). */
+export interface PaystackSubaccount {
+  subaccount_code: string;
+  business_name?: string;
+  settlement_bank?: string;
+  account_number?: string;
+  active?: boolean;
 }
 
 export interface CreateSubaccountParams {
@@ -140,11 +194,25 @@ export class PaystackService {
     );
   }
 
+  /**
+   * The settlement-bank field, sent under BOTH names Paystack recognises.
+   *
+   * Their `POST /subaccount` reference lists the parameter as `bank_code` while
+   * the example on the very same page uses `settlement_bank`. `settlement_bank`
+   * is the one we have actually seen work, so it stays; `bank_code` rides along
+   * so the call keeps working if the documented name becomes the only one.
+   * Paystack ignores fields it doesn't recognise, and the two always carry the
+   * same value, so there is nothing to disagree about.
+   */
+  private static settlementBankFields(bankCode: string) {
+    return { settlement_bank: bankCode, bank_code: bankCode };
+  }
+
   /** Create a subaccount for a school. Returns the subaccount_code. */
   async createSubaccount(params: CreateSubaccountParams): Promise<string> {
     const body = {
       business_name: params.businessName,
-      settlement_bank: params.settlementBank,
+      ...PaystackService.settlementBankFields(params.settlementBank),
       account_number: params.accountNumber,
       percentage_charge: params.percentageCharge ?? 0,
     };
@@ -154,6 +222,30 @@ export class PaystackService {
       body,
     );
     return data.subaccount_code;
+  }
+
+  /**
+   * Fetch a subaccount, or `null` when it does not exist on the integration the
+   * current key belongs to.
+   *
+   * Subaccounts are per-integration: one created with a test key is invisible to
+   * a live key. `paystackSubaccountActive` in our own database only records that
+   * a create call once succeeded, so it cannot answer "can this school actually
+   * be paid TODAY" — this can, and it is the check that would have caught a
+   * test-mode subaccount surviving the switch to live keys.
+   */
+  async getSubaccount(
+    subaccountCode: string,
+  ): Promise<PaystackSubaccount | null> {
+    try {
+      return await this.request<PaystackSubaccount>(
+        'GET',
+        `/subaccount/${encodeURIComponent(subaccountCode)}`,
+      );
+    } catch (err) {
+      if (err instanceof PaystackApiError && err.isNotFound) return null;
+      throw err; // an outage or auth failure is NOT "this doesn't exist"
+    }
   }
 
   /**
@@ -174,7 +266,7 @@ export class PaystackService {
       `/subaccount/${encodeURIComponent(subaccountCode)}`,
       {
         business_name: params.businessName,
-        settlement_bank: params.settlementBank,
+        ...PaystackService.settlementBankFields(params.settlementBank),
         account_number: params.accountNumber,
         percentage_charge: params.percentageCharge ?? 0,
       },
@@ -347,8 +439,9 @@ export class PaystackService {
           }
           // 4xx — a real client/business error; surface immediately. Excluded
           // from the breaker by errorFilter so it can't open the circuit.
-          throw new BadGatewayException(
-            `Paystack error (${res.status}): ${json?.message ?? 'unknown error'}`,
+          throw new PaystackApiError(
+            res.status,
+            json?.message ?? 'unknown error',
           );
         }
         return json.data as T;

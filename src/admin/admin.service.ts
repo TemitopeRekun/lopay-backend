@@ -35,6 +35,32 @@ import { CacheService, CacheKeys } from '../cache/cache.service';
  * and a school name. Selecting `school: true` here is what previously carried
  * settlement details into admin payloads — keep this narrow.
  */
+/**
+ * Whether a school can actually be paid right now.
+ *
+ * `ACTIVE` and `NOT_ON_INTEGRATION` are both verdicts FROM Paystack; `UNKNOWN`
+ * means we could not ask. They are kept distinct on purpose — an outage must
+ * never render as "broken", or an admin will re-provision a healthy school and
+ * orphan its real payout account.
+ */
+export type SchoolPayoutState =
+  | 'ACTIVE'
+  | 'MISSING'
+  | 'NOT_ON_INTEGRATION'
+  | 'UNKNOWN';
+
+export interface SchoolPayoutStatus {
+  schoolId: string;
+  schoolName: string;
+  subaccountCode: string | null;
+  /** What our own column claims — shown only to expose disagreement with Paystack. */
+  storedActive: boolean;
+  /** False when there is no settlement bank on file, so retrying cannot help. */
+  canRetry: boolean;
+  state: SchoolPayoutState;
+  detail: string;
+}
+
 const ADMIN_ENROLLMENT_SELECT = {
   className: true,
   child: { select: { fullName: true } },
@@ -60,6 +86,9 @@ export class AdminService {
   // are re-derived cheaply; no explicit invalidation needed (M4 scale).
   private static readonly AGGREGATE_TTL_SECONDS = 30;
   private static readonly BANKS_TTL_SECONDS = 24 * 60 * 60;
+  // Costs one Paystack call per school, so it is cached — but briefly, because an
+  // admin who has just pressed "retry" expects the screen to tell the truth.
+  private static readonly PAYOUT_STATUS_TTL_SECONDS = 15;
 
   /**
    * Create (or recreate) a Paystack subaccount for a school and persist the code.
@@ -123,18 +152,175 @@ export class AdminService {
   }
 
   /** Admin action: (re)create a Paystack subaccount for an existing school. */
+  /**
+   * Repair a school's payout setup, idempotently.
+   *
+   * This backs a retry button, so it must survive being pressed twice. It used to
+   * call `provisionSubaccount` unconditionally, which ALWAYS POSTs a new
+   * subaccount: a second press orphaned the first one on Paystack and repointed
+   * the school at the newer code. So we ask Paystack what it actually has first,
+   * and only create when there is genuinely nothing to keep.
+   *
+   * The stored `paystackSubaccountActive` flag is not consulted — it records that
+   * a create call once succeeded, which is exactly the assumption that let a
+   * test-mode subaccount look healthy after the switch to live keys.
+   */
   async createSubaccountForSchool(schoolId: string) {
     const school = await this.prisma.school.findUnique({
       where: { id: schoolId },
     });
     if (!school) throw new NotFoundException('School not found');
+
+    if (school.paystackSubaccountCode) {
+      const existing = await this.paystack.getSubaccount(
+        school.paystackSubaccountCode,
+      );
+      if (existing) {
+        // Already usable on this integration. Nothing to create — just make the
+        // stored flag agree with reality (it may have been switched off by a
+        // failed settlement re-point).
+        await this.prisma.school.update({
+          where: { id: school.id },
+          data: { paystackSubaccountActive: true },
+        });
+        await this.invalidatePayoutStatus();
+        return {
+          subaccountCode: school.paystackSubaccountCode,
+          active: true,
+          created: false,
+        };
+      }
+      this.logger.warn(
+        `School ${school.id} points at subaccount ${school.paystackSubaccountCode}, which does not exist on the current Paystack integration — provisioning a replacement.`,
+      );
+    }
+
     const result = await this.provisionSubaccount(school);
     if (!result.active) {
       throw new BadRequestException(
         result.warning ?? 'Subaccount creation failed',
       );
     }
-    return { subaccountCode: result.subaccountCode, active: true };
+    await this.invalidatePayoutStatus();
+    return {
+      subaccountCode: result.subaccountCode,
+      active: true,
+      created: true,
+    };
+  }
+
+  /**
+   * Drop the cached payout statuses. Without this an admin who has just repaired
+   * a school keeps reading the broken verdict for the rest of the TTL and presses
+   * retry again — the one thing an idempotent endpoint should not have to rely on
+   * being harmless.
+   */
+  private invalidatePayoutStatus(): Promise<void> {
+    return this.cache.del(CacheKeys.adminSchoolsPayoutStatus());
+  }
+
+  /**
+   * Per-school payout readiness, checked against Paystack rather than trusted
+   * from our own column.
+   *
+   * `paystackSubaccountActive` only ever meant "a create call succeeded once", so
+   * a school whose subaccount belonged to a different integration (a test-mode
+   * one left behind by the switch to live keys) advertised itself as healthy
+   * right up until a parent tried to pay and Paystack refused the transaction.
+   * This asks the question the flag cannot: is this school payable TODAY?
+   */
+  async getSchoolsPayoutStatus(): Promise<SchoolPayoutStatus[]> {
+    return this.cache.getOrSet(
+      CacheKeys.adminSchoolsPayoutStatus(),
+      AdminService.PAYOUT_STATUS_TTL_SECONDS,
+      () => this.computeSchoolsPayoutStatus(),
+    );
+  }
+
+  private async computeSchoolsPayoutStatus(): Promise<SchoolPayoutStatus[]> {
+    const schools = await this.prisma.school.findMany({
+      where: { deletedAt: null },
+      select: {
+        id: true,
+        name: true,
+        bankCode: true,
+        paystackSubaccountCode: true,
+        paystackSubaccountActive: true,
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    // One Paystack lookup per school. Bounded the same way the signed-URL
+    // fan-out is (M4): schools are few and this is an admin-only screen behind a
+    // short cache, but the chunking keeps a large directory from opening a
+    // connection per school at once.
+    const CHUNK = 5;
+    const statuses: SchoolPayoutStatus[] = [];
+    for (let i = 0; i < schools.length; i += CHUNK) {
+      const chunk = schools.slice(i, i + CHUNK);
+      statuses.push(
+        ...(await Promise.all(
+          chunk.map((school) => this.resolvePayoutStatus(school)),
+        )),
+      );
+    }
+    return statuses;
+  }
+
+  private async resolvePayoutStatus(school: {
+    id: string;
+    name: string;
+    bankCode: string | null;
+    paystackSubaccountCode: string | null;
+    paystackSubaccountActive: boolean | null;
+  }): Promise<SchoolPayoutStatus> {
+    const base = {
+      schoolId: school.id,
+      schoolName: school.name,
+      subaccountCode: school.paystackSubaccountCode,
+      storedActive: school.paystackSubaccountActive === true,
+      canRetry: !!school.bankCode,
+    };
+
+    if (!school.paystackSubaccountCode) {
+      return {
+        ...base,
+        state: 'MISSING',
+        detail: school.bankCode
+          ? 'No payout account has been created for this school yet.'
+          : 'No settlement bank on file, so a payout account cannot be created.',
+      };
+    }
+
+    try {
+      const existing = await this.paystack.getSubaccount(
+        school.paystackSubaccountCode,
+      );
+      if (!existing) {
+        return {
+          ...base,
+          state: 'NOT_ON_INTEGRATION',
+          detail:
+            'This payout account does not exist on the Paystack integration these API keys belong to — most likely it was created in test mode. Parents cannot pay this school until it is re-created.',
+        };
+      }
+      return {
+        ...base,
+        state: 'ACTIVE',
+        detail: 'Verified against Paystack — this school can accept payments.',
+      };
+    } catch (error) {
+      // Paystack unreachable or the key rejected: we genuinely do not know, and
+      // saying "broken" would send an admin re-provisioning a healthy school.
+      this.logger.warn(
+        `Could not verify payout status for school ${school.id}: ${errorMessage(error)}`,
+      );
+      return {
+        ...base,
+        state: 'UNKNOWN',
+        detail: 'Could not reach Paystack to verify this payout account.',
+      };
+    }
   }
 
   /** Onboard a new school and create the school owner account */

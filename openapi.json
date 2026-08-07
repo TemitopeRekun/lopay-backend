@@ -1591,6 +1591,26 @@
         ]
       }
     },
+    "/api/v1/admin/schools/payout-status": {
+      "get": {
+        "operationId": "AdminController_getSchoolsPayoutStatus",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Per-school payout readiness, verified against Paystack",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/schools/{schoolId}/paystack-subaccount": {
       "post": {
         "operationId": "AdminController_createSubaccount",
@@ -1614,7 +1634,7 @@
             "bearer": []
           }
         ],
-        "summary": "Create a Paystack subaccount for a school missing one",
+        "summary": "Create or repair a school’s Paystack subaccount (idempotent: keeps an existing one that is still valid on this integration)",
         "tags": [
           "admin"
         ]
