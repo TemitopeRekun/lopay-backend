@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationType, UserRole } from '../generated/prisma/client';
 import { CreateNotificationDto } from './dto/create.notification.dto';
@@ -7,16 +8,70 @@ import { DeviceTokensService } from '../device-tokens/device-tokens.service';
 import { FIREBASE_MESSAGING } from '../firebase/firebase.module';
 import type { Messaging } from 'firebase-admin/messaging';
 
+/**
+ * Android notification channel every push is posted to.
+ *
+ * Must match `ANDROID_CHANNEL_ID` in the client's `services/push/config.ts` and
+ * the `default_notification_channel_id` meta-data in AndroidManifest.xml.
+ * Android 8+ silently DROPS a notification naming a channel that does not
+ * exist, and the drop is invisible from here — FCM still reports success,
+ * because delivery to the device did succeed. Changing this string requires
+ * changing it in all three places at once.
+ */
+const ANDROID_CHANNEL_ID = 'lopay-payments';
+
+/**
+ * Sound file for the Android channel, in `android/app/src/main/res/raw`,
+ * without extension — which is the form the FCM `android.notification.sound`
+ * field takes.
+ *
+ * Note this only applies where Android builds the notification from the payload
+ * itself. For a channel that already exists on the device, the CHANNEL's sound
+ * wins: Android deliberately ignores per-message sound so a user's own settings
+ * cannot be overridden by the sender. This field therefore matters on the first
+ * delivery before the app has run, and on pre-Oreo devices.
+ */
+const ANDROID_SOUND = 'lopay_alert';
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
+
+  /**
+   * Origin of the web client, used to build the absolute URL a web push opens.
+   *
+   * Optional. Falls back to the first configured CORS origin — which is the web
+   * client by definition — so a deployment that never sets it still gets
+   * working click-through. If neither is set the link is simply omitted and a
+   * click focuses the app at its root.
+   */
+  private readonly webAppUrl: string | undefined;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventsGateway,
     private readonly deviceTokens: DeviceTokensService,
     @Inject(FIREBASE_MESSAGING) private readonly messaging: Messaging,
-  ) {}
+    config: ConfigService,
+  ) {
+    const explicit = config.get<string>('WEB_APP_URL')?.trim();
+    const firstCorsOrigin = config
+      .get<string>('CORS_ORIGINS')
+      ?.split(',')[0]
+      ?.trim();
+    const candidate = explicit || firstCorsOrigin;
+
+    // Validate rather than trust: a malformed value would produce a link the
+    // browser refuses to open, turning every push click into a no-op.
+    try {
+      this.webAppUrl = candidate ? new URL(candidate).origin : undefined;
+    } catch {
+      this.logger.warn(
+        `Ignoring unparseable web app origin "${candidate}" — push notification links will be omitted.`,
+      );
+      this.webAppUrl = undefined;
+    }
+  }
 
   async create(dto: CreateNotificationDto) {
     const notification = await this.prisma.notification.create({
@@ -33,12 +88,15 @@ export class NotificationsService {
 
     this.events.pushNotification(notification.userId, notification);
 
-    await this.sendPushNotification(
-      dto.userId,
-      dto.title,
-      dto.message,
-      dto.link,
-    );
+    await this.sendPushNotification(dto.userId, {
+      title: notification.title,
+      body: notification.message,
+      link: notification.link ?? undefined,
+      // Sent so the client can mark the row read straight from a notification
+      // tap, and so the in-app pop-up can pick its icon without a refetch.
+      notificationId: notification.id,
+      type: notification.type,
+    });
 
     return notification;
   }
@@ -79,7 +137,12 @@ export class NotificationsService {
       await Promise.allSettled(
         parents.slice(i, i + PUSH_BATCH).map(async (p) => {
           this.events.pushNotification(p.id, { title, message, link });
-          await this.sendPushNotification(p.id, title, message, link);
+          await this.sendPushNotification(p.id, {
+            title,
+            body: message,
+            link,
+            type: NotificationType.ANNOUNCEMENT,
+          });
         }),
       );
     }
@@ -147,11 +210,106 @@ export class NotificationsService {
     return { updated: result.count };
   }
 
+  /**
+   * Build the FCM message for one recipient.
+   *
+   * Kept separate and pure so the payload can be asserted in a unit test — the
+   * per-platform blocks below are exactly the kind of thing that silently rots,
+   * because getting them wrong produces a push that FCM reports as *delivered*
+   * and the user never sees.
+   *
+   * Every send carries BOTH a `notification` block and a `data` block, on
+   * purpose:
+   *   - `notification` is what makes the OS display it while the app is closed,
+   *     with no code of ours running. A data-only message would need our
+   *     service worker (web) or a background handler (Android) to survive and
+   *     execute — and if either failed, Chrome posts its own generic "This site
+   *     has been updated in the background" notice instead.
+   *   - `data` is what the app reads when it IS running, to render the in-app
+   *     pop-up and route the tap. FCM requires every data value to be a string,
+   *     so undefined entries are dropped rather than stringified to "undefined".
+   */
+  private buildPushMessage(payload: {
+    title: string;
+    body: string;
+    link?: string;
+    notificationId?: string;
+    type?: NotificationType;
+  }) {
+    const data: Record<string, string> = {
+      title: payload.title,
+      body: payload.body,
+    };
+    if (payload.link) data.link = payload.link;
+    if (payload.notificationId) data.notificationId = payload.notificationId;
+    if (payload.type) data.type = payload.type;
+
+    // `link` is stored as an app-relative route (e.g. "/notifications"); the web
+    // needs an absolute URL. The app runs on HashRouter, so the route lives in
+    // the fragment — "/#/notifications", not "/notifications", which would 404
+    // through to the SPA fallback and land on the wrong screen.
+    const webLink =
+      this.webAppUrl && payload.link
+        ? `${this.webAppUrl}/#${payload.link}`
+        : this.webAppUrl;
+
+    return {
+      notification: { title: payload.title, body: payload.body },
+      data,
+      android: {
+        // Wakes the device and shows a heads-up banner. A confirmed or rejected
+        // school-fee payment is time-sensitive; 'normal' lets Android hold it
+        // until the next maintenance window in Doze.
+        priority: 'high' as const,
+        notification: {
+          channelId: ANDROID_CHANNEL_ID,
+          sound: ANDROID_SOUND,
+          icon: 'ic_stat_lopay',
+          color: '#4A90E2',
+          // Collapses repeats about the same notification into one row instead
+          // of stacking. Falls back to a constant tag so at worst everything
+          // collapses — better than a parent waking to fourteen entries.
+          tag: payload.notificationId ?? 'lopay-notification',
+        },
+      },
+      webpush: {
+        headers: {
+          // Four weeks. A payment confirmation is still worth showing to
+          // someone who reopens their laptop days later; the FCM default of the
+          // same order is made explicit so it cannot drift.
+          TTL: '2419200',
+        },
+        notification: {
+          icon: '/icons/notification-icon.png',
+          badge: '/icons/notification-badge.png',
+          tag: payload.notificationId ?? 'lopay-notification',
+        },
+        // What a click opens or focuses. Must be https (or localhost) or FCM
+        // rejects the send outright.
+        ...(webLink ? { fcmOptions: { link: webLink } } : {}),
+      },
+      apns: {
+        // No iOS build ships yet, but the block is cheap and its absence is the
+        // kind of thing that gets discovered the week iOS launches.
+        payload: {
+          aps: {
+            sound: 'default',
+            badge: 1,
+          },
+        },
+      },
+    };
+  }
+
   private async sendPushNotification(
     userId: string,
-    title: string,
-    body: string,
-    link?: string,
+    payload: {
+      title: string;
+      body: string;
+      link?: string;
+      notificationId?: string;
+      type?: NotificationType;
+    },
   ) {
     try {
       const tokens = await this.deviceTokens.getTokensForUser(userId);
@@ -159,8 +317,7 @@ export class NotificationsService {
 
       const response = await this.messaging.sendEachForMulticast({
         tokens,
-        notification: { title, body },
-        data: link ? { link } : undefined,
+        ...this.buildPushMessage(payload),
       });
 
       // FCM error codes that mean the token is permanently invalid and should be

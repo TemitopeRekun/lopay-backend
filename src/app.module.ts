@@ -84,6 +84,12 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
         SUPABASE_MAX_UPLOAD_BYTES: Joi.number().integer().min(1024).optional(),
         ADMIN_EMAIL: Joi.string().email().optional(),
         ADMIN_PASSWORD: Joi.string().min(8).optional(),
+        // Origin of the web client, used to build the absolute URL a WEB push
+        // notification opens when tapped (`webpush.fcmOptions.link`). Optional:
+        // NotificationsService falls back to the first CORS_ORIGINS entry, which
+        // is the web client by definition. Set it explicitly once CORS_ORIGINS
+        // lists more than one origin, or the link may point at the wrong one.
+        WEB_APP_URL: Joi.string().uri().optional(),
         // Required (non-empty) in production so the API can't boot wide-open;
         // optional locally where main.ts reflects the dev origin.
         CORS_ORIGINS: Joi.when('NODE_ENV', {

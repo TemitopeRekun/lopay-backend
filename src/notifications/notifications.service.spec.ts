@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { DeviceTokensService } from '../device-tokens/device-tokens.service';
 import { FIREBASE_MESSAGING } from '../firebase/firebase.module';
+import { ConfigService } from '@nestjs/config';
 
 describe('NotificationsService', () => {
   let service: NotificationsService;
@@ -38,6 +39,13 @@ describe('NotificationsService', () => {
     sendEachForMulticast: jest.fn(),
   };
 
+  // WEB_APP_URL drives the absolute URL a web push opens; CORS_ORIGINS is the
+  // fallback. Both are exercised in the payload suite below.
+  const configValues: Record<string, string | undefined> = {};
+  const mockConfig = {
+    get: jest.fn((key: string) => configValues[key]),
+  };
+
   const dto = {
     userId: 'user-1',
     title: 'Payment received',
@@ -47,6 +55,8 @@ describe('NotificationsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    for (const key of Object.keys(configValues)) delete configValues[key];
+    configValues.WEB_APP_URL = 'https://lopay.netlify.app';
     mockPrisma.notification.create.mockResolvedValue({
       id: 'notif-1',
       ...dto,
@@ -60,6 +70,7 @@ describe('NotificationsService', () => {
         { provide: EventsGateway, useValue: mockEvents },
         { provide: DeviceTokensService, useValue: mockDeviceTokens },
         { provide: FIREBASE_MESSAGING, useValue: mockMessaging },
+        { provide: ConfigService, useValue: mockConfig },
       ],
     }).compile();
 
@@ -211,12 +222,158 @@ describe('NotificationsService', () => {
 
       await service.create(dto);
 
-      expect(mockMessaging.sendEachForMulticast).toHaveBeenCalledWith({
-        tokens: ['tok-a', 'tok-b'],
-        notification: { title: dto.title, body: dto.message },
-        data: { link: dto.link },
-      });
+      expect(mockMessaging.sendEachForMulticast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tokens: ['tok-a', 'tok-b'],
+          notification: { title: dto.title, body: dto.message },
+        }),
+      );
       expect(mockPrisma.deviceToken.deleteMany).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The per-platform blocks are the part of a push that fails invisibly: FCM
+     * accepts the send and reports success, and the user simply never sees
+     * anything. These assertions are the only thing standing between a typo and
+     * a silent outage.
+     */
+    describe('FCM payload', () => {
+      const sentMessage = () =>
+        mockMessaging.sendEachForMulticast.mock.calls[0][0];
+
+      beforeEach(() => {
+        mockDeviceTokens.getTokensForUser.mockResolvedValue(['tok-a']);
+        mockMessaging.sendEachForMulticast.mockResolvedValue({
+          responses: [{ success: true }],
+        });
+      });
+
+      /**
+       * Both blocks, always. `notification` is what the OS displays with none
+       * of our code running; `data` is what the app reads when it IS running,
+       * to draw the in-app pop-up and route the tap.
+       */
+      it('carries both a notification block and a data block', async () => {
+        await service.create(dto);
+
+        expect(sentMessage().notification).toEqual({
+          title: dto.title,
+          body: dto.message,
+        });
+        expect(sentMessage().data).toEqual({
+          title: dto.title,
+          body: dto.message,
+          link: dto.link,
+          notificationId: 'notif-1',
+        });
+      });
+
+      /** FCM rejects a send whose data values are not all strings. */
+      it('omits absent data fields rather than stringifying undefined', async () => {
+        mockPrisma.notification.create.mockResolvedValue({
+          id: 'notif-2',
+          userId: 'user-1',
+          title: 'T',
+          message: 'M',
+          link: null,
+          type: undefined,
+        });
+
+        await service.create({ userId: 'user-1', title: 'T', message: 'M' });
+
+        const data = sentMessage().data as Record<string, unknown>;
+        expect(data).not.toHaveProperty('link');
+        expect(data).not.toHaveProperty('type');
+        expect(Object.values(data).every((v) => typeof v === 'string')).toBe(
+          true,
+        );
+      });
+
+      /**
+       * Android 8+ silently DROPS a notification naming a channel that does not
+       * exist, and the drop is invisible from here — FCM still reports success.
+       * This id must match ANDROID_CHANNEL_ID on the client and the manifest.
+       */
+      it('targets the lopay-payments channel with the app sound and icon', async () => {
+        await service.create(dto);
+
+        expect(sentMessage().android).toEqual(
+          expect.objectContaining({
+            priority: 'high',
+            notification: expect.objectContaining({
+              channelId: 'lopay-payments',
+              sound: 'lopay_alert',
+              icon: 'ic_stat_lopay',
+              tag: 'notif-1',
+            }),
+          }),
+        );
+      });
+
+      /**
+       * The app runs on HashRouter, so the route lives in the FRAGMENT. Sending
+       * "<origin>/notifications" would miss the router entirely and land the
+       * user on the default screen after they deliberately tapped a payment
+       * alert.
+       */
+      it('builds the web click-through URL through the hash', async () => {
+        await service.create(dto);
+
+        expect(sentMessage().webpush.fcmOptions).toEqual({
+          link: 'https://lopay.netlify.app/#/payments/1',
+        });
+      });
+
+      it('falls back to the first CORS origin when WEB_APP_URL is unset', async () => {
+        delete configValues.WEB_APP_URL;
+        configValues.CORS_ORIGINS =
+          'https://lopay.netlify.app,https://admin.lopay.com';
+
+        const module = await Test.createTestingModule({
+          providers: [
+            NotificationsService,
+            { provide: PrismaService, useValue: mockPrisma },
+            { provide: EventsGateway, useValue: mockEvents },
+            { provide: DeviceTokensService, useValue: mockDeviceTokens },
+            { provide: FIREBASE_MESSAGING, useValue: mockMessaging },
+            { provide: ConfigService, useValue: mockConfig },
+          ],
+        }).compile();
+
+        await module.get(NotificationsService).create(dto);
+
+        expect(sentMessage().webpush.fcmOptions.link).toBe(
+          'https://lopay.netlify.app/#/payments/1',
+        );
+      });
+
+      /** A malformed origin would produce a link the browser refuses to open. */
+      it('omits the link entirely when no valid origin is configured', async () => {
+        delete configValues.WEB_APP_URL;
+        configValues.CORS_ORIGINS = 'not-a-url';
+
+        const module = await Test.createTestingModule({
+          providers: [
+            NotificationsService,
+            { provide: PrismaService, useValue: mockPrisma },
+            { provide: EventsGateway, useValue: mockEvents },
+            { provide: DeviceTokensService, useValue: mockDeviceTokens },
+            { provide: FIREBASE_MESSAGING, useValue: mockMessaging },
+            { provide: ConfigService, useValue: mockConfig },
+          ],
+        }).compile();
+
+        await module.get(NotificationsService).create(dto);
+
+        expect(sentMessage().webpush).not.toHaveProperty('fcmOptions');
+      });
+
+      it('collapses repeats of the same notification via a stable tag', async () => {
+        await service.create(dto);
+
+        expect(sentMessage().webpush.notification.tag).toBe('notif-1');
+        expect(sentMessage().android.notification.tag).toBe('notif-1');
+      });
     });
 
     it('prunes tokens FCM reports as no-longer-registered', async () => {
