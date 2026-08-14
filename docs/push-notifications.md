@@ -116,10 +116,15 @@ Without the file the app builds and runs fine and receives nothing.
 
 The file is **not** a secret in the credential sense — it holds the same public
 project identifiers as the web config, and Google's own guidance is that it may
-be committed. `Lopay/android/.gitignore` does **not** currently exclude it, so
-committing it is the path of least surprise; if you would rather keep it out of
-git, add the ignore rule *and* a CI step that materialises it, or Android builds
-will silently ship without push.
+be committed. It IS committed, and `android/.gitignore` carries a note not to
+re-add the ignore rule. A build that cannot find it now fails outright for any
+`*Release` task (`app/build.gradle`) rather than logging at `info` and producing
+an app that receives nothing.
+
+Committing it does mean GitHub secret scanning opens a `google_api_key` alert on
+the public repo. See §2.5 — the answer is to restrict the key, not to hide the
+file: it ships inside every APK, so anyone can `unzip` a release build and read
+it whether or not git has a copy.
 
 The plugin is already wired into Gradle (`npx cap sync android` has been run —
 `capacitor.build.gradle` lists `:capacitor-push-notifications`). Re-run
@@ -138,7 +143,63 @@ WEB_APP_URL="https://lopay.netlify.app"
 This is the origin a **web** push opens when tapped. It falls back to the first
 entry in `CORS_ORIGINS`, which is the web client by definition — so it only
 needs setting once `CORS_ORIGINS` lists more than one origin, otherwise a push
-may open whichever happens to be first.
+may open whichever happens to be first. **Set explicitly on Render 2026-08-13**
+(`WEB_APP_URL=https://lopay.netlify.app`), so the link no longer depends on
+`CORS_ORIGINS` ordering.
+
+### 2.5 API key restrictions (required, not optional)
+
+Two Google API keys are public by design and both are flagged by GitHub secret
+scanning on the public `Lopay` repo:
+
+| Key | Where it is public | Alert |
+| --- | --- | --- |
+| Android `AIzaSyAJ2l…RzL8` | `android/app/google-services.json`, and inside every APK | #2 |
+| Web `AIzaSyAOBO…rJ1As` | `netlify.toml`, and inlined into the JS bundle | #1 (open since 2026-02-07) |
+
+Neither can be kept private — that is what a client identifier is. What makes
+them safe is a **restriction**, and as of 2026-08-13 both were verified
+UNRESTRICTED: probing either against an unrelated Google API
+(`customsearch.googleapis.com`) got `Custom Search API has not been used in
+project 891944287716` — the key was accepted, only the API was off. A restricted
+key is refused before that point. Which matters because Identity Toolkit
+(Firebase Auth) **is** enabled in this project and answers to these keys, even
+though the app authenticates with Better Auth: with the key alone, its REST
+endpoints allow account creation and `sendOobCode` mail from Firebase's sender to
+arbitrary addresses.
+
+In Google Cloud Console → APIs & Services → Credentials, project `lopay-auth`
+(891944287716):
+
+1. **API restrictions on BOTH keys — do this first.** Restrict each to *Firebase
+   Cloud Messaging API*, *FCM Registration API* and *Firebase Installations API*.
+   That alone closes the Identity Toolkit surface and cannot break anything: FCM
+   and Installations are the only APIs either key is used for.
+2. **Web key application restriction:** Websites →
+   `https://lopay.netlify.app/*` plus `http://localhost:*` for the local
+   verification recipe in §5. Safe because the Capacitor shell does NOT use this
+   key — native push goes through the plugin and `google-services.json`.
+3. **Android key application restriction:** Android apps → `com.lopay.app` with
+   the SHA-1 of *every* certificate that signs a build. Do this LAST, and only
+   once release signing exists: there is no release keystore in the repo yet and
+   omitting the cert that actually signs the shipped APK breaks push in
+   production while debug builds keep working. The SHA-1s needed are the debug
+   one (`D8:E9:CB:6C:E7:B1:09:09:8C:06:CA:D8:D5:E4:31:10:FE:B8:93:FF`, from
+   `~/.android/debug.keystore`), the upload keystore's, and — with Play App
+   Signing — Google's app-signing cert from Play Console → Setup → App signing.
+4. Consider disabling unused Firebase Auth sign-in providers, since Better Auth
+   owns authentication and every enabled provider is reachable REST surface.
+
+Re-verify after applying:
+
+```bash
+curl -s "https://www.googleapis.com/customsearch/v1?key=<KEY>&q=probe"
+# restricted  -> "Requests to this API customsearch.googleapis.com ... are blocked"
+# unrestricted -> "Custom Search API has not been used in project ..."
+```
+
+Only then dismiss the two alerts (`wont_fix`), because until the restriction is
+in place the alert is describing something real.
 
 ---
 
