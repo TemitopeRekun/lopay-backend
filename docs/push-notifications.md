@@ -158,28 +158,45 @@ scanning on the public `Lopay` repo:
 | Web `AIzaSyAOBO…rJ1As` | `netlify.toml`, and inlined into the JS bundle | #1 (open since 2026-02-07) |
 
 Neither can be kept private — that is what a client identifier is. What makes
-them safe is a **restriction**, and as of 2026-08-13 both were verified
-UNRESTRICTED: probing either against an unrelated Google API
-(`customsearch.googleapis.com`) got `Custom Search API has not been used in
-project 891944287716` — the key was accepted, only the API was off. A restricted
-key is refused before that point. Which matters because Identity Toolkit
-(Firebase Auth) **is** enabled in this project and answers to these keys, even
-though the app authenticates with Better Auth: with the key alone, its REST
-endpoints allow account creation and `sendOobCode` mail from Firebase's sender to
-arbitrary addresses.
+them safe is a **restriction**.
 
-In Google Cloud Console → APIs & Services → Credentials, project `lopay-auth`
-(891944287716):
+**DONE 2026-08-14.** Both keys are now restricted to
+`fcmregistrations.googleapis.com`, `firebaseinstallations.googleapis.com` and
+`fcm.googleapis.com`, and the web key additionally to referrers
+`https://lopay.netlify.app/*` and `http://localhost:*`. Applied with the gcloud
+commands at the end of this section (gcloud CLI 580 installed via winget; the
+`apikeys.googleapis.com` service had to be enabled first — it was off, which is
+why the API cannot be driven by a service account before that).
 
-1. **API restrictions on BOTH keys — do this first.** Restrict each to *Firebase
-   Cloud Messaging API*, *FCM Registration API* and *Firebase Installations API*.
-   That alone closes the Identity Toolkit surface and cannot break anything: FCM
-   and Installations are the only APIs either key is used for.
+What they carried before was **not** "no restriction" — it was Firebase's default
+allow-list of 27 APIs, which included `identitytoolkit`, `securetoken`,
+`firestore`, `datastore`, `firebasestorage`, `sqladmin` and `firebasevertexai`.
+That was the actual exposure: with the key alone, Identity Toolkit REST endpoints
+allow account creation and `sendOobCode` mail from Firebase's sender to arbitrary
+addresses, even though this app authenticates with Better Auth and has no Firebase
+Auth users.
+
+**Do not verify this with an API that is disabled in the project.** Google checks
+API *enablement* before key *restrictions*, so probing e.g.
+`customsearch.googleapis.com` returns "has not been used in project 891944287716"
+whether or not the key is restricted — it looks like an unrestricted key and is
+not. Probe an API that IS enabled but is NOT in the allow-list; `identitytoolkit`
+is the one to use here.
+
+To change the restrictions later, in Google Cloud Console → APIs & Services →
+Credentials, project `lopay-auth` (891944287716) — or with the gcloud commands
+below:
+
+1. **API restrictions on BOTH keys.** *Firebase Cloud Messaging API*, *FCM
+   Registration API*, *Firebase Installations API*. These are the only APIs
+   either client uses, so narrowing to them cannot break push.
 2. **Web key application restriction:** Websites →
    `https://lopay.netlify.app/*` plus `http://localhost:*` for the local
    verification recipe in §5. Safe because the Capacitor shell does NOT use this
-   key — native push goes through the plugin and `google-services.json`.
-3. **Android key application restriction:** Android apps → `com.lopay.app` with
+   key — native push goes through the plugin and `google-services.json`. Adding a
+   new web origin later means adding it here too, or web push dies there.
+3. **Android key application restriction — STILL NOT APPLIED, deliberately:**
+   Android apps → `com.lopay.app` with
    the SHA-1 of *every* certificate that signs a build. Do this LAST, and only
    once release signing exists: there is no release keystore in the repo yet and
    omitting the cert that actually signs the shipped APK breaks push in
@@ -190,16 +207,43 @@ In Google Cloud Console → APIs & Services → Credentials, project `lopay-auth
 4. Consider disabling unused Firebase Auth sign-in providers, since Better Auth
    owns authentication and every enabled provider is reachable REST surface.
 
-Re-verify after applying:
+The commands that were run, for reference and for re-application:
 
 ```bash
-curl -s "https://www.googleapis.com/customsearch/v1?key=<KEY>&q=probe"
-# restricted  -> "Requests to this API customsearch.googleapis.com ... are blocked"
-# unrestricted -> "Custom Search API has not been used in project ..."
+gcloud services enable apikeys.googleapis.com --project=lopay-auth
+gcloud services api-keys list --project=lopay-auth --format=json
+# Android key uid bf352abc-e47e-4a99-85fb-74b0180769a5  (key string ...uWRzL8)
+# Web key     uid 7662f50c-df2d-4462-84c3-35756ae640c4  (key string ...yrJ1As)
+# Confirm the mapping before touching either — applying the WEB referrer
+# restriction to the ANDROID key would kill native push:
+#   gcloud services api-keys get-key-string <uid> --location=global
+
+gcloud services api-keys update <uid> --location=global --project=lopay-auth \
+  --api-target=service=fcmregistrations.googleapis.com \
+  --api-target=service=firebaseinstallations.googleapis.com \
+  --api-target=service=fcm.googleapis.com \
+  [--allowed-referrers="https://lopay.netlify.app/*,http://localhost:*"]  # web key only
 ```
 
-Only then dismiss the two alerts (`wont_fix`), because until the restriction is
-in place the alert is describing something real.
+Verification, both halves — a blocked API and a working one:
+
+```bash
+# Blocked (restriction bites):
+curl -s "https://identitytoolkit.googleapis.com/v1/projects?key=<KEY>"
+#   android key -> PERMISSION_DENIED "Requests to this API identitytoolkit ... are blocked"
+#   web key     -> PERMISSION_DENIED "Requests from referer <empty> are blocked"
+#   before      -> returned the project's authorizedDomains
+
+# Still working (push not broken) — 400 means it reached the service:
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -d '{}' \
+  -H 'Content-Type: application/json' -H 'Referer: https://lopay.netlify.app/' \
+  "https://firebaseinstallations.googleapis.com/v1/projects/lopay-auth/installations?key=<KEY>"
+#   400 = key gate passed, body rejected.  403 = you broke push.
+```
+
+Both GitHub alerts were resolved `wont_fix` on 2026-08-14 with this evidence.
+Order matters: restrict first, dismiss second — until the restriction exists the
+alert is describing something real.
 
 ---
 
