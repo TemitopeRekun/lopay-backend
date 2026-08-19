@@ -9,6 +9,7 @@ import { RedisIoAdapter } from './events/redis-io.adapter';
 import { initEncryptionKey } from './common/encryption';
 import { JsonLogger } from './common/logger/json.logger';
 import { resolveSecurityPosture } from './common/security-posture';
+import { resolveCorsAllowlist } from './common/cors-origins';
 
 async function bootstrap() {
   initSentry();
@@ -79,23 +80,18 @@ async function bootstrap() {
     }),
   );
 
-  // Enable CORS
-  const nodeEnv = process.env.NODE_ENV ?? 'development';
-  const corsOriginsRaw = process.env.CORS_ORIGINS ?? '';
-  const corsOrigins = corsOriginsRaw
-    .split(',')
-    .map((o) => o.trim())
-    .filter(Boolean);
+  // Enable CORS. The allowlist (including the Capacitor native origins, which
+  // are NOT in CORS_ORIGINS and must not have to be) is built in
+  // common/cors-origins.ts, where it is documented and unit-tested.
+  const cors = resolveCorsAllowlist(
+    process.env.CORS_ORIGINS,
+    process.env.NODE_ENV,
+  );
 
   app.enableCors({
-    origin:
-      corsOrigins.length > 0
-        ? corsOrigins
-        : nodeEnv === 'development'
-          ? true
-          : false,
+    origin: cors.origin,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    credentials: corsOrigins.length > 0,
+    credentials: cors.credentials,
   });
 
   // Swagger Configuration. Gated on an explicit API_DOCS_ENABLED opt-in, NOT on
