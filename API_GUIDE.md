@@ -81,6 +81,26 @@ receipt (`PENDING`), and the school owner **confirms** it (decrementing the
 balance) or **reverses** a confirmed one (auditable undo). Every money transition
 is owned by a single ledger and recorded in the audit log.
 
+### Parents who paid before joining Lopay
+
+Schools use `POST /api/v1/migration-invites` to create a one-time invite with
+the student, fee, amount already paid, migration date, and plan frequency. The
+backend returns a hashed-token-backed `inviteUrl` and normalized WhatsApp
+number; the configured WhatsApp delivery layer should send the returned message
+without exposing or creating a parent password.
+
+The parent opens `GET /api/v1/migration-invites/preview?token=...`, signs in or
+creates a normal Lopay parent account, then either confirms the amount and calls
+`POST /api/v1/migration-invites/claim?token=...`, or disputes it with
+`POST /api/v1/migration-invites/dispute?token=...` and a `{ "reason": "..." }`
+body.
+
+Claiming is atomic and one-time. It creates the normal child/enrollment records
+and a confirmed `MIGRATED_PAYMENT` ledger row with no platform fee. The
+enrollment's `termStartDate` is the migration date, so the existing due-date
+projection starts from the handover rather than incorrectly treating the parent
+as overdue for an earlier school payment.
+
 ## 5. End-to-end flow
 
 1. **Discover** — parent lists schools and class fees (`/api/v1/schools`,

@@ -35,6 +35,7 @@ import { HealthModule } from './health/health.module';
 import { FirebaseModule } from './firebase/firebase.module';
 import { SupabaseModule } from './supabase/supabase.module';
 import { DeviceTokensModule } from './device-tokens/device-tokens.module';
+import { MigrationInvitesModule } from './migration-invites/migration-invites.module';
 
 @Module({
   imports: [
@@ -235,6 +236,7 @@ import { DeviceTokensModule } from './device-tokens/device-tokens.module';
     DocumentsModule,
     NotificationsModule,
     DeviceTokensModule,
+    MigrationInvitesModule,
     PrismaModule,
     EnrollmentModule,
     AdminModule,
