@@ -187,7 +187,7 @@ export class MigrationInvitesService {
     const { invite, hash } = await this.findUsableInvite(rawToken);
     await this.assertParentMatchesInvite(invite, user.userId);
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const claimed = await tx.migrationInvite.updateMany({
         where: {
           id: invite.id,
