@@ -1,0 +1,14 @@
+-- Record whether a claimant's phone matched the number the school addressed the
+-- invite to — as a signal for the school, not as a gate on the claim.
+--
+-- The phone match used to be a hard requirement. It was removed because it cost
+-- more than it bought: Lopay never verifies phone numbers, so a "match" only
+-- ever proved that someone typed that number into a signup form, while the
+-- refusal reliably locked out legitimate parents — Google sign-ins have no
+-- number at all, and a single mistyped digit on the school's side made the real
+-- parent the one person who could NOT claim their own child's plan.
+--
+-- Nullable with no default and no backfill: NULL is a real state that means
+-- "not claimed, or claimed before this column existed", and inventing `false`
+-- for historic rows would manufacture warnings about claims nobody checked.
+ALTER TABLE "EnrollmentInvite" ADD COLUMN "claimantPhoneMatched" BOOLEAN;

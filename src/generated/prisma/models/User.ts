@@ -242,6 +242,9 @@ export type UserWhereInput = {
   parent?: Prisma.XOR<Prisma.ParentNullableScalarRelationFilter, Prisma.ParentWhereInput> | null
   notifications?: Prisma.NotificationListRelationFilter
   deviceTokens?: Prisma.DeviceTokenListRelationFilter
+  invitesCreated?: Prisma.EnrollmentInviteListRelationFilter
+  invitesClaimed?: Prisma.EnrollmentInviteListRelationFilter
+  invitesRevoked?: Prisma.EnrollmentInviteListRelationFilter
   sessions?: Prisma.SessionListRelationFilter
   accounts?: Prisma.AccountListRelationFilter
 }
@@ -263,6 +266,9 @@ export type UserOrderByWithRelationInput = {
   parent?: Prisma.ParentOrderByWithRelationInput
   notifications?: Prisma.NotificationOrderByRelationAggregateInput
   deviceTokens?: Prisma.DeviceTokenOrderByRelationAggregateInput
+  invitesCreated?: Prisma.EnrollmentInviteOrderByRelationAggregateInput
+  invitesClaimed?: Prisma.EnrollmentInviteOrderByRelationAggregateInput
+  invitesRevoked?: Prisma.EnrollmentInviteOrderByRelationAggregateInput
   sessions?: Prisma.SessionOrderByRelationAggregateInput
   accounts?: Prisma.AccountOrderByRelationAggregateInput
 }
@@ -287,6 +293,9 @@ export type UserWhereUniqueInput = Prisma.AtLeast<{
   parent?: Prisma.XOR<Prisma.ParentNullableScalarRelationFilter, Prisma.ParentWhereInput> | null
   notifications?: Prisma.NotificationListRelationFilter
   deviceTokens?: Prisma.DeviceTokenListRelationFilter
+  invitesCreated?: Prisma.EnrollmentInviteListRelationFilter
+  invitesClaimed?: Prisma.EnrollmentInviteListRelationFilter
+  invitesRevoked?: Prisma.EnrollmentInviteListRelationFilter
   sessions?: Prisma.SessionListRelationFilter
   accounts?: Prisma.AccountListRelationFilter
 }, "id" | "email" | "phoneHash">
@@ -344,6 +353,9 @@ export type UserCreateInput = {
   parent?: Prisma.ParentCreateNestedOneWithoutUserInput
   notifications?: Prisma.NotificationCreateNestedManyWithoutUserInput
   deviceTokens?: Prisma.DeviceTokenCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteCreateNestedManyWithoutCreatedByInput
+  invitesClaimed?: Prisma.EnrollmentInviteCreateNestedManyWithoutClaimedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteCreateNestedManyWithoutRevokedByInput
   sessions?: Prisma.SessionCreateNestedManyWithoutUserInput
   accounts?: Prisma.AccountCreateNestedManyWithoutUserInput
 }
@@ -365,6 +377,9 @@ export type UserUncheckedCreateInput = {
   parent?: Prisma.ParentUncheckedCreateNestedOneWithoutUserInput
   notifications?: Prisma.NotificationUncheckedCreateNestedManyWithoutUserInput
   deviceTokens?: Prisma.DeviceTokenUncheckedCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutCreatedByInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutClaimedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutRevokedByInput
   sessions?: Prisma.SessionUncheckedCreateNestedManyWithoutUserInput
   accounts?: Prisma.AccountUncheckedCreateNestedManyWithoutUserInput
 }
@@ -386,6 +401,9 @@ export type UserUpdateInput = {
   parent?: Prisma.ParentUpdateOneWithoutUserNestedInput
   notifications?: Prisma.NotificationUpdateManyWithoutUserNestedInput
   deviceTokens?: Prisma.DeviceTokenUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUpdateManyWithoutCreatedByNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUpdateManyWithoutClaimedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUpdateManyWithoutRevokedByNestedInput
   sessions?: Prisma.SessionUpdateManyWithoutUserNestedInput
   accounts?: Prisma.AccountUpdateManyWithoutUserNestedInput
 }
@@ -407,6 +425,9 @@ export type UserUncheckedUpdateInput = {
   parent?: Prisma.ParentUncheckedUpdateOneWithoutUserNestedInput
   notifications?: Prisma.NotificationUncheckedUpdateManyWithoutUserNestedInput
   deviceTokens?: Prisma.DeviceTokenUncheckedUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutCreatedByNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutClaimedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutRevokedByNestedInput
   sessions?: Prisma.SessionUncheckedUpdateManyWithoutUserNestedInput
   accounts?: Prisma.AccountUncheckedUpdateManyWithoutUserNestedInput
 }
@@ -506,6 +527,11 @@ export type UserScalarRelationFilter = {
   isNot?: Prisma.UserWhereInput
 }
 
+export type UserNullableScalarRelationFilter = {
+  is?: Prisma.UserWhereInput | null
+  isNot?: Prisma.UserWhereInput | null
+}
+
 export type StringFieldUpdateOperationsInput = {
   set?: string
 }
@@ -586,6 +612,52 @@ export type UserUpdateOneRequiredWithoutParentNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutParentInput, Prisma.UserUpdateWithoutParentInput>, Prisma.UserUncheckedUpdateWithoutParentInput>
 }
 
+export type UserCreateNestedOneWithoutInvitesCreatedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutInvitesCreatedInput, Prisma.UserUncheckedCreateWithoutInvitesCreatedInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutInvitesCreatedInput
+  connect?: Prisma.UserWhereUniqueInput
+}
+
+export type UserCreateNestedOneWithoutInvitesClaimedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutInvitesClaimedInput, Prisma.UserUncheckedCreateWithoutInvitesClaimedInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutInvitesClaimedInput
+  connect?: Prisma.UserWhereUniqueInput
+}
+
+export type UserCreateNestedOneWithoutInvitesRevokedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutInvitesRevokedInput, Prisma.UserUncheckedCreateWithoutInvitesRevokedInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutInvitesRevokedInput
+  connect?: Prisma.UserWhereUniqueInput
+}
+
+export type UserUpdateOneRequiredWithoutInvitesCreatedNestedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutInvitesCreatedInput, Prisma.UserUncheckedCreateWithoutInvitesCreatedInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutInvitesCreatedInput
+  upsert?: Prisma.UserUpsertWithoutInvitesCreatedInput
+  connect?: Prisma.UserWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutInvitesCreatedInput, Prisma.UserUpdateWithoutInvitesCreatedInput>, Prisma.UserUncheckedUpdateWithoutInvitesCreatedInput>
+}
+
+export type UserUpdateOneWithoutInvitesClaimedNestedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutInvitesClaimedInput, Prisma.UserUncheckedCreateWithoutInvitesClaimedInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutInvitesClaimedInput
+  upsert?: Prisma.UserUpsertWithoutInvitesClaimedInput
+  disconnect?: Prisma.UserWhereInput | boolean
+  delete?: Prisma.UserWhereInput | boolean
+  connect?: Prisma.UserWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutInvitesClaimedInput, Prisma.UserUpdateWithoutInvitesClaimedInput>, Prisma.UserUncheckedUpdateWithoutInvitesClaimedInput>
+}
+
+export type UserUpdateOneWithoutInvitesRevokedNestedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutInvitesRevokedInput, Prisma.UserUncheckedCreateWithoutInvitesRevokedInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutInvitesRevokedInput
+  upsert?: Prisma.UserUpsertWithoutInvitesRevokedInput
+  disconnect?: Prisma.UserWhereInput | boolean
+  delete?: Prisma.UserWhereInput | boolean
+  connect?: Prisma.UserWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutInvitesRevokedInput, Prisma.UserUpdateWithoutInvitesRevokedInput>, Prisma.UserUncheckedUpdateWithoutInvitesRevokedInput>
+}
+
 export type UserCreateNestedOneWithoutNotificationsInput = {
   create?: Prisma.XOR<Prisma.UserCreateWithoutNotificationsInput, Prisma.UserUncheckedCreateWithoutNotificationsInput>
   connectOrCreate?: Prisma.UserCreateOrConnectWithoutNotificationsInput
@@ -631,6 +703,9 @@ export type UserCreateWithoutSessionsInput = {
   parent?: Prisma.ParentCreateNestedOneWithoutUserInput
   notifications?: Prisma.NotificationCreateNestedManyWithoutUserInput
   deviceTokens?: Prisma.DeviceTokenCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteCreateNestedManyWithoutCreatedByInput
+  invitesClaimed?: Prisma.EnrollmentInviteCreateNestedManyWithoutClaimedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteCreateNestedManyWithoutRevokedByInput
   accounts?: Prisma.AccountCreateNestedManyWithoutUserInput
 }
 
@@ -651,6 +726,9 @@ export type UserUncheckedCreateWithoutSessionsInput = {
   parent?: Prisma.ParentUncheckedCreateNestedOneWithoutUserInput
   notifications?: Prisma.NotificationUncheckedCreateNestedManyWithoutUserInput
   deviceTokens?: Prisma.DeviceTokenUncheckedCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutCreatedByInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutClaimedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutRevokedByInput
   accounts?: Prisma.AccountUncheckedCreateNestedManyWithoutUserInput
 }
 
@@ -687,6 +765,9 @@ export type UserUpdateWithoutSessionsInput = {
   parent?: Prisma.ParentUpdateOneWithoutUserNestedInput
   notifications?: Prisma.NotificationUpdateManyWithoutUserNestedInput
   deviceTokens?: Prisma.DeviceTokenUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUpdateManyWithoutCreatedByNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUpdateManyWithoutClaimedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUpdateManyWithoutRevokedByNestedInput
   accounts?: Prisma.AccountUpdateManyWithoutUserNestedInput
 }
 
@@ -707,6 +788,9 @@ export type UserUncheckedUpdateWithoutSessionsInput = {
   parent?: Prisma.ParentUncheckedUpdateOneWithoutUserNestedInput
   notifications?: Prisma.NotificationUncheckedUpdateManyWithoutUserNestedInput
   deviceTokens?: Prisma.DeviceTokenUncheckedUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutCreatedByNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutClaimedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutRevokedByNestedInput
   accounts?: Prisma.AccountUncheckedUpdateManyWithoutUserNestedInput
 }
 
@@ -727,6 +811,9 @@ export type UserCreateWithoutAccountsInput = {
   parent?: Prisma.ParentCreateNestedOneWithoutUserInput
   notifications?: Prisma.NotificationCreateNestedManyWithoutUserInput
   deviceTokens?: Prisma.DeviceTokenCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteCreateNestedManyWithoutCreatedByInput
+  invitesClaimed?: Prisma.EnrollmentInviteCreateNestedManyWithoutClaimedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteCreateNestedManyWithoutRevokedByInput
   sessions?: Prisma.SessionCreateNestedManyWithoutUserInput
 }
 
@@ -747,6 +834,9 @@ export type UserUncheckedCreateWithoutAccountsInput = {
   parent?: Prisma.ParentUncheckedCreateNestedOneWithoutUserInput
   notifications?: Prisma.NotificationUncheckedCreateNestedManyWithoutUserInput
   deviceTokens?: Prisma.DeviceTokenUncheckedCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutCreatedByInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutClaimedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutRevokedByInput
   sessions?: Prisma.SessionUncheckedCreateNestedManyWithoutUserInput
 }
 
@@ -783,6 +873,9 @@ export type UserUpdateWithoutAccountsInput = {
   parent?: Prisma.ParentUpdateOneWithoutUserNestedInput
   notifications?: Prisma.NotificationUpdateManyWithoutUserNestedInput
   deviceTokens?: Prisma.DeviceTokenUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUpdateManyWithoutCreatedByNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUpdateManyWithoutClaimedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUpdateManyWithoutRevokedByNestedInput
   sessions?: Prisma.SessionUpdateManyWithoutUserNestedInput
 }
 
@@ -803,6 +896,9 @@ export type UserUncheckedUpdateWithoutAccountsInput = {
   parent?: Prisma.ParentUncheckedUpdateOneWithoutUserNestedInput
   notifications?: Prisma.NotificationUncheckedUpdateManyWithoutUserNestedInput
   deviceTokens?: Prisma.DeviceTokenUncheckedUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutCreatedByNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutClaimedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutRevokedByNestedInput
   sessions?: Prisma.SessionUncheckedUpdateManyWithoutUserNestedInput
 }
 
@@ -822,6 +918,9 @@ export type UserCreateWithoutSchoolInput = {
   parent?: Prisma.ParentCreateNestedOneWithoutUserInput
   notifications?: Prisma.NotificationCreateNestedManyWithoutUserInput
   deviceTokens?: Prisma.DeviceTokenCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteCreateNestedManyWithoutCreatedByInput
+  invitesClaimed?: Prisma.EnrollmentInviteCreateNestedManyWithoutClaimedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteCreateNestedManyWithoutRevokedByInput
   sessions?: Prisma.SessionCreateNestedManyWithoutUserInput
   accounts?: Prisma.AccountCreateNestedManyWithoutUserInput
 }
@@ -842,6 +941,9 @@ export type UserUncheckedCreateWithoutSchoolInput = {
   parent?: Prisma.ParentUncheckedCreateNestedOneWithoutUserInput
   notifications?: Prisma.NotificationUncheckedCreateNestedManyWithoutUserInput
   deviceTokens?: Prisma.DeviceTokenUncheckedCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutCreatedByInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutClaimedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutRevokedByInput
   sessions?: Prisma.SessionUncheckedCreateNestedManyWithoutUserInput
   accounts?: Prisma.AccountUncheckedCreateNestedManyWithoutUserInput
 }
@@ -878,6 +980,9 @@ export type UserUpdateWithoutSchoolInput = {
   parent?: Prisma.ParentUpdateOneWithoutUserNestedInput
   notifications?: Prisma.NotificationUpdateManyWithoutUserNestedInput
   deviceTokens?: Prisma.DeviceTokenUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUpdateManyWithoutCreatedByNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUpdateManyWithoutClaimedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUpdateManyWithoutRevokedByNestedInput
   sessions?: Prisma.SessionUpdateManyWithoutUserNestedInput
   accounts?: Prisma.AccountUpdateManyWithoutUserNestedInput
 }
@@ -898,6 +1003,9 @@ export type UserUncheckedUpdateWithoutSchoolInput = {
   parent?: Prisma.ParentUncheckedUpdateOneWithoutUserNestedInput
   notifications?: Prisma.NotificationUncheckedUpdateManyWithoutUserNestedInput
   deviceTokens?: Prisma.DeviceTokenUncheckedUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutCreatedByNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutClaimedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutRevokedByNestedInput
   sessions?: Prisma.SessionUncheckedUpdateManyWithoutUserNestedInput
   accounts?: Prisma.AccountUncheckedUpdateManyWithoutUserNestedInput
 }
@@ -918,6 +1026,9 @@ export type UserCreateWithoutParentInput = {
   school?: Prisma.SchoolCreateNestedOneWithoutOwnerInput
   notifications?: Prisma.NotificationCreateNestedManyWithoutUserInput
   deviceTokens?: Prisma.DeviceTokenCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteCreateNestedManyWithoutCreatedByInput
+  invitesClaimed?: Prisma.EnrollmentInviteCreateNestedManyWithoutClaimedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteCreateNestedManyWithoutRevokedByInput
   sessions?: Prisma.SessionCreateNestedManyWithoutUserInput
   accounts?: Prisma.AccountCreateNestedManyWithoutUserInput
 }
@@ -938,6 +1049,9 @@ export type UserUncheckedCreateWithoutParentInput = {
   school?: Prisma.SchoolUncheckedCreateNestedOneWithoutOwnerInput
   notifications?: Prisma.NotificationUncheckedCreateNestedManyWithoutUserInput
   deviceTokens?: Prisma.DeviceTokenUncheckedCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutCreatedByInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutClaimedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutRevokedByInput
   sessions?: Prisma.SessionUncheckedCreateNestedManyWithoutUserInput
   accounts?: Prisma.AccountUncheckedCreateNestedManyWithoutUserInput
 }
@@ -974,6 +1088,9 @@ export type UserUpdateWithoutParentInput = {
   school?: Prisma.SchoolUpdateOneWithoutOwnerNestedInput
   notifications?: Prisma.NotificationUpdateManyWithoutUserNestedInput
   deviceTokens?: Prisma.DeviceTokenUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUpdateManyWithoutCreatedByNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUpdateManyWithoutClaimedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUpdateManyWithoutRevokedByNestedInput
   sessions?: Prisma.SessionUpdateManyWithoutUserNestedInput
   accounts?: Prisma.AccountUpdateManyWithoutUserNestedInput
 }
@@ -994,6 +1111,333 @@ export type UserUncheckedUpdateWithoutParentInput = {
   school?: Prisma.SchoolUncheckedUpdateOneWithoutOwnerNestedInput
   notifications?: Prisma.NotificationUncheckedUpdateManyWithoutUserNestedInput
   deviceTokens?: Prisma.DeviceTokenUncheckedUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutCreatedByNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutClaimedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutRevokedByNestedInput
+  sessions?: Prisma.SessionUncheckedUpdateManyWithoutUserNestedInput
+  accounts?: Prisma.AccountUncheckedUpdateManyWithoutUserNestedInput
+}
+
+export type UserCreateWithoutInvitesCreatedInput = {
+  id?: string
+  email: string
+  fullName?: string | null
+  role: $Enums.UserRole
+  name?: string | null
+  emailVerified?: boolean
+  image?: string | null
+  phoneNumber?: string | null
+  phoneHash?: string | null
+  deletedAt?: Date | string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  school?: Prisma.SchoolCreateNestedOneWithoutOwnerInput
+  parent?: Prisma.ParentCreateNestedOneWithoutUserInput
+  notifications?: Prisma.NotificationCreateNestedManyWithoutUserInput
+  deviceTokens?: Prisma.DeviceTokenCreateNestedManyWithoutUserInput
+  invitesClaimed?: Prisma.EnrollmentInviteCreateNestedManyWithoutClaimedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteCreateNestedManyWithoutRevokedByInput
+  sessions?: Prisma.SessionCreateNestedManyWithoutUserInput
+  accounts?: Prisma.AccountCreateNestedManyWithoutUserInput
+}
+
+export type UserUncheckedCreateWithoutInvitesCreatedInput = {
+  id?: string
+  email: string
+  fullName?: string | null
+  role: $Enums.UserRole
+  name?: string | null
+  emailVerified?: boolean
+  image?: string | null
+  phoneNumber?: string | null
+  phoneHash?: string | null
+  deletedAt?: Date | string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  school?: Prisma.SchoolUncheckedCreateNestedOneWithoutOwnerInput
+  parent?: Prisma.ParentUncheckedCreateNestedOneWithoutUserInput
+  notifications?: Prisma.NotificationUncheckedCreateNestedManyWithoutUserInput
+  deviceTokens?: Prisma.DeviceTokenUncheckedCreateNestedManyWithoutUserInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutClaimedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutRevokedByInput
+  sessions?: Prisma.SessionUncheckedCreateNestedManyWithoutUserInput
+  accounts?: Prisma.AccountUncheckedCreateNestedManyWithoutUserInput
+}
+
+export type UserCreateOrConnectWithoutInvitesCreatedInput = {
+  where: Prisma.UserWhereUniqueInput
+  create: Prisma.XOR<Prisma.UserCreateWithoutInvitesCreatedInput, Prisma.UserUncheckedCreateWithoutInvitesCreatedInput>
+}
+
+export type UserCreateWithoutInvitesClaimedInput = {
+  id?: string
+  email: string
+  fullName?: string | null
+  role: $Enums.UserRole
+  name?: string | null
+  emailVerified?: boolean
+  image?: string | null
+  phoneNumber?: string | null
+  phoneHash?: string | null
+  deletedAt?: Date | string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  school?: Prisma.SchoolCreateNestedOneWithoutOwnerInput
+  parent?: Prisma.ParentCreateNestedOneWithoutUserInput
+  notifications?: Prisma.NotificationCreateNestedManyWithoutUserInput
+  deviceTokens?: Prisma.DeviceTokenCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteCreateNestedManyWithoutCreatedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteCreateNestedManyWithoutRevokedByInput
+  sessions?: Prisma.SessionCreateNestedManyWithoutUserInput
+  accounts?: Prisma.AccountCreateNestedManyWithoutUserInput
+}
+
+export type UserUncheckedCreateWithoutInvitesClaimedInput = {
+  id?: string
+  email: string
+  fullName?: string | null
+  role: $Enums.UserRole
+  name?: string | null
+  emailVerified?: boolean
+  image?: string | null
+  phoneNumber?: string | null
+  phoneHash?: string | null
+  deletedAt?: Date | string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  school?: Prisma.SchoolUncheckedCreateNestedOneWithoutOwnerInput
+  parent?: Prisma.ParentUncheckedCreateNestedOneWithoutUserInput
+  notifications?: Prisma.NotificationUncheckedCreateNestedManyWithoutUserInput
+  deviceTokens?: Prisma.DeviceTokenUncheckedCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutCreatedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutRevokedByInput
+  sessions?: Prisma.SessionUncheckedCreateNestedManyWithoutUserInput
+  accounts?: Prisma.AccountUncheckedCreateNestedManyWithoutUserInput
+}
+
+export type UserCreateOrConnectWithoutInvitesClaimedInput = {
+  where: Prisma.UserWhereUniqueInput
+  create: Prisma.XOR<Prisma.UserCreateWithoutInvitesClaimedInput, Prisma.UserUncheckedCreateWithoutInvitesClaimedInput>
+}
+
+export type UserCreateWithoutInvitesRevokedInput = {
+  id?: string
+  email: string
+  fullName?: string | null
+  role: $Enums.UserRole
+  name?: string | null
+  emailVerified?: boolean
+  image?: string | null
+  phoneNumber?: string | null
+  phoneHash?: string | null
+  deletedAt?: Date | string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  school?: Prisma.SchoolCreateNestedOneWithoutOwnerInput
+  parent?: Prisma.ParentCreateNestedOneWithoutUserInput
+  notifications?: Prisma.NotificationCreateNestedManyWithoutUserInput
+  deviceTokens?: Prisma.DeviceTokenCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteCreateNestedManyWithoutCreatedByInput
+  invitesClaimed?: Prisma.EnrollmentInviteCreateNestedManyWithoutClaimedByInput
+  sessions?: Prisma.SessionCreateNestedManyWithoutUserInput
+  accounts?: Prisma.AccountCreateNestedManyWithoutUserInput
+}
+
+export type UserUncheckedCreateWithoutInvitesRevokedInput = {
+  id?: string
+  email: string
+  fullName?: string | null
+  role: $Enums.UserRole
+  name?: string | null
+  emailVerified?: boolean
+  image?: string | null
+  phoneNumber?: string | null
+  phoneHash?: string | null
+  deletedAt?: Date | string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  school?: Prisma.SchoolUncheckedCreateNestedOneWithoutOwnerInput
+  parent?: Prisma.ParentUncheckedCreateNestedOneWithoutUserInput
+  notifications?: Prisma.NotificationUncheckedCreateNestedManyWithoutUserInput
+  deviceTokens?: Prisma.DeviceTokenUncheckedCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutCreatedByInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutClaimedByInput
+  sessions?: Prisma.SessionUncheckedCreateNestedManyWithoutUserInput
+  accounts?: Prisma.AccountUncheckedCreateNestedManyWithoutUserInput
+}
+
+export type UserCreateOrConnectWithoutInvitesRevokedInput = {
+  where: Prisma.UserWhereUniqueInput
+  create: Prisma.XOR<Prisma.UserCreateWithoutInvitesRevokedInput, Prisma.UserUncheckedCreateWithoutInvitesRevokedInput>
+}
+
+export type UserUpsertWithoutInvitesCreatedInput = {
+  update: Prisma.XOR<Prisma.UserUpdateWithoutInvitesCreatedInput, Prisma.UserUncheckedUpdateWithoutInvitesCreatedInput>
+  create: Prisma.XOR<Prisma.UserCreateWithoutInvitesCreatedInput, Prisma.UserUncheckedCreateWithoutInvitesCreatedInput>
+  where?: Prisma.UserWhereInput
+}
+
+export type UserUpdateToOneWithWhereWithoutInvitesCreatedInput = {
+  where?: Prisma.UserWhereInput
+  data: Prisma.XOR<Prisma.UserUpdateWithoutInvitesCreatedInput, Prisma.UserUncheckedUpdateWithoutInvitesCreatedInput>
+}
+
+export type UserUpdateWithoutInvitesCreatedInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
+  name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  emailVerified?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  image?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phoneNumber?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phoneHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  school?: Prisma.SchoolUpdateOneWithoutOwnerNestedInput
+  parent?: Prisma.ParentUpdateOneWithoutUserNestedInput
+  notifications?: Prisma.NotificationUpdateManyWithoutUserNestedInput
+  deviceTokens?: Prisma.DeviceTokenUpdateManyWithoutUserNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUpdateManyWithoutClaimedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUpdateManyWithoutRevokedByNestedInput
+  sessions?: Prisma.SessionUpdateManyWithoutUserNestedInput
+  accounts?: Prisma.AccountUpdateManyWithoutUserNestedInput
+}
+
+export type UserUncheckedUpdateWithoutInvitesCreatedInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
+  name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  emailVerified?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  image?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phoneNumber?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phoneHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  school?: Prisma.SchoolUncheckedUpdateOneWithoutOwnerNestedInput
+  parent?: Prisma.ParentUncheckedUpdateOneWithoutUserNestedInput
+  notifications?: Prisma.NotificationUncheckedUpdateManyWithoutUserNestedInput
+  deviceTokens?: Prisma.DeviceTokenUncheckedUpdateManyWithoutUserNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutClaimedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutRevokedByNestedInput
+  sessions?: Prisma.SessionUncheckedUpdateManyWithoutUserNestedInput
+  accounts?: Prisma.AccountUncheckedUpdateManyWithoutUserNestedInput
+}
+
+export type UserUpsertWithoutInvitesClaimedInput = {
+  update: Prisma.XOR<Prisma.UserUpdateWithoutInvitesClaimedInput, Prisma.UserUncheckedUpdateWithoutInvitesClaimedInput>
+  create: Prisma.XOR<Prisma.UserCreateWithoutInvitesClaimedInput, Prisma.UserUncheckedCreateWithoutInvitesClaimedInput>
+  where?: Prisma.UserWhereInput
+}
+
+export type UserUpdateToOneWithWhereWithoutInvitesClaimedInput = {
+  where?: Prisma.UserWhereInput
+  data: Prisma.XOR<Prisma.UserUpdateWithoutInvitesClaimedInput, Prisma.UserUncheckedUpdateWithoutInvitesClaimedInput>
+}
+
+export type UserUpdateWithoutInvitesClaimedInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
+  name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  emailVerified?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  image?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phoneNumber?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phoneHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  school?: Prisma.SchoolUpdateOneWithoutOwnerNestedInput
+  parent?: Prisma.ParentUpdateOneWithoutUserNestedInput
+  notifications?: Prisma.NotificationUpdateManyWithoutUserNestedInput
+  deviceTokens?: Prisma.DeviceTokenUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUpdateManyWithoutCreatedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUpdateManyWithoutRevokedByNestedInput
+  sessions?: Prisma.SessionUpdateManyWithoutUserNestedInput
+  accounts?: Prisma.AccountUpdateManyWithoutUserNestedInput
+}
+
+export type UserUncheckedUpdateWithoutInvitesClaimedInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
+  name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  emailVerified?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  image?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phoneNumber?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phoneHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  school?: Prisma.SchoolUncheckedUpdateOneWithoutOwnerNestedInput
+  parent?: Prisma.ParentUncheckedUpdateOneWithoutUserNestedInput
+  notifications?: Prisma.NotificationUncheckedUpdateManyWithoutUserNestedInput
+  deviceTokens?: Prisma.DeviceTokenUncheckedUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutCreatedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutRevokedByNestedInput
+  sessions?: Prisma.SessionUncheckedUpdateManyWithoutUserNestedInput
+  accounts?: Prisma.AccountUncheckedUpdateManyWithoutUserNestedInput
+}
+
+export type UserUpsertWithoutInvitesRevokedInput = {
+  update: Prisma.XOR<Prisma.UserUpdateWithoutInvitesRevokedInput, Prisma.UserUncheckedUpdateWithoutInvitesRevokedInput>
+  create: Prisma.XOR<Prisma.UserCreateWithoutInvitesRevokedInput, Prisma.UserUncheckedCreateWithoutInvitesRevokedInput>
+  where?: Prisma.UserWhereInput
+}
+
+export type UserUpdateToOneWithWhereWithoutInvitesRevokedInput = {
+  where?: Prisma.UserWhereInput
+  data: Prisma.XOR<Prisma.UserUpdateWithoutInvitesRevokedInput, Prisma.UserUncheckedUpdateWithoutInvitesRevokedInput>
+}
+
+export type UserUpdateWithoutInvitesRevokedInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
+  name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  emailVerified?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  image?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phoneNumber?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phoneHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  school?: Prisma.SchoolUpdateOneWithoutOwnerNestedInput
+  parent?: Prisma.ParentUpdateOneWithoutUserNestedInput
+  notifications?: Prisma.NotificationUpdateManyWithoutUserNestedInput
+  deviceTokens?: Prisma.DeviceTokenUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUpdateManyWithoutCreatedByNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUpdateManyWithoutClaimedByNestedInput
+  sessions?: Prisma.SessionUpdateManyWithoutUserNestedInput
+  accounts?: Prisma.AccountUpdateManyWithoutUserNestedInput
+}
+
+export type UserUncheckedUpdateWithoutInvitesRevokedInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
+  name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  emailVerified?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  image?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phoneNumber?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phoneHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  school?: Prisma.SchoolUncheckedUpdateOneWithoutOwnerNestedInput
+  parent?: Prisma.ParentUncheckedUpdateOneWithoutUserNestedInput
+  notifications?: Prisma.NotificationUncheckedUpdateManyWithoutUserNestedInput
+  deviceTokens?: Prisma.DeviceTokenUncheckedUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutCreatedByNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutClaimedByNestedInput
   sessions?: Prisma.SessionUncheckedUpdateManyWithoutUserNestedInput
   accounts?: Prisma.AccountUncheckedUpdateManyWithoutUserNestedInput
 }
@@ -1014,6 +1458,9 @@ export type UserCreateWithoutNotificationsInput = {
   school?: Prisma.SchoolCreateNestedOneWithoutOwnerInput
   parent?: Prisma.ParentCreateNestedOneWithoutUserInput
   deviceTokens?: Prisma.DeviceTokenCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteCreateNestedManyWithoutCreatedByInput
+  invitesClaimed?: Prisma.EnrollmentInviteCreateNestedManyWithoutClaimedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteCreateNestedManyWithoutRevokedByInput
   sessions?: Prisma.SessionCreateNestedManyWithoutUserInput
   accounts?: Prisma.AccountCreateNestedManyWithoutUserInput
 }
@@ -1034,6 +1481,9 @@ export type UserUncheckedCreateWithoutNotificationsInput = {
   school?: Prisma.SchoolUncheckedCreateNestedOneWithoutOwnerInput
   parent?: Prisma.ParentUncheckedCreateNestedOneWithoutUserInput
   deviceTokens?: Prisma.DeviceTokenUncheckedCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutCreatedByInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutClaimedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutRevokedByInput
   sessions?: Prisma.SessionUncheckedCreateNestedManyWithoutUserInput
   accounts?: Prisma.AccountUncheckedCreateNestedManyWithoutUserInput
 }
@@ -1070,6 +1520,9 @@ export type UserUpdateWithoutNotificationsInput = {
   school?: Prisma.SchoolUpdateOneWithoutOwnerNestedInput
   parent?: Prisma.ParentUpdateOneWithoutUserNestedInput
   deviceTokens?: Prisma.DeviceTokenUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUpdateManyWithoutCreatedByNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUpdateManyWithoutClaimedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUpdateManyWithoutRevokedByNestedInput
   sessions?: Prisma.SessionUpdateManyWithoutUserNestedInput
   accounts?: Prisma.AccountUpdateManyWithoutUserNestedInput
 }
@@ -1090,6 +1543,9 @@ export type UserUncheckedUpdateWithoutNotificationsInput = {
   school?: Prisma.SchoolUncheckedUpdateOneWithoutOwnerNestedInput
   parent?: Prisma.ParentUncheckedUpdateOneWithoutUserNestedInput
   deviceTokens?: Prisma.DeviceTokenUncheckedUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutCreatedByNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutClaimedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutRevokedByNestedInput
   sessions?: Prisma.SessionUncheckedUpdateManyWithoutUserNestedInput
   accounts?: Prisma.AccountUncheckedUpdateManyWithoutUserNestedInput
 }
@@ -1110,6 +1566,9 @@ export type UserCreateWithoutDeviceTokensInput = {
   school?: Prisma.SchoolCreateNestedOneWithoutOwnerInput
   parent?: Prisma.ParentCreateNestedOneWithoutUserInput
   notifications?: Prisma.NotificationCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteCreateNestedManyWithoutCreatedByInput
+  invitesClaimed?: Prisma.EnrollmentInviteCreateNestedManyWithoutClaimedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteCreateNestedManyWithoutRevokedByInput
   sessions?: Prisma.SessionCreateNestedManyWithoutUserInput
   accounts?: Prisma.AccountCreateNestedManyWithoutUserInput
 }
@@ -1130,6 +1589,9 @@ export type UserUncheckedCreateWithoutDeviceTokensInput = {
   school?: Prisma.SchoolUncheckedCreateNestedOneWithoutOwnerInput
   parent?: Prisma.ParentUncheckedCreateNestedOneWithoutUserInput
   notifications?: Prisma.NotificationUncheckedCreateNestedManyWithoutUserInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutCreatedByInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutClaimedByInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutRevokedByInput
   sessions?: Prisma.SessionUncheckedCreateNestedManyWithoutUserInput
   accounts?: Prisma.AccountUncheckedCreateNestedManyWithoutUserInput
 }
@@ -1166,6 +1628,9 @@ export type UserUpdateWithoutDeviceTokensInput = {
   school?: Prisma.SchoolUpdateOneWithoutOwnerNestedInput
   parent?: Prisma.ParentUpdateOneWithoutUserNestedInput
   notifications?: Prisma.NotificationUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUpdateManyWithoutCreatedByNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUpdateManyWithoutClaimedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUpdateManyWithoutRevokedByNestedInput
   sessions?: Prisma.SessionUpdateManyWithoutUserNestedInput
   accounts?: Prisma.AccountUpdateManyWithoutUserNestedInput
 }
@@ -1186,6 +1651,9 @@ export type UserUncheckedUpdateWithoutDeviceTokensInput = {
   school?: Prisma.SchoolUncheckedUpdateOneWithoutOwnerNestedInput
   parent?: Prisma.ParentUncheckedUpdateOneWithoutUserNestedInput
   notifications?: Prisma.NotificationUncheckedUpdateManyWithoutUserNestedInput
+  invitesCreated?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutCreatedByNestedInput
+  invitesClaimed?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutClaimedByNestedInput
+  invitesRevoked?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutRevokedByNestedInput
   sessions?: Prisma.SessionUncheckedUpdateManyWithoutUserNestedInput
   accounts?: Prisma.AccountUncheckedUpdateManyWithoutUserNestedInput
 }
@@ -1198,6 +1666,9 @@ export type UserUncheckedUpdateWithoutDeviceTokensInput = {
 export type UserCountOutputType = {
   notifications: number
   deviceTokens: number
+  invitesCreated: number
+  invitesClaimed: number
+  invitesRevoked: number
   sessions: number
   accounts: number
 }
@@ -1205,6 +1676,9 @@ export type UserCountOutputType = {
 export type UserCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   notifications?: boolean | UserCountOutputTypeCountNotificationsArgs
   deviceTokens?: boolean | UserCountOutputTypeCountDeviceTokensArgs
+  invitesCreated?: boolean | UserCountOutputTypeCountInvitesCreatedArgs
+  invitesClaimed?: boolean | UserCountOutputTypeCountInvitesClaimedArgs
+  invitesRevoked?: boolean | UserCountOutputTypeCountInvitesRevokedArgs
   sessions?: boolean | UserCountOutputTypeCountSessionsArgs
   accounts?: boolean | UserCountOutputTypeCountAccountsArgs
 }
@@ -1231,6 +1705,27 @@ export type UserCountOutputTypeCountNotificationsArgs<ExtArgs extends runtime.Ty
  */
 export type UserCountOutputTypeCountDeviceTokensArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   where?: Prisma.DeviceTokenWhereInput
+}
+
+/**
+ * UserCountOutputType without action
+ */
+export type UserCountOutputTypeCountInvitesCreatedArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.EnrollmentInviteWhereInput
+}
+
+/**
+ * UserCountOutputType without action
+ */
+export type UserCountOutputTypeCountInvitesClaimedArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.EnrollmentInviteWhereInput
+}
+
+/**
+ * UserCountOutputType without action
+ */
+export type UserCountOutputTypeCountInvitesRevokedArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.EnrollmentInviteWhereInput
 }
 
 /**
@@ -1265,6 +1760,9 @@ export type UserSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
   parent?: boolean | Prisma.User$parentArgs<ExtArgs>
   notifications?: boolean | Prisma.User$notificationsArgs<ExtArgs>
   deviceTokens?: boolean | Prisma.User$deviceTokensArgs<ExtArgs>
+  invitesCreated?: boolean | Prisma.User$invitesCreatedArgs<ExtArgs>
+  invitesClaimed?: boolean | Prisma.User$invitesClaimedArgs<ExtArgs>
+  invitesRevoked?: boolean | Prisma.User$invitesRevokedArgs<ExtArgs>
   sessions?: boolean | Prisma.User$sessionsArgs<ExtArgs>
   accounts?: boolean | Prisma.User$accountsArgs<ExtArgs>
   _count?: boolean | Prisma.UserCountOutputTypeDefaultArgs<ExtArgs>
@@ -1321,6 +1819,9 @@ export type UserInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = 
   parent?: boolean | Prisma.User$parentArgs<ExtArgs>
   notifications?: boolean | Prisma.User$notificationsArgs<ExtArgs>
   deviceTokens?: boolean | Prisma.User$deviceTokensArgs<ExtArgs>
+  invitesCreated?: boolean | Prisma.User$invitesCreatedArgs<ExtArgs>
+  invitesClaimed?: boolean | Prisma.User$invitesClaimedArgs<ExtArgs>
+  invitesRevoked?: boolean | Prisma.User$invitesRevokedArgs<ExtArgs>
   sessions?: boolean | Prisma.User$sessionsArgs<ExtArgs>
   accounts?: boolean | Prisma.User$accountsArgs<ExtArgs>
   _count?: boolean | Prisma.UserCountOutputTypeDefaultArgs<ExtArgs>
@@ -1335,6 +1836,9 @@ export type $UserPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
     parent: Prisma.$ParentPayload<ExtArgs> | null
     notifications: Prisma.$NotificationPayload<ExtArgs>[]
     deviceTokens: Prisma.$DeviceTokenPayload<ExtArgs>[]
+    invitesCreated: Prisma.$EnrollmentInvitePayload<ExtArgs>[]
+    invitesClaimed: Prisma.$EnrollmentInvitePayload<ExtArgs>[]
+    invitesRevoked: Prisma.$EnrollmentInvitePayload<ExtArgs>[]
     sessions: Prisma.$SessionPayload<ExtArgs>[]
     accounts: Prisma.$AccountPayload<ExtArgs>[]
   }
@@ -1749,6 +2253,9 @@ export interface Prisma__UserClient<T, Null = never, ExtArgs extends runtime.Typ
   parent<T extends Prisma.User$parentArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$parentArgs<ExtArgs>>): Prisma.Prisma__ParentClient<runtime.Types.Result.GetResult<Prisma.$ParentPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
   notifications<T extends Prisma.User$notificationsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$notificationsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$NotificationPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   deviceTokens<T extends Prisma.User$deviceTokensArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$deviceTokensArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$DeviceTokenPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  invitesCreated<T extends Prisma.User$invitesCreatedArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$invitesCreatedArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$EnrollmentInvitePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  invitesClaimed<T extends Prisma.User$invitesClaimedArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$invitesClaimedArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$EnrollmentInvitePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  invitesRevoked<T extends Prisma.User$invitesRevokedArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$invitesRevokedArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$EnrollmentInvitePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   sessions<T extends Prisma.User$sessionsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$sessionsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$SessionPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   accounts<T extends Prisma.User$accountsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$accountsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$AccountPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
@@ -2268,6 +2775,78 @@ export type User$deviceTokensArgs<ExtArgs extends runtime.Types.Extensions.Inter
   take?: number
   skip?: number
   distinct?: Prisma.DeviceTokenScalarFieldEnum | Prisma.DeviceTokenScalarFieldEnum[]
+}
+
+/**
+ * User.invitesCreated
+ */
+export type User$invitesCreatedArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the EnrollmentInvite
+   */
+  select?: Prisma.EnrollmentInviteSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the EnrollmentInvite
+   */
+  omit?: Prisma.EnrollmentInviteOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.EnrollmentInviteInclude<ExtArgs> | null
+  where?: Prisma.EnrollmentInviteWhereInput
+  orderBy?: Prisma.EnrollmentInviteOrderByWithRelationInput | Prisma.EnrollmentInviteOrderByWithRelationInput[]
+  cursor?: Prisma.EnrollmentInviteWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.EnrollmentInviteScalarFieldEnum | Prisma.EnrollmentInviteScalarFieldEnum[]
+}
+
+/**
+ * User.invitesClaimed
+ */
+export type User$invitesClaimedArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the EnrollmentInvite
+   */
+  select?: Prisma.EnrollmentInviteSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the EnrollmentInvite
+   */
+  omit?: Prisma.EnrollmentInviteOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.EnrollmentInviteInclude<ExtArgs> | null
+  where?: Prisma.EnrollmentInviteWhereInput
+  orderBy?: Prisma.EnrollmentInviteOrderByWithRelationInput | Prisma.EnrollmentInviteOrderByWithRelationInput[]
+  cursor?: Prisma.EnrollmentInviteWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.EnrollmentInviteScalarFieldEnum | Prisma.EnrollmentInviteScalarFieldEnum[]
+}
+
+/**
+ * User.invitesRevoked
+ */
+export type User$invitesRevokedArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the EnrollmentInvite
+   */
+  select?: Prisma.EnrollmentInviteSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the EnrollmentInvite
+   */
+  omit?: Prisma.EnrollmentInviteOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.EnrollmentInviteInclude<ExtArgs> | null
+  where?: Prisma.EnrollmentInviteWhereInput
+  orderBy?: Prisma.EnrollmentInviteOrderByWithRelationInput | Prisma.EnrollmentInviteOrderByWithRelationInput[]
+  cursor?: Prisma.EnrollmentInviteWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.EnrollmentInviteScalarFieldEnum | Prisma.EnrollmentInviteScalarFieldEnum[]
 }
 
 /**

@@ -81,6 +81,70 @@ receipt (`PENDING`), and the school owner **confirms** it (decrementing the
 balance) or **reverses** a confirmed one (auditable undo). Every money transition
 is owned by a single ledger and recorded in the audit log.
 
+### Parents who paid before the school joined Lopay
+
+A school arriving mid-term has families part-way through paying, whose money
+exists only in the school's own records. They cannot use the normal flow — it
+starts with a Paystack deposit, and they have already paid. `EnrollmentInvite`
+carries them across. See [ADR 0006](docs/adr/0006-enrollment-invites.md) for why
+it is shaped this way.
+
+**The school issues an invite.** `POST /api/v1/enrollment-invites` with the
+student, class, amount already paid, the parent's phone, and the plan's cadence
+and dates. The fee is read from the school's published `ClassFee` — it is not a
+request field. The response carries `claimUrl`, a `wa.me` deep link and
+pre-written text; there is no automated delivery, the school sends it over the
+WhatsApp thread it already has with that parent. **The raw token appears in that
+response and nowhere else, ever** — only its SHA-256 digest is stored, so a lost
+link is recovered by revoking and re-issuing.
+
+`termEndDate` is **not** accepted: it is derived from `planStartDate` and
+`installmentFrequency`, because it is the point at which an unpaid plan is
+marked as defaulting and the instalment count is fixed. Supplying it would let
+one family default early and another never default at all. The response carries
+the derived value.
+
+`claimUrl` is `https://app/#/claim-invite?token=…`. The web client is
+hash-routed, so the route has to sit inside the fragment — a link with it in the
+real path reaches the SPA fallback and matches nothing. That also keeps the
+token private: everything after the `#` is fragment and is never transmitted,
+so it reaches no access log and no `Referer`. The three API routes below keep it
+out of URLs entirely, for the same reason.
+
+**The parent reviews it.** `GET /api/v1/enrollment-invites/preview` with the
+token in an `x-invite-token` header (not the query string — it is a bearer
+credential). This route is public: the parent usually has no account yet and must
+be able to read what is being asserted before signing up. The response is a thin
+projection — no phone number, no ids.
+
+**The parent confirms or contests.** `POST /api/v1/enrollment-invites/claim` or
+`/dispute`, token in the body. Both require an authenticated account whose
+`phoneHash` matches the number the invite was addressed to; the token alone is
+not enough, because it travels over a chat app. Neither is role-gated — a school
+owner can be a parent elsewhere.
+
+A claim builds the Parent/Child/Enrollment graph and records the prior payment as
+a confirmed `MIGRATED_PAYMENT` with no platform fee, in one transaction, through
+`LedgerService`. It takes the place of the **deposit**, so the derived instalment
+schedule opens from the balance it leaves; `termStartDate` is the handover date,
+not the historical term start, so the plan is not born in arrears.
+
+**Corrections.** `POST /enrollment-invites/:id/revoke` cancels a live invite and
+frees the student's slot for a re-issue. Once claimed there is a real plan, so
+the remedy is `POST /enrollment-invites/:id/amend`, which restates the figure on
+the payment, the plan **and the invite** — so the school's own list stops showing
+the number they just corrected — and re-derives the balance under a row lock,
+refusing any correction that would leave the plan overpaid.
+`GET /api/v1/enrollment-invites` lists a school's invites, including any dispute
+reasons.
+
+**What migrated money is not.** It reduces the plan's balance and appears in the
+parent's history, but it is excluded from the "School Collections" figure and
+from the admin's per-school collected total (`MOVED_THROUGH_LOPAY` in
+`common/migrated-plan.ts`). The school banked that cash itself before Lopay was
+involved; no rail carried it and `platformAmount` is zero, so counting it would
+make a school's collections jump by months-old money the moment a parent claims.
+
 ## 5. End-to-end flow
 
 1. **Discover** — parent lists schools and class fees (`/api/v1/schools`,

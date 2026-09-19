@@ -43,11 +43,37 @@ enum AuditAction {
   FIRST_PAYMENT_PAID
   ENROLLMENT_DEFAULTED
   PAYMENT_DISPUTED
+  // Enrollment invites — onboarding parents who paid the school before Lopay.
+  ENROLLMENT_INVITE_CREATED
+  ENROLLMENT_INVITE_REVOKED
+  ENROLLMENT_INVITE_DISPUTED
+  ENROLLMENT_INVITE_CLAIMED
+  ENROLLMENT_INVITE_RELEASED
+  MIGRATED_PAYMENT_AMENDED
 }
 
 enum PaymentType {
   FIRST_PAYMENT
   INSTALLMENT
+  /// Money a parent paid the school directly BEFORE the school adopted Lopay,
+  /// recorded once when they claim an enrollment invite. It is not an
+  /// installment: it takes the place of the deposit, so the derived installment
+  /// schedule (see common/installment-schedule.ts) opens from the balance it
+  /// leaves behind. No money moves through Lopay for it — the school already
+  /// holds it — so `receiver` is SCHOOL and `platformAmount` is zero.
+  MIGRATED_PAYMENT
+}
+
+/// Lifecycle of an enrollment invite. Only PENDING and DISPUTED are "live":
+/// a live invite holds the (school, student, class) slot and can still be
+/// claimed or revoked. CLAIMED is terminal-successful; REVOKED and EXPIRED are
+/// terminal-dead and free the slot for a re-issue.
+enum EnrollmentInviteStatus {
+  PENDING
+  DISPUTED
+  CLAIMED
+  REVOKED
+  EXPIRED
 }
 
 enum PaymentReceiver {
@@ -85,6 +111,10 @@ model User {
   parent    Parent?
   notifications Notification[]
   deviceTokens  DeviceToken[]
+
+  invitesCreated  EnrollmentInvite[] @relation("EnrollmentInviteCreatedBy")
+  invitesClaimed  EnrollmentInvite[] @relation("EnrollmentInviteClaimedBy")
+  invitesRevoked  EnrollmentInvite[] @relation("EnrollmentInviteRevokedBy")
 
   // Better Auth relations
   sessions  Session[]
@@ -183,6 +213,7 @@ model School {
   classes       ClassFee[]
   students      ChildEnrollment[]
   payments      Payment[]
+  invites       EnrollmentInvite[]
 
   createdAt     DateTime @default(now())
 
@@ -293,6 +324,11 @@ model ChildEnrollment {
   termStartDate         DateTime
   termEndDate           DateTime
 
+  /// Set only on a plan created by claiming an enrollment invite. Unique, so one
+  /// invite can never mint two enrollments even if two claims race.
+  enrollmentInviteId    String?  @unique
+  enrollmentInvite      EnrollmentInvite? @relation(fields: [enrollmentInviteId], references: [id])
+
   child                 Child    @relation(fields: [childId], references: [id])
   school                School   @relation(fields: [schoolId], references: [id])
   payments              Payment[]
@@ -302,6 +338,120 @@ model ChildEnrollment {
 
   @@index([schoolId])
   @@index([schoolId, paymentStatus])
+}
+
+/// A school's record of a student whose parent paid fees BEFORE the school
+/// adopted Lopay, held until that parent claims it.
+///
+/// ## Why a staging table rather than a real enrollment
+///
+/// `ChildEnrollment` hangs off `Child → Parent → User`, and `User.email` /
+/// `User.phoneHash` are globally unique. Pre-creating parents as real `User`
+/// rows to hold their history would burn those uniqueness slots and collide
+/// with `signup-guard.ts` the moment the parent signs up for themselves. The
+/// invite therefore carries the facts, and the enrollment graph is built once,
+/// at claim time, by `LedgerService.recordMigratedEnrollment`.
+///
+/// ## How a claim is authorised
+///
+/// By the raw invite token, and nothing else: 32 random bytes, of which only the
+/// SHA-256 digest is stored, so a database dump cannot be replayed into a claim.
+///
+/// A phone match was required once and was removed. It read as a second factor
+/// and was not one — Lopay verifies no phone number anywhere, so a match only
+/// proved someone had typed that number into a signup form — while it reliably
+/// refused legitimate parents, most sharply when the school mistyped a digit and
+/// the wrong number became the only one able to claim.
+///
+/// The link is a bearer credential and is treated as one: it is sent inside a
+/// conversation the school and family have already had, the comparison survives
+/// as `claimantPhoneMatched` for the school to see, and a claim that reached the
+/// wrong person is undone with `EnrollmentInvitesService.release`.
+model EnrollmentInvite {
+  id                    String   @id @default(uuid())
+  schoolId              String
+  createdByUserId       String
+
+  studentName           String
+  className             String
+
+  /// Snapshot of the school's published `ClassFee` at issue time, in kobo. Held
+  /// on the invite so a later fee change cannot silently restate what the parent
+  /// already agreed to on the claim screen.
+  totalSchoolFee        Int
+  /// Kobo the school says this parent has already paid, off-platform.
+  amountAlreadyPaid     Int
+
+  /// The parent's number. Named `phoneNumber` deliberately: the field-name-keyed
+  /// PII extension in `common/pii-crypto.ts` encrypts it at rest and decrypts it
+  /// on read, with no per-model code.
+  phoneNumber           String
+  /// Blind index over the same number (`common/phone.ts`). Randomised ciphertext
+  /// is not comparable, so this — not `phoneNumber` — is what a claimant's own
+  /// number is compared against. That comparison is a SIGNAL for the school, not
+  /// a gate on the claim; see `claimantPhoneMatched`.
+  parentPhoneHash       String
+
+  installmentFrequency  InstallmentFrequency
+  /// Anchor for the derived installment schedule. Deliberately the handover date
+  /// rather than the historical term start: anchoring to a term that began months
+  /// ago would open the plan already in arrears (see common/arrears.ts).
+  planStartDate         DateTime
+  termEndDate           DateTime
+
+  /// SHA-256 of the raw token. Unique, so a claim is a single indexed lookup
+  /// rather than a scan-and-compare.
+  tokenHash             String   @unique
+  expiresAt             DateTime
+
+  status                EnrollmentInviteStatus @default(PENDING)
+
+  disputeReason         String?
+  disputedAt            DateTime?
+
+  revokedAt             DateTime?
+  revokedByUserId       String?
+
+  claimedByUserId       String?
+  claimedAt             DateTime?
+
+  /// Whether the claimant's own phone matched `parentPhoneHash`, recorded at the
+  /// moment of the claim.
+  ///
+  /// A SIGNAL, never a gate. Claiming is authorised by holding the link and
+  /// nothing else: the link follows a conversation the school and parent have
+  /// already had, and a phone match proved almost nothing anyway because Lopay
+  /// does not verify phone numbers — it only proves someone typed that number
+  /// into a signup form. What it did reliably do was block legitimate parents:
+  /// anyone who signed in with Google (no number at all), anyone using a second
+  /// phone, and — worst — every case where the school mistyped a digit, which
+  /// locked the real parent out of their own child's plan while doing nothing to
+  /// stop anyone else.
+  ///
+  /// So the comparison is kept and the refusal is not. It is STORED rather than
+  /// recomputed on read because it is a fact about an instant: a claimant who
+  /// later corrects their profile number would otherwise turn retroactively
+  /// green, erasing the only trace that anything looked odd.
+  ///
+  /// Null means not claimed, or claimed before this column existed.
+  claimantPhoneMatched  Boolean?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  school                School   @relation(fields: [schoolId], references: [id])
+  createdBy             User     @relation("EnrollmentInviteCreatedBy", fields: [createdByUserId], references: [id])
+  claimedBy             User?    @relation("EnrollmentInviteClaimedBy", fields: [claimedByUserId], references: [id])
+  revokedBy             User?    @relation("EnrollmentInviteRevokedBy", fields: [revokedByUserId], references: [id])
+  enrollment            ChildEnrollment?
+
+  /// The school's own list: filter by status, newest first.
+  @@index([schoolId, status, createdAt])
+  /// "Which invites are waiting for the number I just signed up with?" — lets a
+  /// parent be shown their pending invite without holding the link.
+  @@index([parentPhoneHash, status])
+  /// Drives the expiry sweep, which scans only live invites already past due.
+  @@index([status, expiresAt])
 }
 
 model PlatformSetting {

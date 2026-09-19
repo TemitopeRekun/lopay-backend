@@ -258,6 +258,7 @@ export type SchoolWhereInput = {
   classes?: Prisma.ClassFeeListRelationFilter
   students?: Prisma.ChildEnrollmentListRelationFilter
   payments?: Prisma.PaymentListRelationFilter
+  invites?: Prisma.EnrollmentInviteListRelationFilter
 }
 
 export type SchoolOrderByWithRelationInput = {
@@ -279,6 +280,7 @@ export type SchoolOrderByWithRelationInput = {
   classes?: Prisma.ClassFeeOrderByRelationAggregateInput
   students?: Prisma.ChildEnrollmentOrderByRelationAggregateInput
   payments?: Prisma.PaymentOrderByRelationAggregateInput
+  invites?: Prisma.EnrollmentInviteOrderByRelationAggregateInput
 }
 
 export type SchoolWhereUniqueInput = Prisma.AtLeast<{
@@ -303,6 +305,7 @@ export type SchoolWhereUniqueInput = Prisma.AtLeast<{
   classes?: Prisma.ClassFeeListRelationFilter
   students?: Prisma.ChildEnrollmentListRelationFilter
   payments?: Prisma.PaymentListRelationFilter
+  invites?: Prisma.EnrollmentInviteListRelationFilter
 }, "id" | "ownerId" | "paystackSubaccountCode">
 
 export type SchoolOrderByWithAggregationInput = {
@@ -363,6 +366,7 @@ export type SchoolCreateInput = {
   classes?: Prisma.ClassFeeCreateNestedManyWithoutSchoolInput
   students?: Prisma.ChildEnrollmentCreateNestedManyWithoutSchoolInput
   payments?: Prisma.PaymentCreateNestedManyWithoutSchoolInput
+  invites?: Prisma.EnrollmentInviteCreateNestedManyWithoutSchoolInput
 }
 
 export type SchoolUncheckedCreateInput = {
@@ -383,6 +387,7 @@ export type SchoolUncheckedCreateInput = {
   classes?: Prisma.ClassFeeUncheckedCreateNestedManyWithoutSchoolInput
   students?: Prisma.ChildEnrollmentUncheckedCreateNestedManyWithoutSchoolInput
   payments?: Prisma.PaymentUncheckedCreateNestedManyWithoutSchoolInput
+  invites?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutSchoolInput
 }
 
 export type SchoolUpdateInput = {
@@ -403,6 +408,7 @@ export type SchoolUpdateInput = {
   classes?: Prisma.ClassFeeUpdateManyWithoutSchoolNestedInput
   students?: Prisma.ChildEnrollmentUpdateManyWithoutSchoolNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutSchoolNestedInput
+  invites?: Prisma.EnrollmentInviteUpdateManyWithoutSchoolNestedInput
 }
 
 export type SchoolUncheckedUpdateInput = {
@@ -423,6 +429,7 @@ export type SchoolUncheckedUpdateInput = {
   classes?: Prisma.ClassFeeUncheckedUpdateManyWithoutSchoolNestedInput
   students?: Prisma.ChildEnrollmentUncheckedUpdateManyWithoutSchoolNestedInput
   payments?: Prisma.PaymentUncheckedUpdateManyWithoutSchoolNestedInput
+  invites?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutSchoolNestedInput
 }
 
 export type SchoolCreateManyInput = {
@@ -610,6 +617,20 @@ export type SchoolUpdateOneRequiredWithoutStudentsNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.SchoolUpdateToOneWithWhereWithoutStudentsInput, Prisma.SchoolUpdateWithoutStudentsInput>, Prisma.SchoolUncheckedUpdateWithoutStudentsInput>
 }
 
+export type SchoolCreateNestedOneWithoutInvitesInput = {
+  create?: Prisma.XOR<Prisma.SchoolCreateWithoutInvitesInput, Prisma.SchoolUncheckedCreateWithoutInvitesInput>
+  connectOrCreate?: Prisma.SchoolCreateOrConnectWithoutInvitesInput
+  connect?: Prisma.SchoolWhereUniqueInput
+}
+
+export type SchoolUpdateOneRequiredWithoutInvitesNestedInput = {
+  create?: Prisma.XOR<Prisma.SchoolCreateWithoutInvitesInput, Prisma.SchoolUncheckedCreateWithoutInvitesInput>
+  connectOrCreate?: Prisma.SchoolCreateOrConnectWithoutInvitesInput
+  upsert?: Prisma.SchoolUpsertWithoutInvitesInput
+  connect?: Prisma.SchoolWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.SchoolUpdateToOneWithWhereWithoutInvitesInput, Prisma.SchoolUpdateWithoutInvitesInput>, Prisma.SchoolUncheckedUpdateWithoutInvitesInput>
+}
+
 export type SchoolCreateWithoutOwnerInput = {
   id?: string
   name: string
@@ -627,6 +648,7 @@ export type SchoolCreateWithoutOwnerInput = {
   classes?: Prisma.ClassFeeCreateNestedManyWithoutSchoolInput
   students?: Prisma.ChildEnrollmentCreateNestedManyWithoutSchoolInput
   payments?: Prisma.PaymentCreateNestedManyWithoutSchoolInput
+  invites?: Prisma.EnrollmentInviteCreateNestedManyWithoutSchoolInput
 }
 
 export type SchoolUncheckedCreateWithoutOwnerInput = {
@@ -646,6 +668,7 @@ export type SchoolUncheckedCreateWithoutOwnerInput = {
   classes?: Prisma.ClassFeeUncheckedCreateNestedManyWithoutSchoolInput
   students?: Prisma.ChildEnrollmentUncheckedCreateNestedManyWithoutSchoolInput
   payments?: Prisma.PaymentUncheckedCreateNestedManyWithoutSchoolInput
+  invites?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutSchoolInput
 }
 
 export type SchoolCreateOrConnectWithoutOwnerInput = {
@@ -681,6 +704,7 @@ export type SchoolUpdateWithoutOwnerInput = {
   classes?: Prisma.ClassFeeUpdateManyWithoutSchoolNestedInput
   students?: Prisma.ChildEnrollmentUpdateManyWithoutSchoolNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutSchoolNestedInput
+  invites?: Prisma.EnrollmentInviteUpdateManyWithoutSchoolNestedInput
 }
 
 export type SchoolUncheckedUpdateWithoutOwnerInput = {
@@ -700,6 +724,7 @@ export type SchoolUncheckedUpdateWithoutOwnerInput = {
   classes?: Prisma.ClassFeeUncheckedUpdateManyWithoutSchoolNestedInput
   students?: Prisma.ChildEnrollmentUncheckedUpdateManyWithoutSchoolNestedInput
   payments?: Prisma.PaymentUncheckedUpdateManyWithoutSchoolNestedInput
+  invites?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutSchoolNestedInput
 }
 
 export type SchoolCreateWithoutClassesInput = {
@@ -719,6 +744,7 @@ export type SchoolCreateWithoutClassesInput = {
   owner: Prisma.UserCreateNestedOneWithoutSchoolInput
   students?: Prisma.ChildEnrollmentCreateNestedManyWithoutSchoolInput
   payments?: Prisma.PaymentCreateNestedManyWithoutSchoolInput
+  invites?: Prisma.EnrollmentInviteCreateNestedManyWithoutSchoolInput
 }
 
 export type SchoolUncheckedCreateWithoutClassesInput = {
@@ -738,6 +764,7 @@ export type SchoolUncheckedCreateWithoutClassesInput = {
   createdAt?: Date | string
   students?: Prisma.ChildEnrollmentUncheckedCreateNestedManyWithoutSchoolInput
   payments?: Prisma.PaymentUncheckedCreateNestedManyWithoutSchoolInput
+  invites?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutSchoolInput
 }
 
 export type SchoolCreateOrConnectWithoutClassesInput = {
@@ -773,6 +800,7 @@ export type SchoolUpdateWithoutClassesInput = {
   owner?: Prisma.UserUpdateOneRequiredWithoutSchoolNestedInput
   students?: Prisma.ChildEnrollmentUpdateManyWithoutSchoolNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutSchoolNestedInput
+  invites?: Prisma.EnrollmentInviteUpdateManyWithoutSchoolNestedInput
 }
 
 export type SchoolUncheckedUpdateWithoutClassesInput = {
@@ -792,6 +820,7 @@ export type SchoolUncheckedUpdateWithoutClassesInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   students?: Prisma.ChildEnrollmentUncheckedUpdateManyWithoutSchoolNestedInput
   payments?: Prisma.PaymentUncheckedUpdateManyWithoutSchoolNestedInput
+  invites?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutSchoolNestedInput
 }
 
 export type SchoolCreateWithoutPaymentsInput = {
@@ -811,6 +840,7 @@ export type SchoolCreateWithoutPaymentsInput = {
   owner: Prisma.UserCreateNestedOneWithoutSchoolInput
   classes?: Prisma.ClassFeeCreateNestedManyWithoutSchoolInput
   students?: Prisma.ChildEnrollmentCreateNestedManyWithoutSchoolInput
+  invites?: Prisma.EnrollmentInviteCreateNestedManyWithoutSchoolInput
 }
 
 export type SchoolUncheckedCreateWithoutPaymentsInput = {
@@ -830,6 +860,7 @@ export type SchoolUncheckedCreateWithoutPaymentsInput = {
   createdAt?: Date | string
   classes?: Prisma.ClassFeeUncheckedCreateNestedManyWithoutSchoolInput
   students?: Prisma.ChildEnrollmentUncheckedCreateNestedManyWithoutSchoolInput
+  invites?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutSchoolInput
 }
 
 export type SchoolCreateOrConnectWithoutPaymentsInput = {
@@ -865,6 +896,7 @@ export type SchoolUpdateWithoutPaymentsInput = {
   owner?: Prisma.UserUpdateOneRequiredWithoutSchoolNestedInput
   classes?: Prisma.ClassFeeUpdateManyWithoutSchoolNestedInput
   students?: Prisma.ChildEnrollmentUpdateManyWithoutSchoolNestedInput
+  invites?: Prisma.EnrollmentInviteUpdateManyWithoutSchoolNestedInput
 }
 
 export type SchoolUncheckedUpdateWithoutPaymentsInput = {
@@ -884,6 +916,7 @@ export type SchoolUncheckedUpdateWithoutPaymentsInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   classes?: Prisma.ClassFeeUncheckedUpdateManyWithoutSchoolNestedInput
   students?: Prisma.ChildEnrollmentUncheckedUpdateManyWithoutSchoolNestedInput
+  invites?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutSchoolNestedInput
 }
 
 export type SchoolCreateWithoutStudentsInput = {
@@ -903,6 +936,7 @@ export type SchoolCreateWithoutStudentsInput = {
   owner: Prisma.UserCreateNestedOneWithoutSchoolInput
   classes?: Prisma.ClassFeeCreateNestedManyWithoutSchoolInput
   payments?: Prisma.PaymentCreateNestedManyWithoutSchoolInput
+  invites?: Prisma.EnrollmentInviteCreateNestedManyWithoutSchoolInput
 }
 
 export type SchoolUncheckedCreateWithoutStudentsInput = {
@@ -922,6 +956,7 @@ export type SchoolUncheckedCreateWithoutStudentsInput = {
   createdAt?: Date | string
   classes?: Prisma.ClassFeeUncheckedCreateNestedManyWithoutSchoolInput
   payments?: Prisma.PaymentUncheckedCreateNestedManyWithoutSchoolInput
+  invites?: Prisma.EnrollmentInviteUncheckedCreateNestedManyWithoutSchoolInput
 }
 
 export type SchoolCreateOrConnectWithoutStudentsInput = {
@@ -957,6 +992,7 @@ export type SchoolUpdateWithoutStudentsInput = {
   owner?: Prisma.UserUpdateOneRequiredWithoutSchoolNestedInput
   classes?: Prisma.ClassFeeUpdateManyWithoutSchoolNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutSchoolNestedInput
+  invites?: Prisma.EnrollmentInviteUpdateManyWithoutSchoolNestedInput
 }
 
 export type SchoolUncheckedUpdateWithoutStudentsInput = {
@@ -976,6 +1012,103 @@ export type SchoolUncheckedUpdateWithoutStudentsInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   classes?: Prisma.ClassFeeUncheckedUpdateManyWithoutSchoolNestedInput
   payments?: Prisma.PaymentUncheckedUpdateManyWithoutSchoolNestedInput
+  invites?: Prisma.EnrollmentInviteUncheckedUpdateManyWithoutSchoolNestedInput
+}
+
+export type SchoolCreateWithoutInvitesInput = {
+  id?: string
+  name: string
+  email: string
+  phone: string
+  address: string
+  bankName: string
+  bankCode?: string | null
+  accountName: string
+  accountNumber: string
+  paystackSubaccountCode?: string | null
+  paystackSubaccountActive?: boolean
+  deletedAt?: Date | string | null
+  createdAt?: Date | string
+  owner: Prisma.UserCreateNestedOneWithoutSchoolInput
+  classes?: Prisma.ClassFeeCreateNestedManyWithoutSchoolInput
+  students?: Prisma.ChildEnrollmentCreateNestedManyWithoutSchoolInput
+  payments?: Prisma.PaymentCreateNestedManyWithoutSchoolInput
+}
+
+export type SchoolUncheckedCreateWithoutInvitesInput = {
+  id?: string
+  name: string
+  email: string
+  phone: string
+  address: string
+  ownerId: string
+  bankName: string
+  bankCode?: string | null
+  accountName: string
+  accountNumber: string
+  paystackSubaccountCode?: string | null
+  paystackSubaccountActive?: boolean
+  deletedAt?: Date | string | null
+  createdAt?: Date | string
+  classes?: Prisma.ClassFeeUncheckedCreateNestedManyWithoutSchoolInput
+  students?: Prisma.ChildEnrollmentUncheckedCreateNestedManyWithoutSchoolInput
+  payments?: Prisma.PaymentUncheckedCreateNestedManyWithoutSchoolInput
+}
+
+export type SchoolCreateOrConnectWithoutInvitesInput = {
+  where: Prisma.SchoolWhereUniqueInput
+  create: Prisma.XOR<Prisma.SchoolCreateWithoutInvitesInput, Prisma.SchoolUncheckedCreateWithoutInvitesInput>
+}
+
+export type SchoolUpsertWithoutInvitesInput = {
+  update: Prisma.XOR<Prisma.SchoolUpdateWithoutInvitesInput, Prisma.SchoolUncheckedUpdateWithoutInvitesInput>
+  create: Prisma.XOR<Prisma.SchoolCreateWithoutInvitesInput, Prisma.SchoolUncheckedCreateWithoutInvitesInput>
+  where?: Prisma.SchoolWhereInput
+}
+
+export type SchoolUpdateToOneWithWhereWithoutInvitesInput = {
+  where?: Prisma.SchoolWhereInput
+  data: Prisma.XOR<Prisma.SchoolUpdateWithoutInvitesInput, Prisma.SchoolUncheckedUpdateWithoutInvitesInput>
+}
+
+export type SchoolUpdateWithoutInvitesInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  phone?: Prisma.StringFieldUpdateOperationsInput | string
+  address?: Prisma.StringFieldUpdateOperationsInput | string
+  bankName?: Prisma.StringFieldUpdateOperationsInput | string
+  bankCode?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  accountName?: Prisma.StringFieldUpdateOperationsInput | string
+  accountNumber?: Prisma.StringFieldUpdateOperationsInput | string
+  paystackSubaccountCode?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackSubaccountActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  owner?: Prisma.UserUpdateOneRequiredWithoutSchoolNestedInput
+  classes?: Prisma.ClassFeeUpdateManyWithoutSchoolNestedInput
+  students?: Prisma.ChildEnrollmentUpdateManyWithoutSchoolNestedInput
+  payments?: Prisma.PaymentUpdateManyWithoutSchoolNestedInput
+}
+
+export type SchoolUncheckedUpdateWithoutInvitesInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  phone?: Prisma.StringFieldUpdateOperationsInput | string
+  address?: Prisma.StringFieldUpdateOperationsInput | string
+  ownerId?: Prisma.StringFieldUpdateOperationsInput | string
+  bankName?: Prisma.StringFieldUpdateOperationsInput | string
+  bankCode?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  accountName?: Prisma.StringFieldUpdateOperationsInput | string
+  accountNumber?: Prisma.StringFieldUpdateOperationsInput | string
+  paystackSubaccountCode?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  paystackSubaccountActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  classes?: Prisma.ClassFeeUncheckedUpdateManyWithoutSchoolNestedInput
+  students?: Prisma.ChildEnrollmentUncheckedUpdateManyWithoutSchoolNestedInput
+  payments?: Prisma.PaymentUncheckedUpdateManyWithoutSchoolNestedInput
 }
 
 
@@ -987,12 +1120,14 @@ export type SchoolCountOutputType = {
   classes: number
   students: number
   payments: number
+  invites: number
 }
 
 export type SchoolCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   classes?: boolean | SchoolCountOutputTypeCountClassesArgs
   students?: boolean | SchoolCountOutputTypeCountStudentsArgs
   payments?: boolean | SchoolCountOutputTypeCountPaymentsArgs
+  invites?: boolean | SchoolCountOutputTypeCountInvitesArgs
 }
 
 /**
@@ -1026,6 +1161,13 @@ export type SchoolCountOutputTypeCountPaymentsArgs<ExtArgs extends runtime.Types
   where?: Prisma.PaymentWhereInput
 }
 
+/**
+ * SchoolCountOutputType without action
+ */
+export type SchoolCountOutputTypeCountInvitesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.EnrollmentInviteWhereInput
+}
+
 
 export type SchoolSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
@@ -1046,6 +1188,7 @@ export type SchoolSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   classes?: boolean | Prisma.School$classesArgs<ExtArgs>
   students?: boolean | Prisma.School$studentsArgs<ExtArgs>
   payments?: boolean | Prisma.School$paymentsArgs<ExtArgs>
+  invites?: boolean | Prisma.School$invitesArgs<ExtArgs>
   _count?: boolean | Prisma.SchoolCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["school"]>
 
@@ -1108,6 +1251,7 @@ export type SchoolInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs 
   classes?: boolean | Prisma.School$classesArgs<ExtArgs>
   students?: boolean | Prisma.School$studentsArgs<ExtArgs>
   payments?: boolean | Prisma.School$paymentsArgs<ExtArgs>
+  invites?: boolean | Prisma.School$invitesArgs<ExtArgs>
   _count?: boolean | Prisma.SchoolCountOutputTypeDefaultArgs<ExtArgs>
 }
 export type SchoolIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
@@ -1124,6 +1268,7 @@ export type $SchoolPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs
     classes: Prisma.$ClassFeePayload<ExtArgs>[]
     students: Prisma.$ChildEnrollmentPayload<ExtArgs>[]
     payments: Prisma.$PaymentPayload<ExtArgs>[]
+    invites: Prisma.$EnrollmentInvitePayload<ExtArgs>[]
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
@@ -1538,6 +1683,7 @@ export interface Prisma__SchoolClient<T, Null = never, ExtArgs extends runtime.T
   classes<T extends Prisma.School$classesArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.School$classesArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$ClassFeePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   students<T extends Prisma.School$studentsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.School$studentsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$ChildEnrollmentPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   payments<T extends Prisma.School$paymentsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.School$paymentsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$PaymentPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  invites<T extends Prisma.School$invitesArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.School$invitesArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$EnrollmentInvitePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -2051,6 +2197,30 @@ export type School$paymentsArgs<ExtArgs extends runtime.Types.Extensions.Interna
   take?: number
   skip?: number
   distinct?: Prisma.PaymentScalarFieldEnum | Prisma.PaymentScalarFieldEnum[]
+}
+
+/**
+ * School.invites
+ */
+export type School$invitesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the EnrollmentInvite
+   */
+  select?: Prisma.EnrollmentInviteSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the EnrollmentInvite
+   */
+  omit?: Prisma.EnrollmentInviteOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.EnrollmentInviteInclude<ExtArgs> | null
+  where?: Prisma.EnrollmentInviteWhereInput
+  orderBy?: Prisma.EnrollmentInviteOrderByWithRelationInput | Prisma.EnrollmentInviteOrderByWithRelationInput[]
+  cursor?: Prisma.EnrollmentInviteWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.EnrollmentInviteScalarFieldEnum | Prisma.EnrollmentInviteScalarFieldEnum[]
 }
 
 /**

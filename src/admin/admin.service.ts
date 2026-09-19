@@ -19,6 +19,7 @@ import { AuditService, AuditActor } from '../audit/audit.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { SchoolOnboardingService } from '../school-onboarding/school-onboarding.service';
 import { Money } from '../common/money';
+import { MOVED_THROUGH_LOPAY } from '../common/migrated-plan';
 import { computeArrears } from '../common/arrears';
 import { errorMessage } from '../common/errors';
 import { toPaymentView, type PaymentView } from '../common/payment-dto';
@@ -996,9 +997,13 @@ export class AdminService {
       _sum: { amountPaid: true },
     });
 
+    // MIGRATED_PAYMENT is excluded for the same reason as in the school's own
+    // "School Collections" tile: it is money the school banked before Lopay was
+    // involved, so counting it here would credit the platform with collections
+    // it never carried. See MOVED_THROUGH_LOPAY.
     const collectedAmounts = await this.prisma.payment.groupBy({
       by: ['schoolId'],
-      where: { isConfirmed: true },
+      where: { isConfirmed: true, ...MOVED_THROUGH_LOPAY },
       _sum: { schoolAmount: true },
     });
 

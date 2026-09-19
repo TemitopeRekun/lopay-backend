@@ -68,6 +68,37 @@ export type Payment = Prisma.PaymentModel
  */
 export type ChildEnrollment = Prisma.ChildEnrollmentModel
 /**
+ * Model EnrollmentInvite
+ * A school's record of a student whose parent paid fees BEFORE the school
+ * adopted Lopay, held until that parent claims it.
+ * 
+ * ## Why a staging table rather than a real enrollment
+ * 
+ * `ChildEnrollment` hangs off `Child → Parent → User`, and `User.email` /
+ * `User.phoneHash` are globally unique. Pre-creating parents as real `User`
+ * rows to hold their history would burn those uniqueness slots and collide
+ * with `signup-guard.ts` the moment the parent signs up for themselves. The
+ * invite therefore carries the facts, and the enrollment graph is built once,
+ * at claim time, by `LedgerService.recordMigratedEnrollment`.
+ * 
+ * ## How a claim is authorised
+ * 
+ * By the raw invite token, and nothing else: 32 random bytes, of which only the
+ * SHA-256 digest is stored, so a database dump cannot be replayed into a claim.
+ * 
+ * A phone match was required once and was removed. It read as a second factor
+ * and was not one — Lopay verifies no phone number anywhere, so a match only
+ * proved someone had typed that number into a signup form — while it reliably
+ * refused legitimate parents, most sharply when the school mistyped a digit and
+ * the wrong number became the only one able to claim.
+ * 
+ * The link is a bearer credential and is treated as one: it is sent inside a
+ * conversation the school and family have already had, the comparison survives
+ * as `claimantPhoneMatched` for the school to see, and a claim that reached the
+ * wrong person is undone with `EnrollmentInvitesService.release`.
+ */
+export type EnrollmentInvite = Prisma.EnrollmentInviteModel
+/**
  * Model PlatformSetting
  * 
  */

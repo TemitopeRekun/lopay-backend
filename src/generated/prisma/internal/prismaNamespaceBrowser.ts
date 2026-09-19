@@ -61,6 +61,7 @@ export const ModelName = {
   Child: 'Child',
   Payment: 'Payment',
   ChildEnrollment: 'ChildEnrollment',
+  EnrollmentInvite: 'EnrollmentInvite',
   PlatformSetting: 'PlatformSetting',
   SchedulerLock: 'SchedulerLock',
   WebhookEvent: 'WebhookEvent',
@@ -240,11 +241,42 @@ export const ChildEnrollmentScalarFieldEnum = {
   installmentFrequency: 'installmentFrequency',
   termStartDate: 'termStartDate',
   termEndDate: 'termEndDate',
+  enrollmentInviteId: 'enrollmentInviteId',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
 
 export type ChildEnrollmentScalarFieldEnum = (typeof ChildEnrollmentScalarFieldEnum)[keyof typeof ChildEnrollmentScalarFieldEnum]
+
+
+export const EnrollmentInviteScalarFieldEnum = {
+  id: 'id',
+  schoolId: 'schoolId',
+  createdByUserId: 'createdByUserId',
+  studentName: 'studentName',
+  className: 'className',
+  totalSchoolFee: 'totalSchoolFee',
+  amountAlreadyPaid: 'amountAlreadyPaid',
+  phoneNumber: 'phoneNumber',
+  parentPhoneHash: 'parentPhoneHash',
+  installmentFrequency: 'installmentFrequency',
+  planStartDate: 'planStartDate',
+  termEndDate: 'termEndDate',
+  tokenHash: 'tokenHash',
+  expiresAt: 'expiresAt',
+  status: 'status',
+  disputeReason: 'disputeReason',
+  disputedAt: 'disputedAt',
+  revokedAt: 'revokedAt',
+  revokedByUserId: 'revokedByUserId',
+  claimedByUserId: 'claimedByUserId',
+  claimedAt: 'claimedAt',
+  claimantPhoneMatched: 'claimantPhoneMatched',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type EnrollmentInviteScalarFieldEnum = (typeof EnrollmentInviteScalarFieldEnum)[keyof typeof EnrollmentInviteScalarFieldEnum]
 
 
 export const PlatformSettingScalarFieldEnum = {
