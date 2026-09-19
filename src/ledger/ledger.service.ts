@@ -12,6 +12,7 @@ import {
   PaymentType,
   PaymentReceiver,
   AuditAction,
+  MigrationInviteStatus,
   NotificationType,
   UserRole,
   Prisma,
@@ -40,6 +41,10 @@ import { captureMessage } from '../common/observability/sentry';
 export class LedgerService {
   private readonly logger = new Logger(LedgerService.name);
 
+  // Migrated payments predate Lopay's split checkout, so the one-time platform
+  // fee is intentionally zero during migration rather than charged retroactively.
+  private static readonly MIGRATION_PLATFORM_FEE_KOBO = 0;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
@@ -60,6 +65,100 @@ export class LedgerService {
       return undefined;
     }
     return Math.max(0, (Date.now() - submittedAt.getTime()) / 1000);
+  }
+
+  async recordMigratedPayment(
+    tx: Prisma.TransactionClient,
+    args: {
+      invite: {
+        id: string;
+        schoolId: string;
+        className: string;
+        totalSchoolFee: number;
+        amountPaid: number;
+        installmentFrequency: any;
+        migrationDate: Date;
+        termEndDate: Date;
+      };
+      childId: string;
+      parentUserId: string;
+      actor: AuditActor;
+    },
+  ) {
+    const remainingBalance = Math.max(
+      0,
+      Money.fromKobo(args.invite.totalSchoolFee)
+        .subtract(Money.fromKobo(args.invite.amountPaid))
+        .toKobo(),
+    );
+    let enrollment;
+    try {
+      enrollment = await tx.childEnrollment.create({
+        data: {
+          childId: args.childId,
+          schoolId: args.invite.schoolId,
+          migrationInviteId: args.invite.id,
+          className: args.invite.className,
+          totalSchoolFee: args.invite.totalSchoolFee,
+          platformFee: LedgerService.MIGRATION_PLATFORM_FEE_KOBO,
+          schoolMinimumFee: LedgerService.MIGRATION_PLATFORM_FEE_KOBO,
+          firstPaymentPaid: args.invite.amountPaid,
+          remainingBalance,
+          paymentStatus: remainingBalance === 0
+            ? PaymentStatus.COMPLETED
+            : PaymentStatus.ACTIVE,
+          installmentFrequency: args.invite.installmentFrequency,
+          termStartDate: args.invite.migrationDate,
+          termEndDate: args.invite.termEndDate,
+        },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new BadRequestException('This child already has an enrollment');
+      }
+      throw error;
+    }
+
+    const payment = await tx.payment.create({
+      data: {
+        enrollmentId: enrollment.id,
+        schoolId: args.invite.schoolId,
+        amountPaid: args.invite.amountPaid,
+        platformAmount: LedgerService.MIGRATION_PLATFORM_FEE_KOBO,
+        schoolAmount: args.invite.amountPaid,
+        receiver: PaymentReceiver.SCHOOL,
+        paymentType: PaymentType.MIGRATED_PAYMENT,
+        status: PaymentTransactionStatus.SUCCESS,
+        isConfirmed: true,
+        paymentDate: args.invite.migrationDate,
+      },
+    });
+
+    await this.audit.record(
+      {
+        action: AuditAction.MIGRATION_PAYMENT_RECORDED,
+        entityType: 'Payment',
+        entityId: payment.id,
+        actor: args.actor,
+        schoolId: args.invite.schoolId,
+        before: { inviteStatus: MigrationInviteStatus.CREATED },
+        after: {
+          inviteStatus: MigrationInviteStatus.CLAIMED,
+          enrollmentId: enrollment.id,
+          remainingBalance,
+        },
+        metadata: { migrationInviteId: args.invite.id, parentUserId: args.parentUserId },
+      },
+      tx,
+    );
+
+    await this.notificationsService.create({
+      userId: args.parentUserId,
+      title: 'Migration complete',
+      message: 'Your previous school payment has been added to your Lopay plan.',
+      link: '/dashboard',
+    });
+    return enrollment;
   }
 
   /**

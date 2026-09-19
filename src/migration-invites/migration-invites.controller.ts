@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { CurrentUser, AuthUser } from '../common/decorators/user.decorator';
@@ -7,6 +7,7 @@ import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../generated/prisma/client';
 import { CreateMigrationInviteDto } from './dto/create-migration-invite.dto';
 import { MigrationDisputeDto } from './dto/migration-dispute.dto';
+import { ClaimMigrationInviteDto } from './dto/claim-migration-invite.dto';
 import { MigrationInvitesService } from './migration-invites.service';
 
 @ApiTags('migration-invites')
@@ -27,25 +28,23 @@ export class MigrationInvitesController {
   @Public()
   @Throttle({ default: { ttl: 60000, limit: 30 } })
   @ApiOperation({ summary: 'Preview a migration invite before signing in' })
-  preview(@Query('token') token: string) {
+  preview(@Headers('x-migration-token') token: string) {
     return this.service.preview(token);
   }
 
   @Post('dispute')
   @ApiBearerAuth()
-  @Roles(UserRole.PARENT)
   @Throttle({ default: { ttl: 60000, limit: 10 } })
   @ApiOperation({ summary: 'Dispute the amount recorded on a migration invite' })
-  dispute(@Body() dto: MigrationDisputeDto, @Query('token') token: string, @CurrentUser() user: AuthUser) {
-    return this.service.dispute(token, user, dto.reason);
+  dispute(@Body() dto: MigrationDisputeDto, @CurrentUser() user: AuthUser) {
+    return this.service.dispute(dto.token, user, dto.reason);
   }
 
   @Post('claim')
   @ApiBearerAuth()
-  @Roles(UserRole.PARENT)
   @Throttle({ default: { ttl: 60000, limit: 10 } })
   @ApiOperation({ summary: 'Claim and activate a confirmed migration invite' })
-  claim(@Query('token') token: string, @CurrentUser() user: AuthUser) {
-    return this.service.claim(token, user);
+  claim(@Body() dto: ClaimMigrationInviteDto, @CurrentUser() user: AuthUser) {
+    return this.service.claim(dto.token, user);
   }
 }

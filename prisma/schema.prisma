@@ -43,6 +43,7 @@ enum AuditAction {
   FIRST_PAYMENT_PAID
   ENROLLMENT_DEFAULTED
   PAYMENT_DISPUTED
+  MIGRATION_PAYMENT_RECORDED
 }
 
 enum PaymentType {
@@ -347,6 +348,7 @@ model MigrationInvite {
 
   @@index([schoolId, status])
   @@index([expiresAt])
+  @@unique([schoolId, studentName, className])
 }
 
 model PlatformSetting {

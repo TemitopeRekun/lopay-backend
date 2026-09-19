@@ -84,16 +84,16 @@ is owned by a single ledger and recorded in the audit log.
 ### Parents who paid before joining Lopay
 
 Schools use `POST /api/v1/migration-invites` to create a one-time invite with
-the student, fee, amount already paid, migration date, and plan frequency. The
+the student, active class fee, amount already paid, migration date, and plan frequency. The
 backend returns a hashed-token-backed `inviteUrl` and normalized WhatsApp
 number; the configured WhatsApp delivery layer should send the returned message
 without exposing or creating a parent password.
 
-The parent opens `GET /api/v1/migration-invites/preview?token=...`, signs in or
-creates a normal Lopay parent account, then either confirms the amount and calls
-`POST /api/v1/migration-invites/claim?token=...`, or disputes it with
-`POST /api/v1/migration-invites/dispute?token=...` and a `{ "reason": "..." }`
-body.
+The parent opens `GET /api/v1/migration-invites/preview` with the token in the
+`X-Migration-Token` header, signs in or creates a normal Lopay parent account,
+then either confirms the amount and calls `POST /api/v1/migration-invites/claim`
+with `{ "token": "..." }`, or disputes it with `POST
+/api/v1/migration-invites/dispute` and `{ "token": "...", "reason": "..." }`.
 
 Claiming is atomic and one-time. It creates the normal child/enrollment records
 and a confirmed `MIGRATED_PAYMENT` ledger row with no platform fee. The

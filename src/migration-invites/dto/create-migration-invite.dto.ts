@@ -14,12 +14,6 @@ export class CreateMigrationInviteDto {
   @IsNotEmpty()
   className: string;
 
-  @ApiProperty({ example: 100000, description: 'Total school fee in naira' })
-  @Type(() => Number)
-  @IsNumber()
-  @Min(1)
-  totalSchoolFee: number;
-
   @ApiProperty({ example: 27500, description: 'Amount already paid in naira' })
   @Type(() => Number)
   @IsNumber()

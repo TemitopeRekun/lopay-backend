@@ -1,7 +1,5 @@
 CREATE TYPE "MigrationInviteStatus" AS ENUM ('CREATED', 'DISPUTED', 'CLAIMED', 'EXPIRED');
 
-ALTER TYPE "PaymentType" ADD VALUE 'MIGRATED_PAYMENT';
-
 ALTER TABLE "ChildEnrollment" ADD COLUMN "migrationInviteId" TEXT;
 CREATE UNIQUE INDEX "ChildEnrollment_migrationInviteId_key" ON "ChildEnrollment"("migrationInviteId");
 
