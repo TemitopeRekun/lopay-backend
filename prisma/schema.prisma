@@ -43,11 +43,20 @@ enum AuditAction {
   FIRST_PAYMENT_PAID
   ENROLLMENT_DEFAULTED
   PAYMENT_DISPUTED
+  MIGRATION_PAYMENT_RECORDED
 }
 
 enum PaymentType {
   FIRST_PAYMENT
   INSTALLMENT
+  MIGRATED_PAYMENT
+}
+
+enum MigrationInviteStatus {
+  CREATED
+  DISPUTED
+  CLAIMED
+  EXPIRED
 }
 
 enum PaymentReceiver {
@@ -85,6 +94,8 @@ model User {
   parent    Parent?
   notifications Notification[]
   deviceTokens  DeviceToken[]
+  createdMigrationInvites MigrationInvite[] @relation("MigrationInviteCreatedBy")
+  claimedMigrationInvites MigrationInvite[] @relation("MigrationInviteClaimedBy")
 
   // Better Auth relations
   sessions  Session[]
@@ -183,6 +194,7 @@ model School {
   classes       ClassFee[]
   students      ChildEnrollment[]
   payments      Payment[]
+  migrationInvites MigrationInvite[]
 
   createdAt     DateTime @default(now())
 
@@ -296,12 +308,47 @@ model ChildEnrollment {
   child                 Child    @relation(fields: [childId], references: [id])
   school                School   @relation(fields: [schoolId], references: [id])
   payments              Payment[]
+  migrationInviteId     String?  @unique
+  migrationInvite       MigrationInvite? @relation(fields: [migrationInviteId], references: [id])
 
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
   @@index([schoolId])
   @@index([schoolId, paymentStatus])
+}
+
+/// A school-provided record of money paid before the parent joined Lopay.
+/// The raw claim token is never stored; only its SHA-256 digest is persisted.
+model MigrationInvite {
+  id                  String                @id @default(uuid())
+  schoolId            String
+  createdByUserId     String
+  claimedByUserId     String?
+  studentName         String
+  className           String
+  totalSchoolFee      Int
+  amountPaid          Int
+  parentPhoneHash     String
+  installmentFrequency InstallmentFrequency
+  migrationDate       DateTime
+  termEndDate         DateTime
+  tokenHash           String                @unique
+  expiresAt           DateTime
+  status              MigrationInviteStatus @default(CREATED)
+  disputeReason       String?
+  claimedAt           DateTime?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  school              School                @relation(fields: [schoolId], references: [id])
+  createdBy           User                  @relation("MigrationInviteCreatedBy", fields: [createdByUserId], references: [id])
+  claimedBy           User?                 @relation("MigrationInviteClaimedBy", fields: [claimedByUserId], references: [id])
+  enrollment          ChildEnrollment?
+
+  @@index([schoolId, status])
+  @@index([expiresAt])
+  @@unique([schoolId, studentName, className])
 }
 
 model PlatformSetting {

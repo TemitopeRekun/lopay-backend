@@ -34,7 +34,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U lopay"
+          --health-cmd "pg_isready -U lopay -d lopay_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -50,6 +50,8 @@ jobs:
           cache: 'npm'
       - name: Install
         run: npm ci
+      - name: Generate Prisma client
+        run: npm run prisma:generate
       - name: OpenAPI spec is committed & up to date
         # Hermetic: generate-swagger.ts runs in Nest preview mode with inert env
         # fallbacks, so it needs no DB/secrets. Fails the build if openapi.json
