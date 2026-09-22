@@ -427,7 +427,7 @@ describe('SchoolPaymentsService (coverage)', () => {
       });
     });
 
-    it('counts revenue only from confirmed SUCCESS rows', async () => {
+    it('counts revenue only from confirmed SUCCESS rows that moved through Lopay', async () => {
       db.childEnrollment.count.mockResolvedValue(0);
       prisma.payment.aggregate.mockResolvedValue({
         _sum: { schoolAmount: 0 },
@@ -436,10 +436,15 @@ describe('SchoolPaymentsService (coverage)', () => {
 
       await service.getDashboardStats('s1');
 
+      // MIGRATED_PAYMENT is excluded: it is a real payment against a real plan,
+      // but it is cash the school banked before Lopay was involved. Counting it
+      // would make the "School Collections" tile jump by months-old money the
+      // moment a parent claims an enrollment invite.
       expect(prisma.payment.aggregate.mock.calls[0][0].where).toEqual({
         schoolId: 's1',
         isConfirmed: true,
         status: PaymentTransactionStatus.SUCCESS,
+        paymentType: { not: PaymentType.MIGRATED_PAYMENT },
       });
     });
 

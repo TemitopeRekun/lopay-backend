@@ -304,6 +304,36 @@ export type EnumInstallmentFrequencyWithAggregatesFilter<$PrismaModel = never> =
   _max?: Prisma.NestedEnumInstallmentFrequencyFilter<$PrismaModel>
 }
 
+export type EnumEnrollmentInviteStatusFilter<$PrismaModel = never> = {
+  equals?: $Enums.EnrollmentInviteStatus | Prisma.EnumEnrollmentInviteStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.EnrollmentInviteStatus[] | Prisma.ListEnumEnrollmentInviteStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.EnrollmentInviteStatus[] | Prisma.ListEnumEnrollmentInviteStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumEnrollmentInviteStatusFilter<$PrismaModel> | $Enums.EnrollmentInviteStatus
+}
+
+export type BoolNullableFilter<$PrismaModel = never> = {
+  equals?: boolean | Prisma.BooleanFieldRefInput<$PrismaModel> | null
+  not?: Prisma.NestedBoolNullableFilter<$PrismaModel> | boolean | null
+}
+
+export type EnumEnrollmentInviteStatusWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.EnrollmentInviteStatus | Prisma.EnumEnrollmentInviteStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.EnrollmentInviteStatus[] | Prisma.ListEnumEnrollmentInviteStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.EnrollmentInviteStatus[] | Prisma.ListEnumEnrollmentInviteStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumEnrollmentInviteStatusWithAggregatesFilter<$PrismaModel> | $Enums.EnrollmentInviteStatus
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumEnrollmentInviteStatusFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumEnrollmentInviteStatusFilter<$PrismaModel>
+}
+
+export type BoolNullableWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: boolean | Prisma.BooleanFieldRefInput<$PrismaModel> | null
+  not?: Prisma.NestedBoolNullableWithAggregatesFilter<$PrismaModel> | boolean | null
+  _count?: Prisma.NestedIntNullableFilter<$PrismaModel>
+  _min?: Prisma.NestedBoolNullableFilter<$PrismaModel>
+  _max?: Prisma.NestedBoolNullableFilter<$PrismaModel>
+}
+
 export type JsonFilter<$PrismaModel = never> =
 | Prisma.PatchUndefined<
     Prisma.Either<Required<JsonFilterBase<$PrismaModel>>, Exclude<keyof Required<JsonFilterBase<$PrismaModel>>, 'path'>>,
@@ -741,6 +771,36 @@ export type NestedEnumInstallmentFrequencyWithAggregatesFilter<$PrismaModel = ne
   _count?: Prisma.NestedIntFilter<$PrismaModel>
   _min?: Prisma.NestedEnumInstallmentFrequencyFilter<$PrismaModel>
   _max?: Prisma.NestedEnumInstallmentFrequencyFilter<$PrismaModel>
+}
+
+export type NestedEnumEnrollmentInviteStatusFilter<$PrismaModel = never> = {
+  equals?: $Enums.EnrollmentInviteStatus | Prisma.EnumEnrollmentInviteStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.EnrollmentInviteStatus[] | Prisma.ListEnumEnrollmentInviteStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.EnrollmentInviteStatus[] | Prisma.ListEnumEnrollmentInviteStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumEnrollmentInviteStatusFilter<$PrismaModel> | $Enums.EnrollmentInviteStatus
+}
+
+export type NestedBoolNullableFilter<$PrismaModel = never> = {
+  equals?: boolean | Prisma.BooleanFieldRefInput<$PrismaModel> | null
+  not?: Prisma.NestedBoolNullableFilter<$PrismaModel> | boolean | null
+}
+
+export type NestedEnumEnrollmentInviteStatusWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.EnrollmentInviteStatus | Prisma.EnumEnrollmentInviteStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.EnrollmentInviteStatus[] | Prisma.ListEnumEnrollmentInviteStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.EnrollmentInviteStatus[] | Prisma.ListEnumEnrollmentInviteStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumEnrollmentInviteStatusWithAggregatesFilter<$PrismaModel> | $Enums.EnrollmentInviteStatus
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumEnrollmentInviteStatusFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumEnrollmentInviteStatusFilter<$PrismaModel>
+}
+
+export type NestedBoolNullableWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: boolean | Prisma.BooleanFieldRefInput<$PrismaModel> | null
+  not?: Prisma.NestedBoolNullableWithAggregatesFilter<$PrismaModel> | boolean | null
+  _count?: Prisma.NestedIntNullableFilter<$PrismaModel>
+  _min?: Prisma.NestedBoolNullableFilter<$PrismaModel>
+  _max?: Prisma.NestedBoolNullableFilter<$PrismaModel>
 }
 
 export type NestedJsonFilter<$PrismaModel = never> =

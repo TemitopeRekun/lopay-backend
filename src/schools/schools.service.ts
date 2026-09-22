@@ -23,6 +23,7 @@ import { AuditService, AuditActor } from '../audit/audit.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { SchoolOnboardingService } from '../school-onboarding/school-onboarding.service';
 import { Money } from '../common/money';
+import { MOVED_THROUGH_LOPAY } from '../common/migrated-plan';
 import { toPaymentView } from '../common/payment-dto';
 import { paginate } from '../common/pagination';
 import { CacheService, CacheKeys } from '../cache/cache.service';
@@ -510,12 +511,19 @@ export class SchoolPaymentsService {
         where: { paymentStatus: PaymentStatus.ACTIVE },
       }),
 
-      // 3. Confirmed Payments (School Revenue)
+      // 3. Confirmed Payments (School Revenue) — the "School Collections" tile.
+      //
+      // MIGRATED_PAYMENT is excluded. It is a real payment against a real plan,
+      // but it is money the school banked itself before Lopay was involved; it
+      // never moved through a Paystack split and carries no platform fee. A
+      // claimed enrollment invite would otherwise add months-old cash to this
+      // period's collections. See MOVED_THROUGH_LOPAY.
       this.prisma.payment.aggregate({
         where: {
           schoolId,
           isConfirmed: true,
           status: PaymentTransactionStatus.SUCCESS,
+          ...MOVED_THROUGH_LOPAY,
         },
         _sum: { schoolAmount: true },
       }),

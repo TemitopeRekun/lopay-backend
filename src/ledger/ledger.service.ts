@@ -14,11 +14,17 @@ import {
   AuditAction,
   NotificationType,
   UserRole,
+  InstallmentFrequency,
   Prisma,
 } from '../generated/prisma/client';
 import { EventsGateway } from '../events/events.gateway';
 import { AuditService, AuditActor } from '../audit/audit.service';
 import { Money } from '../common/money';
+import {
+  deriveMigratedPlan,
+  migratedPaymentDate,
+  statusAfterMigratedAmendment,
+} from '../common/migrated-plan';
 import { errorMessage } from '../common/errors';
 import { MetricsService } from '../common/observability/metrics.service';
 import { captureMessage } from '../common/observability/sentry';
@@ -77,6 +83,693 @@ export class LedgerService {
    * that flips the payment), so this decrement can never be applied twice. The
    * clamp keeps a slight overpayment from driving the balance negative.
    */
+  // ======================= migrated (pre-Lopay) money =======================
+
+  /**
+   * Record fees a parent paid the school BEFORE it adopted Lopay, as the opening
+   * position of a new plan.
+   *
+   * ## Why this one method takes a transaction instead of owning one
+   *
+   * Every other method here opens its own `$transaction`, because every other
+   * money transition is the whole of what its caller is doing. A claim is not:
+   * `EnrollmentInvitesService.claim` must flip the invite to CLAIMED under a
+   * conditional write, materialise the `Parent` and `Child` rows, and create this
+   * enrollment — all or nothing. If the ledger opened its own transaction the
+   * invite could end up CLAIMED with no plan behind it, which is the one outcome
+   * with no route back: the token is single-use and the slot is taken.
+   *
+   * So the caller owns the transaction and the ledger owns what goes in it. The
+   * money writes, the balance arithmetic and the audit row still live here and
+   * nowhere else, which is the invariant Milestone 3 actually protects. What the
+   * caller must NOT do is emit — see `announceMigratedEnrollment`.
+   *
+   * ## What it does not do
+   *
+   * It does not touch Paystack, because no money moves: the school already holds
+   * it. The payment is written `receiver: SCHOOL`, already `SUCCESS` and already
+   * `isConfirmed`, with `platformAmount` zero (see
+   * `MIGRATED_ENROLLMENT_PLATFORM_FEE_RATE`). There is no school confirmation
+   * step to wait for, because the school is the party asserting it.
+   */
+  async recordMigratedEnrollment(
+    tx: Prisma.TransactionClient,
+    args: {
+      invite: {
+        id: string;
+        schoolId: string;
+        studentName: string;
+        className: string;
+        totalSchoolFee: number;
+        amountAlreadyPaid: number;
+        installmentFrequency: InstallmentFrequency;
+        planStartDate: Date;
+        termEndDate: Date;
+      };
+      childId: string;
+      /** Recorded on the audit row; the parent is told post-commit, not here. */
+      parentUserId: string;
+      actor: AuditActor;
+    },
+  ) {
+    const { invite } = args;
+    const figures = deriveMigratedPlan(invite);
+
+    let enrollment;
+    try {
+      enrollment = await tx.childEnrollment.create({
+        data: {
+          childId: args.childId,
+          schoolId: invite.schoolId,
+          enrollmentInviteId: invite.id,
+          className: invite.className,
+          totalSchoolFee: invite.totalSchoolFee,
+          platformFee: figures.platformFee,
+          // No deposit gate applies. `schoolMinimumFee` exists to hold the 25%
+          // a NEW parent must pay up front before a plan opens; this plan is
+          // opening on money the school has already banked, so there is no
+          // threshold left to meet. Zero states that, rather than inventing a
+          // retrospective minimum the parent could appear to have missed.
+          schoolMinimumFee: 0,
+          firstPaymentPaid: invite.amountAlreadyPaid,
+          remainingBalance: figures.remainingBalance,
+          paymentStatus: figures.paymentStatus,
+          installmentFrequency: invite.installmentFrequency,
+          // The handover date, NOT the historical term start — see the field
+          // comment on EnrollmentInvite.planStartDate.
+          termStartDate: invite.planStartDate,
+          termEndDate: invite.termEndDate,
+        },
+      });
+    } catch (error) {
+      throw LedgerService.asMigratedEnrollmentConflict(error);
+    }
+
+    // Written even when `amountAlreadyPaid` is zero, which the CHECK constraint
+    // `EnrollmentInvite_paid_within_fee` allows on purpose: a school may want to
+    // move a family onto a Lopay plan before they have paid anything. A ₦0 row
+    // looks like noise, but it is the anchor `amendMigratedPayment` resolves the
+    // plan's migrated figure through — without it, the first correction of a
+    // zero-paid plan would be refused as "did not start from an enrollment
+    // invite". It is also the honest ledger entry: the opening position was
+    // zero. Do not optimise it away.
+    const payment = await tx.payment.create({
+      data: {
+        enrollmentId: enrollment.id,
+        schoolId: invite.schoolId,
+        amountPaid: invite.amountAlreadyPaid,
+        platformAmount: figures.platformFee,
+        schoolAmount: invite.amountAlreadyPaid,
+        receiver: PaymentReceiver.SCHOOL,
+        paymentType: PaymentType.MIGRATED_PAYMENT,
+        status: PaymentTransactionStatus.SUCCESS,
+        isConfirmed: true,
+        // The handover, or now if the handover is still ahead. Dating it to the
+        // handover keeps the row at the head of the plan's own history, which is
+        // where the opening entry belongs; clamping stops a start date set for
+        // next term from writing a confirmed payment into the future, where it
+        // would outrank every genuinely recent transaction on the admin
+        // dashboard. See `migratedPaymentDate`.
+        paymentDate: migratedPaymentDate(invite.planStartDate, new Date()),
+      },
+    });
+
+    await this.audit.record(
+      {
+        action: AuditAction.ENROLLMENT_INVITE_CLAIMED,
+        entityType: 'Payment',
+        entityId: payment.id,
+        actor: args.actor,
+        schoolId: invite.schoolId,
+        before: null,
+        after: {
+          enrollmentId: enrollment.id,
+          totalSchoolFee: invite.totalSchoolFee,
+          amountAlreadyPaid: invite.amountAlreadyPaid,
+          remainingBalance: figures.remainingBalance,
+          enrollmentStatus: figures.paymentStatus,
+        },
+        metadata: {
+          enrollmentInviteId: invite.id,
+          childId: args.childId,
+          parentUserId: args.parentUserId,
+          studentName: invite.studentName,
+          className: invite.className,
+          // The school asserted this figure and it is not independently
+          // verifiable, so record who is accountable for it alongside the number.
+          assertedBySchool: true,
+        },
+      },
+      tx,
+    );
+
+    // NOTE: no notification here. Telling the parent is a post-commit effect
+    // and lives in `announceMigratedEnrollment` with the rest of them.
+    return { enrollment, payment, figures };
+  }
+
+  /**
+   * Post-commit side effects for a claim.
+   *
+   * Split out because `recordMigratedEnrollment` runs inside the CALLER's
+   * transaction, and nothing observable outside the database may be emitted for
+   * a write that might still roll back. Each of these fails differently and all
+   * three fail permanently:
+   *
+   *   - a realtime nudge makes every open dashboard refetch state that never
+   *     existed;
+   *   - a Prometheus counter cannot be decremented, so a rolled-back claim
+   *     overstates migrations for the lifetime of the process;
+   *   - a notification is the worst of the three, because it is not just an
+   *     in-app row. `NotificationsService.create` writes through the
+   *     NON-transactional client (so it survives the rollback that discards the
+   *     enrollment), emits over the socket, and awaits an FCM multicast. The
+   *     parent's phone buzzes "Previous payments added" for a plan that does not
+   *     exist, and there is no way to take it back.
+   *
+   * The FCM call is also why this must not be inside the transaction on
+   * throughput grounds alone: Prisma's interactive transactions default to a 5s
+   * budget, and the claim already spans a guarded update, a parent upsert, a
+   * child upsert and three writes. Holding a connection open across a network
+   * round-trip to Google is how that budget gets spent.
+   *
+   * Awaited by the caller, but never allowed to fail the claim: by the time this
+   * runs the plan is real, and re-raising would tell the parent their claim
+   * failed and invite them to retry a single-use token.
+   */
+  async announceMigratedEnrollment(args: {
+    parentUserId: string;
+    schoolId: string;
+    schoolName: string;
+    studentName: string;
+    className: string;
+    amountAlreadyPaid: number;
+    remainingBalance: number;
+  }): Promise<void> {
+    const targets = {
+      parentUserId: args.parentUserId,
+      schoolId: args.schoolId,
+      notifyAdmins: true,
+    };
+    this.events.emitEnrollmentsChanged(targets);
+    this.events.emitPaymentsChanged(targets);
+    this.metrics.recordPaymentOutcome('confirmed', {
+      type: PaymentType.MIGRATED_PAYMENT,
+      receiver: PaymentReceiver.SCHOOL,
+    });
+
+    try {
+      await this.notificationsService.create({
+        userId: args.parentUserId,
+        title: 'Previous payments added',
+        message: LedgerService.migratedClaimMessage(args),
+        type: NotificationType.PAYMENT,
+        link: '/history',
+      });
+    } catch (error) {
+      this.logger.error(
+        `Claim committed but could not notify parent ${args.parentUserId}: ${errorMessage(error)}`,
+      );
+    }
+  }
+
+  /**
+   * What the parent is told when their claim lands.
+   *
+   * Three cases, because a migrated enrollment can legitimately open at zero
+   * paid (the school is moving a family onto a plan before they have paid
+   * anything) and "has recorded ₦0 already paid" reads as a bug rather than a
+   * fact. See the note on `EnrollmentInvite_paid_within_fee` for why zero is
+   * allowed.
+   */
+  private static migratedClaimMessage(args: {
+    schoolName: string;
+    studentName: string;
+    className: string;
+    amountAlreadyPaid: number;
+    remainingBalance: number;
+  }): string {
+    const student = `${args.studentName} (${args.className})`;
+    const remaining = Money.fromKobo(args.remainingBalance).formatNaira();
+
+    if (args.amountAlreadyPaid === 0) {
+      return (
+        `${args.schoolName} has set up a Lopay plan for ${student}. ` +
+        `${remaining} is due, spread over your new plan.`
+      );
+    }
+
+    const paid = Money.fromKobo(args.amountAlreadyPaid).formatNaira();
+    return (
+      `${args.schoolName} has recorded ${paid} already paid for ${student}. ` +
+      (args.remainingBalance === 0
+        ? 'This term’s fees are fully paid.'
+        : `${remaining} remains, spread over your new plan.`)
+    );
+  }
+
+  /**
+   * Correct the amount on an already-claimed migrated payment.
+   *
+   * ## Why a correction and not a reversal
+   *
+   * `reversePayment` deliberately handles installments only, and extending it to
+   * cover this would be the wrong shape. An installment reversal undoes a
+   * discrete event — the school withdrawing its confirmation of one transfer. A
+   * migrated figure is not an event; it is an *assertion about the past*, typed
+   * by hand from a paper ledger, and the realistic failure is that the number is
+   * wrong rather than that the whole migration should not have happened. Undoing
+   * it wholesale would leave an ACTIVE plan whose opening balance says the parent
+   * paid nothing, which is a worse lie than the original typo.
+   *
+   * So this restates the figure and re-derives everything from it. The plan, the
+   * child and the invite all survive; only the money moves.
+   *
+   * ## The arithmetic, and why one number drives everything
+   *
+   * `remainingBalance` at rest is `totalSchoolFee − migrated − confirmed
+   * installments`, so the whole correction reduces to recomputing that from the
+   * new figure. Both the balance and the status are written from that single
+   * value, and that is the point: an earlier draft set the balance by atomic
+   * `increment: old − new` while deriving the status from the recomputed total,
+   * which agree only while the invariant holds exactly. It does not always —
+   * `confirmPayment` clamps an overpaid balance to zero — so the row could
+   * commit COMPLETED with a non-zero balance, or ACTIVE at zero.
+   *
+   * The increment existed to survive a concurrent installment confirmation. The
+   * `SELECT … FOR UPDATE` below does that strictly better: PostgreSQL blocks any
+   * concurrent `UPDATE` of the same row until this transaction ends, so the
+   * installment sum cannot move between the read and the write, and an absolute
+   * write is both safe and self-consistent. Two concurrent corrections are
+   * handled by the guarded `updateMany` on `amountPaid`, which is what makes the
+   * loser fail loudly instead of applying a delta to a figure it never saw.
+   *
+   * There is no deadlock with `confirmPayment`, which takes the payment row
+   * first and the enrollment second: it filters on `paymentType: INSTALLMENT`,
+   * so it can never contend for the MIGRATED_PAYMENT row this one locks.
+   *
+   * The guard that matters is the floor: a correction that leaves the parent
+   * owing less than nothing means they have overpaid, and this method will not
+   * quietly produce that state — it refuses and names the number, because the
+   * resolution is a refund conversation, not a database write.
+   */
+  async amendMigratedPayment(
+    enrollmentId: string,
+    newAmountKobo: number,
+    schoolId: string,
+    actor: AuditActor,
+    reason?: string,
+  ) {
+    if (!Number.isInteger(newAmountKobo) || newAmountKobo < 0) {
+      throw new BadRequestException('Corrected amount must be zero or more');
+    }
+
+    const enrollment = await this.prisma
+      .withTenant(schoolId)
+      .childEnrollment.findFirst({
+        where: { id: enrollmentId },
+        include: {
+          school: true,
+          child: { include: { parent: true } },
+          payments: {
+            where: {
+              paymentType: PaymentType.MIGRATED_PAYMENT,
+              status: PaymentTransactionStatus.SUCCESS,
+            },
+          },
+        },
+      });
+
+    if (!enrollment) {
+      throw new NotFoundException('Enrollment not found for this school');
+    }
+    const migrated = enrollment.payments[0];
+    if (!migrated) {
+      throw new BadRequestException(
+        'This plan did not start from an enrollment invite, so there is no migrated amount to correct',
+      );
+    }
+    if (newAmountKobo > enrollment.totalSchoolFee) {
+      throw new BadRequestException(
+        `Corrected amount cannot exceed the school fee of ${Money.fromKobo(enrollment.totalSchoolFee).formatNaira()}`,
+      );
+    }
+
+    const previousAmount = migrated.amountPaid;
+    if (previousAmount === newAmountKobo) {
+      throw new BadRequestException(
+        'The corrected amount is the same as the recorded one',
+      );
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Installments confirmed so far. Read inside the transaction, and the row
+      // is locked below, so this cannot drift between the check and the write.
+      // `paymentStatus` is locked alongside the money, not read from the
+      // pre-transaction `enrollment` above, because the correction's own status
+      // decision depends on it: a plan that reached DEFAULTED between that read
+      // and this one must stay DEFAULTED. See `statusAfterMigratedAmendment`.
+      const locked = await tx.$queryRaw<
+        {
+          remainingBalance: number;
+          totalSchoolFee: number;
+          paymentStatus: PaymentStatus;
+        }[]
+      >`SELECT "remainingBalance", "totalSchoolFee", "paymentStatus" FROM "ChildEnrollment"
+        WHERE "id" = ${enrollmentId} FOR UPDATE`;
+      if (locked.length === 0) {
+        throw new NotFoundException('Enrollment not found');
+      }
+
+      const installments = await tx.payment.aggregate({
+        where: {
+          enrollmentId,
+          paymentType: PaymentType.INSTALLMENT,
+          isConfirmed: true,
+          status: PaymentTransactionStatus.SUCCESS,
+        },
+        _sum: { amountPaid: true },
+      });
+      const installmentsPaid = installments._sum.amountPaid ?? 0;
+      const nextBalance =
+        locked[0].totalSchoolFee - newAmountKobo - installmentsPaid;
+
+      if (nextBalance < 0) {
+        throw new BadRequestException(
+          `Correcting to ${Money.fromKobo(newAmountKobo).formatNaira()} would leave this plan overpaid by ` +
+            `${Money.fromKobo(-nextBalance).formatNaira()}, because ${Money.fromKobo(installmentsPaid).formatNaira()} ` +
+            'has since been paid in instalments. Reverse those payments first, or agree a refund with the parent.',
+        );
+      }
+
+      // Guarded on the amount we read, so two concurrent corrections cannot both
+      // apply their own delta to the balance.
+      const restated = await tx.payment.updateMany({
+        where: {
+          id: migrated.id,
+          amountPaid: previousAmount,
+          status: PaymentTransactionStatus.SUCCESS,
+          paymentType: PaymentType.MIGRATED_PAYMENT,
+        },
+        data: { amountPaid: newAmountKobo, schoolAmount: newAmountKobo },
+      });
+      if (restated.count === 0) {
+        throw new BadRequestException(
+          'This migrated amount was changed by someone else — reload and try again',
+        );
+      }
+
+      // The balance is written from `nextBalance`, the one value the guard above
+      // proved is >= 0. Safe as an absolute write because the row is locked FOR
+      // UPDATE.
+      //
+      // The STATUS is not re-derived from that balance alone. A correction is a
+      // restatement of a past figure, not a claim about where the family stands
+      // today, and re-deriving would silently flip a DEFAULTED plan back to
+      // ACTIVE — see `statusAfterMigratedAmendment`, which owns the rule and
+      // shares it with `reversePayment`'s reopen logic.
+      const updated = await tx.childEnrollment.update({
+        where: { id: enrollmentId },
+        data: {
+          firstPaymentPaid: newAmountKobo,
+          remainingBalance: nextBalance,
+          paymentStatus: statusAfterMigratedAmendment(
+            locked[0].paymentStatus,
+            nextBalance,
+          ),
+        },
+      });
+
+      // Restate the invite too, or the school's own list keeps showing the
+      // figure they just corrected.
+      //
+      // The invite is what `EnrollmentInvitesScreen` renders and what
+      // `AmendInviteForm` pre-fills and labels "Currently recorded"; it is the
+      // only place an owner reviews these numbers. Leaving it at the original
+      // value meant the correction appeared not to have applied, and a second
+      // attempt at the same figure was then rejected as "the same as the
+      // recorded one" — comparing against a number that was no longer true.
+      // `updateMany` rather than `update` because a plan reached by any other
+      // route has no invite behind it. The before/after history lives in the
+      // audit row below, so nothing is lost by moving the column forward.
+      if (enrollment.enrollmentInviteId) {
+        await tx.enrollmentInvite.updateMany({
+          where: { id: enrollment.enrollmentInviteId },
+          data: { amountAlreadyPaid: newAmountKobo },
+        });
+      }
+
+      await this.audit.record(
+        {
+          action: AuditAction.MIGRATED_PAYMENT_AMENDED,
+          entityType: 'Payment',
+          entityId: migrated.id,
+          actor,
+          schoolId,
+          reason,
+          before: {
+            amountPaid: previousAmount,
+            remainingBalance: locked[0].remainingBalance,
+            // From the locked row, like the balance beside it. The
+            // pre-transaction read is older and can disagree — an audit trail
+            // whose `before` never held is worse than no audit trail.
+            enrollmentStatus: locked[0].paymentStatus,
+          },
+          after: {
+            amountPaid: newAmountKobo,
+            remainingBalance: updated.remainingBalance,
+            enrollmentStatus: updated.paymentStatus,
+          },
+          metadata: { enrollmentId, installmentsPaid },
+        },
+        tx,
+      );
+
+      return updated;
+    });
+
+    // Committed. Everything below is a post-commit effect, for the same reasons
+    // set out on `announceMigratedEnrollment`: a notification is a row written
+    // outside this transaction plus a socket emit plus an awaited FCM call, and
+    // none of the three can be taken back if the transaction rolls back.
+    const parentUserId = enrollment.child.parent.userId;
+    this.events.emitEnrollmentsChanged({
+      parentUserId,
+      schoolId,
+      notifyAdmins: true,
+    });
+    this.events.emitPaymentsChanged({
+      parentUserId,
+      schoolId,
+      notifyAdmins: true,
+    });
+
+    try {
+      await this.notificationsService.create({
+        userId: parentUserId,
+        title: 'Previous payment corrected',
+        message:
+          `${enrollment.school.name} has corrected the amount recorded as already paid for ` +
+          `${enrollment.child.fullName} (${enrollment.className}) from ` +
+          `${Money.fromKobo(previousAmount).formatNaira()} to ${Money.fromKobo(newAmountKobo).formatNaira()}. ` +
+          `You now owe ${Money.fromKobo(result.remainingBalance).formatNaira()}.` +
+          (reason ? ` Reason: ${reason}` : '') +
+          // An increase is good news; a decrease costs the parent money and is
+          // the one they may want to contest.
+          (newAmountKobo > previousAmount
+            ? ''
+            : ' If you believe this is wrong, contact the school before your next payment.'),
+        // Both directions change what they owe, so both are worth an ALERT
+        // rather than sitting in the payments tab unread.
+        type: NotificationType.ALERT,
+        link: '/history',
+      });
+    } catch (error) {
+      this.logger.error(
+        `Correction committed but could not notify parent ${parentUserId}: ${errorMessage(error)}`,
+      );
+    }
+
+    return {
+      enrollmentId: result.id,
+      previousAmount: Money.fromKobo(previousAmount).toNaira(),
+      amountAlreadyPaid: Money.fromKobo(newAmountKobo).toNaira(),
+      remainingBalance: Money.fromKobo(result.remainingBalance).toNaira(),
+      paymentStatus: result.paymentStatus,
+    };
+  }
+
+  /**
+   * Translate a unique-constraint violation from the claim write into the reason
+   * a human can act on. Both collisions are reachable by ordinary user behaviour
+   * — not just by a race — so neither may surface as a 500.
+   */
+  private static asMigratedEnrollmentConflict(error: unknown): unknown {
+    if (
+      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+      error.code !== 'P2002'
+    ) {
+      return error;
+    }
+    // Prisma types `meta` loosely; it is an array of column names for P2002 on
+    // most connectors and a plain string on some. Anything else is not something
+    // we can read a column out of, so it falls through to the default message
+    // rather than being stringified into '[object Object]'.
+    const rawTarget: unknown = error.meta?.target;
+    const target = Array.isArray(rawTarget)
+      ? rawTarget
+          .filter((part): part is string => typeof part === 'string')
+          .join(',')
+      : typeof rawTarget === 'string'
+        ? rawTarget
+        : '';
+
+    if (target.includes('enrollmentInviteId')) {
+      return new BadRequestException('This invite has already been claimed');
+    }
+    // `ChildEnrollment.childId` is unique: the parent already has a plan for this
+    // child. Common during migration — the family signed up and enrolled
+    // themselves before the school's invite reached them.
+    return new BadRequestException(
+      'This child already has a payment plan. Ask the school to cancel this invite and correct the existing plan instead.',
+    );
+  }
+
+  /**
+   * Undo a migrated enrollment that was claimed by the wrong person.
+   *
+   * ## Why this deletes, where every other correction restates
+   *
+   * `amendMigratedPayment` exists because the usual mistake is a wrong NUMBER on
+   * the right plan, and wholesale reversal would be the wrong shape for it — it
+   * would leave an ACTIVE plan claiming the parent paid nothing. This is the
+   * other mistake, and it is categorically different: the plan itself should
+   * never have existed, because the person it hangs off is not this child's
+   * parent. There is no figure to restate. Every row the claim created is a
+   * record of something that did not happen.
+   *
+   * Claiming requires only the link, deliberately (see
+   * `EnrollmentInvitesService.claimantPhoneMatches`), so a link that reached the
+   * wrong person is a foreseeable outcome rather than an exotic one — and
+   * before this existed it was also a permanent one. The invite was spent, the
+   * student's slot was held by a CLAIMED row, and the school had no way to issue
+   * a corrected invite or to get the fabricated family off their roster.
+   *
+   * ## What is removed, and why nothing is left behind
+   *
+   * The payment, the enrollment and the `Child` row, in that order — foreign
+   * keys demand it, and each is meaningless without the one before. The `Child`
+   * goes too because the claim invented it: it was created under the CLAIMANT's
+   * `Parent` row from a name the school typed, so leaving it would attach a
+   * stranger's account to a real student's name for good. The `Parent` row stays
+   * — it belongs to the user, not to this claim, and may carry their own
+   * children.
+   *
+   * Soft-voiding instead was considered and rejected. `ChildEnrollment` has no
+   * deleted state, and adding one means every roster query, student count and
+   * revenue sum in the codebase has to learn to exclude it; a single one that
+   * forgets leaves a ghost family on a school's dashboard, which is a worse
+   * version of the problem being fixed. The audit row below carries the whole
+   * before-state, so nothing is actually lost — it moves from a table that is
+   * read as "the school's students" to one that is read as "what happened".
+   *
+   * ## The one refusal
+   *
+   * Confirmed instalments. If the claimant has paid real money against this
+   * plan, deleting it destroys the record of a transfer that genuinely occurred
+   * and leaves them with no account of where their money went. That is a refund
+   * conversation between three people, and this method will not pretend it is a
+   * database operation.
+   *
+   * Takes the caller's transaction, like `recordMigratedEnrollment`, because the
+   * invite must flip in the same breath — a released plan with a still-CLAIMED
+   * invite is an unusable state in the opposite direction. Emits nothing; the
+   * caller announces after commit.
+   */
+  async releaseMigratedEnrollment(
+    tx: Prisma.TransactionClient,
+    args: {
+      enrollmentId: string;
+      childId: string;
+      inviteId: string;
+      schoolId: string;
+      actor: AuditActor;
+      reason?: string;
+    },
+  ): Promise<{ removedPayments: number }> {
+    const enrollment = await tx.childEnrollment.findUnique({
+      where: { id: args.enrollmentId },
+      include: { payments: true },
+    });
+    if (!enrollment) {
+      throw new NotFoundException('This plan no longer exists');
+    }
+
+    const settled = enrollment.payments.filter(
+      (payment) =>
+        payment.paymentType === PaymentType.INSTALLMENT &&
+        payment.isConfirmed &&
+        payment.status === PaymentTransactionStatus.SUCCESS,
+    );
+    if (settled.length > 0) {
+      const total = settled.reduce(
+        (sum, payment) => sum + payment.amountPaid,
+        0,
+      );
+      throw new BadRequestException(
+        `This plan cannot be removed: ${Money.fromKobo(total).formatNaira()} has been paid in ` +
+          `${settled.length} instalment${settled.length === 1 ? '' : 's'} against it. ` +
+          'Agree a refund with whoever paid before removing the plan.',
+      );
+    }
+
+    // Snapshotted BEFORE the deletes, because after them there is nowhere else
+    // this ever existed. This audit row is the only surviving record.
+    const before = {
+      enrollmentId: enrollment.id,
+      childId: args.childId,
+      className: enrollment.className,
+      totalSchoolFee: enrollment.totalSchoolFee,
+      firstPaymentPaid: enrollment.firstPaymentPaid,
+      remainingBalance: enrollment.remainingBalance,
+      paymentStatus: enrollment.paymentStatus,
+      termStartDate: enrollment.termStartDate,
+      termEndDate: enrollment.termEndDate,
+      payments: enrollment.payments.map((payment) => ({
+        id: payment.id,
+        amountPaid: payment.amountPaid,
+        paymentType: payment.paymentType,
+        status: payment.status,
+        isConfirmed: payment.isConfirmed,
+        paymentDate: payment.paymentDate,
+      })),
+    };
+
+    // Children first, parent last — the foreign keys allow no other order.
+    const { count: removedPayments } = await tx.payment.deleteMany({
+      where: { enrollmentId: args.enrollmentId },
+    });
+    await tx.childEnrollment.delete({ where: { id: args.enrollmentId } });
+    await tx.child.delete({ where: { id: args.childId } });
+
+    await this.audit.record(
+      {
+        action: AuditAction.ENROLLMENT_INVITE_RELEASED,
+        entityType: 'EnrollmentInvite',
+        entityId: args.inviteId,
+        actor: args.actor,
+        schoolId: args.schoolId,
+        reason: args.reason,
+        before,
+        after: null,
+        metadata: { removedPayments },
+      },
+      tx,
+    );
+
+    return { removedPayments };
+  }
+
   private async creditFirstPaymentToBalance(
     tx: Prisma.TransactionClient,
     enrollmentId: string,

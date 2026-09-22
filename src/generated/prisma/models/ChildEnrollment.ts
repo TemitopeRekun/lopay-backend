@@ -56,6 +56,7 @@ export type ChildEnrollmentMinAggregateOutputType = {
   installmentFrequency: $Enums.InstallmentFrequency | null
   termStartDate: Date | null
   termEndDate: Date | null
+  enrollmentInviteId: string | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -74,6 +75,7 @@ export type ChildEnrollmentMaxAggregateOutputType = {
   installmentFrequency: $Enums.InstallmentFrequency | null
   termStartDate: Date | null
   termEndDate: Date | null
+  enrollmentInviteId: string | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -92,6 +94,7 @@ export type ChildEnrollmentCountAggregateOutputType = {
   installmentFrequency: number
   termStartDate: number
   termEndDate: number
+  enrollmentInviteId: number
   createdAt: number
   updatedAt: number
   _all: number
@@ -128,6 +131,7 @@ export type ChildEnrollmentMinAggregateInputType = {
   installmentFrequency?: true
   termStartDate?: true
   termEndDate?: true
+  enrollmentInviteId?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -146,6 +150,7 @@ export type ChildEnrollmentMaxAggregateInputType = {
   installmentFrequency?: true
   termStartDate?: true
   termEndDate?: true
+  enrollmentInviteId?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -164,6 +169,7 @@ export type ChildEnrollmentCountAggregateInputType = {
   installmentFrequency?: true
   termStartDate?: true
   termEndDate?: true
+  enrollmentInviteId?: true
   createdAt?: true
   updatedAt?: true
   _all?: true
@@ -269,6 +275,7 @@ export type ChildEnrollmentGroupByOutputType = {
   installmentFrequency: $Enums.InstallmentFrequency
   termStartDate: Date
   termEndDate: Date
+  enrollmentInviteId: string | null
   createdAt: Date
   updatedAt: Date
   _count: ChildEnrollmentCountAggregateOutputType | null
@@ -310,8 +317,10 @@ export type ChildEnrollmentWhereInput = {
   installmentFrequency?: Prisma.EnumInstallmentFrequencyFilter<"ChildEnrollment"> | $Enums.InstallmentFrequency
   termStartDate?: Prisma.DateTimeFilter<"ChildEnrollment"> | Date | string
   termEndDate?: Prisma.DateTimeFilter<"ChildEnrollment"> | Date | string
+  enrollmentInviteId?: Prisma.StringNullableFilter<"ChildEnrollment"> | string | null
   createdAt?: Prisma.DateTimeFilter<"ChildEnrollment"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"ChildEnrollment"> | Date | string
+  enrollmentInvite?: Prisma.XOR<Prisma.EnrollmentInviteNullableScalarRelationFilter, Prisma.EnrollmentInviteWhereInput> | null
   child?: Prisma.XOR<Prisma.ChildScalarRelationFilter, Prisma.ChildWhereInput>
   school?: Prisma.XOR<Prisma.SchoolScalarRelationFilter, Prisma.SchoolWhereInput>
   payments?: Prisma.PaymentListRelationFilter
@@ -331,8 +340,10 @@ export type ChildEnrollmentOrderByWithRelationInput = {
   installmentFrequency?: Prisma.SortOrder
   termStartDate?: Prisma.SortOrder
   termEndDate?: Prisma.SortOrder
+  enrollmentInviteId?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
+  enrollmentInvite?: Prisma.EnrollmentInviteOrderByWithRelationInput
   child?: Prisma.ChildOrderByWithRelationInput
   school?: Prisma.SchoolOrderByWithRelationInput
   payments?: Prisma.PaymentOrderByRelationAggregateInput
@@ -341,6 +352,7 @@ export type ChildEnrollmentOrderByWithRelationInput = {
 export type ChildEnrollmentWhereUniqueInput = Prisma.AtLeast<{
   id?: string
   childId?: string
+  enrollmentInviteId?: string
   AND?: Prisma.ChildEnrollmentWhereInput | Prisma.ChildEnrollmentWhereInput[]
   OR?: Prisma.ChildEnrollmentWhereInput[]
   NOT?: Prisma.ChildEnrollmentWhereInput | Prisma.ChildEnrollmentWhereInput[]
@@ -357,10 +369,11 @@ export type ChildEnrollmentWhereUniqueInput = Prisma.AtLeast<{
   termEndDate?: Prisma.DateTimeFilter<"ChildEnrollment"> | Date | string
   createdAt?: Prisma.DateTimeFilter<"ChildEnrollment"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"ChildEnrollment"> | Date | string
+  enrollmentInvite?: Prisma.XOR<Prisma.EnrollmentInviteNullableScalarRelationFilter, Prisma.EnrollmentInviteWhereInput> | null
   child?: Prisma.XOR<Prisma.ChildScalarRelationFilter, Prisma.ChildWhereInput>
   school?: Prisma.XOR<Prisma.SchoolScalarRelationFilter, Prisma.SchoolWhereInput>
   payments?: Prisma.PaymentListRelationFilter
-}, "id" | "childId">
+}, "id" | "childId" | "enrollmentInviteId">
 
 export type ChildEnrollmentOrderByWithAggregationInput = {
   id?: Prisma.SortOrder
@@ -376,6 +389,7 @@ export type ChildEnrollmentOrderByWithAggregationInput = {
   installmentFrequency?: Prisma.SortOrder
   termStartDate?: Prisma.SortOrder
   termEndDate?: Prisma.SortOrder
+  enrollmentInviteId?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   _count?: Prisma.ChildEnrollmentCountOrderByAggregateInput
@@ -402,6 +416,7 @@ export type ChildEnrollmentScalarWhereWithAggregatesInput = {
   installmentFrequency?: Prisma.EnumInstallmentFrequencyWithAggregatesFilter<"ChildEnrollment"> | $Enums.InstallmentFrequency
   termStartDate?: Prisma.DateTimeWithAggregatesFilter<"ChildEnrollment"> | Date | string
   termEndDate?: Prisma.DateTimeWithAggregatesFilter<"ChildEnrollment"> | Date | string
+  enrollmentInviteId?: Prisma.StringNullableWithAggregatesFilter<"ChildEnrollment"> | string | null
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"ChildEnrollment"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"ChildEnrollment"> | Date | string
 }
@@ -420,6 +435,7 @@ export type ChildEnrollmentCreateInput = {
   termEndDate: Date | string
   createdAt?: Date | string
   updatedAt?: Date | string
+  enrollmentInvite?: Prisma.EnrollmentInviteCreateNestedOneWithoutEnrollmentInput
   child: Prisma.ChildCreateNestedOneWithoutEnrollmentInput
   school: Prisma.SchoolCreateNestedOneWithoutStudentsInput
   payments?: Prisma.PaymentCreateNestedManyWithoutEnrollmentInput
@@ -439,6 +455,7 @@ export type ChildEnrollmentUncheckedCreateInput = {
   installmentFrequency: $Enums.InstallmentFrequency
   termStartDate: Date | string
   termEndDate: Date | string
+  enrollmentInviteId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   payments?: Prisma.PaymentUncheckedCreateNestedManyWithoutEnrollmentInput
@@ -458,6 +475,7 @@ export type ChildEnrollmentUpdateInput = {
   termEndDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  enrollmentInvite?: Prisma.EnrollmentInviteUpdateOneWithoutEnrollmentNestedInput
   child?: Prisma.ChildUpdateOneRequiredWithoutEnrollmentNestedInput
   school?: Prisma.SchoolUpdateOneRequiredWithoutStudentsNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutEnrollmentNestedInput
@@ -477,6 +495,7 @@ export type ChildEnrollmentUncheckedUpdateInput = {
   installmentFrequency?: Prisma.EnumInstallmentFrequencyFieldUpdateOperationsInput | $Enums.InstallmentFrequency
   termStartDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   termEndDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  enrollmentInviteId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   payments?: Prisma.PaymentUncheckedUpdateManyWithoutEnrollmentNestedInput
@@ -496,6 +515,7 @@ export type ChildEnrollmentCreateManyInput = {
   installmentFrequency: $Enums.InstallmentFrequency
   termStartDate: Date | string
   termEndDate: Date | string
+  enrollmentInviteId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -530,6 +550,7 @@ export type ChildEnrollmentUncheckedUpdateManyInput = {
   installmentFrequency?: Prisma.EnumInstallmentFrequencyFieldUpdateOperationsInput | $Enums.InstallmentFrequency
   termStartDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   termEndDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  enrollmentInviteId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -568,6 +589,7 @@ export type ChildEnrollmentCountOrderByAggregateInput = {
   installmentFrequency?: Prisma.SortOrder
   termStartDate?: Prisma.SortOrder
   termEndDate?: Prisma.SortOrder
+  enrollmentInviteId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -594,6 +616,7 @@ export type ChildEnrollmentMaxOrderByAggregateInput = {
   installmentFrequency?: Prisma.SortOrder
   termStartDate?: Prisma.SortOrder
   termEndDate?: Prisma.SortOrder
+  enrollmentInviteId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -612,6 +635,7 @@ export type ChildEnrollmentMinOrderByAggregateInput = {
   installmentFrequency?: Prisma.SortOrder
   termStartDate?: Prisma.SortOrder
   termEndDate?: Prisma.SortOrder
+  enrollmentInviteId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -720,6 +744,38 @@ export type EnumInstallmentFrequencyFieldUpdateOperationsInput = {
   set?: $Enums.InstallmentFrequency
 }
 
+export type ChildEnrollmentCreateNestedOneWithoutEnrollmentInviteInput = {
+  create?: Prisma.XOR<Prisma.ChildEnrollmentCreateWithoutEnrollmentInviteInput, Prisma.ChildEnrollmentUncheckedCreateWithoutEnrollmentInviteInput>
+  connectOrCreate?: Prisma.ChildEnrollmentCreateOrConnectWithoutEnrollmentInviteInput
+  connect?: Prisma.ChildEnrollmentWhereUniqueInput
+}
+
+export type ChildEnrollmentUncheckedCreateNestedOneWithoutEnrollmentInviteInput = {
+  create?: Prisma.XOR<Prisma.ChildEnrollmentCreateWithoutEnrollmentInviteInput, Prisma.ChildEnrollmentUncheckedCreateWithoutEnrollmentInviteInput>
+  connectOrCreate?: Prisma.ChildEnrollmentCreateOrConnectWithoutEnrollmentInviteInput
+  connect?: Prisma.ChildEnrollmentWhereUniqueInput
+}
+
+export type ChildEnrollmentUpdateOneWithoutEnrollmentInviteNestedInput = {
+  create?: Prisma.XOR<Prisma.ChildEnrollmentCreateWithoutEnrollmentInviteInput, Prisma.ChildEnrollmentUncheckedCreateWithoutEnrollmentInviteInput>
+  connectOrCreate?: Prisma.ChildEnrollmentCreateOrConnectWithoutEnrollmentInviteInput
+  upsert?: Prisma.ChildEnrollmentUpsertWithoutEnrollmentInviteInput
+  disconnect?: Prisma.ChildEnrollmentWhereInput | boolean
+  delete?: Prisma.ChildEnrollmentWhereInput | boolean
+  connect?: Prisma.ChildEnrollmentWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.ChildEnrollmentUpdateToOneWithWhereWithoutEnrollmentInviteInput, Prisma.ChildEnrollmentUpdateWithoutEnrollmentInviteInput>, Prisma.ChildEnrollmentUncheckedUpdateWithoutEnrollmentInviteInput>
+}
+
+export type ChildEnrollmentUncheckedUpdateOneWithoutEnrollmentInviteNestedInput = {
+  create?: Prisma.XOR<Prisma.ChildEnrollmentCreateWithoutEnrollmentInviteInput, Prisma.ChildEnrollmentUncheckedCreateWithoutEnrollmentInviteInput>
+  connectOrCreate?: Prisma.ChildEnrollmentCreateOrConnectWithoutEnrollmentInviteInput
+  upsert?: Prisma.ChildEnrollmentUpsertWithoutEnrollmentInviteInput
+  disconnect?: Prisma.ChildEnrollmentWhereInput | boolean
+  delete?: Prisma.ChildEnrollmentWhereInput | boolean
+  connect?: Prisma.ChildEnrollmentWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.ChildEnrollmentUpdateToOneWithWhereWithoutEnrollmentInviteInput, Prisma.ChildEnrollmentUpdateWithoutEnrollmentInviteInput>, Prisma.ChildEnrollmentUncheckedUpdateWithoutEnrollmentInviteInput>
+}
+
 export type ChildEnrollmentCreateWithoutSchoolInput = {
   id?: string
   className: string
@@ -734,6 +790,7 @@ export type ChildEnrollmentCreateWithoutSchoolInput = {
   termEndDate: Date | string
   createdAt?: Date | string
   updatedAt?: Date | string
+  enrollmentInvite?: Prisma.EnrollmentInviteCreateNestedOneWithoutEnrollmentInput
   child: Prisma.ChildCreateNestedOneWithoutEnrollmentInput
   payments?: Prisma.PaymentCreateNestedManyWithoutEnrollmentInput
 }
@@ -751,6 +808,7 @@ export type ChildEnrollmentUncheckedCreateWithoutSchoolInput = {
   installmentFrequency: $Enums.InstallmentFrequency
   termStartDate: Date | string
   termEndDate: Date | string
+  enrollmentInviteId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   payments?: Prisma.PaymentUncheckedCreateNestedManyWithoutEnrollmentInput
@@ -799,6 +857,7 @@ export type ChildEnrollmentScalarWhereInput = {
   installmentFrequency?: Prisma.EnumInstallmentFrequencyFilter<"ChildEnrollment"> | $Enums.InstallmentFrequency
   termStartDate?: Prisma.DateTimeFilter<"ChildEnrollment"> | Date | string
   termEndDate?: Prisma.DateTimeFilter<"ChildEnrollment"> | Date | string
+  enrollmentInviteId?: Prisma.StringNullableFilter<"ChildEnrollment"> | string | null
   createdAt?: Prisma.DateTimeFilter<"ChildEnrollment"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"ChildEnrollment"> | Date | string
 }
@@ -817,6 +876,7 @@ export type ChildEnrollmentCreateWithoutChildInput = {
   termEndDate: Date | string
   createdAt?: Date | string
   updatedAt?: Date | string
+  enrollmentInvite?: Prisma.EnrollmentInviteCreateNestedOneWithoutEnrollmentInput
   school: Prisma.SchoolCreateNestedOneWithoutStudentsInput
   payments?: Prisma.PaymentCreateNestedManyWithoutEnrollmentInput
 }
@@ -834,6 +894,7 @@ export type ChildEnrollmentUncheckedCreateWithoutChildInput = {
   installmentFrequency: $Enums.InstallmentFrequency
   termStartDate: Date | string
   termEndDate: Date | string
+  enrollmentInviteId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   payments?: Prisma.PaymentUncheckedCreateNestedManyWithoutEnrollmentInput
@@ -869,6 +930,7 @@ export type ChildEnrollmentUpdateWithoutChildInput = {
   termEndDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  enrollmentInvite?: Prisma.EnrollmentInviteUpdateOneWithoutEnrollmentNestedInput
   school?: Prisma.SchoolUpdateOneRequiredWithoutStudentsNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutEnrollmentNestedInput
 }
@@ -886,6 +948,7 @@ export type ChildEnrollmentUncheckedUpdateWithoutChildInput = {
   installmentFrequency?: Prisma.EnumInstallmentFrequencyFieldUpdateOperationsInput | $Enums.InstallmentFrequency
   termStartDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   termEndDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  enrollmentInviteId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   payments?: Prisma.PaymentUncheckedUpdateManyWithoutEnrollmentNestedInput
@@ -905,6 +968,7 @@ export type ChildEnrollmentCreateWithoutPaymentsInput = {
   termEndDate: Date | string
   createdAt?: Date | string
   updatedAt?: Date | string
+  enrollmentInvite?: Prisma.EnrollmentInviteCreateNestedOneWithoutEnrollmentInput
   child: Prisma.ChildCreateNestedOneWithoutEnrollmentInput
   school: Prisma.SchoolCreateNestedOneWithoutStudentsInput
 }
@@ -923,6 +987,7 @@ export type ChildEnrollmentUncheckedCreateWithoutPaymentsInput = {
   installmentFrequency: $Enums.InstallmentFrequency
   termStartDate: Date | string
   termEndDate: Date | string
+  enrollmentInviteId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -957,6 +1022,7 @@ export type ChildEnrollmentUpdateWithoutPaymentsInput = {
   termEndDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  enrollmentInvite?: Prisma.EnrollmentInviteUpdateOneWithoutEnrollmentNestedInput
   child?: Prisma.ChildUpdateOneRequiredWithoutEnrollmentNestedInput
   school?: Prisma.SchoolUpdateOneRequiredWithoutStudentsNestedInput
 }
@@ -975,8 +1041,101 @@ export type ChildEnrollmentUncheckedUpdateWithoutPaymentsInput = {
   installmentFrequency?: Prisma.EnumInstallmentFrequencyFieldUpdateOperationsInput | $Enums.InstallmentFrequency
   termStartDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   termEndDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  enrollmentInviteId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+}
+
+export type ChildEnrollmentCreateWithoutEnrollmentInviteInput = {
+  id?: string
+  className: string
+  totalSchoolFee: number
+  platformFee: number
+  schoolMinimumFee: number
+  firstPaymentPaid: number
+  remainingBalance: number
+  paymentStatus: $Enums.PaymentStatus
+  installmentFrequency: $Enums.InstallmentFrequency
+  termStartDate: Date | string
+  termEndDate: Date | string
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  child: Prisma.ChildCreateNestedOneWithoutEnrollmentInput
+  school: Prisma.SchoolCreateNestedOneWithoutStudentsInput
+  payments?: Prisma.PaymentCreateNestedManyWithoutEnrollmentInput
+}
+
+export type ChildEnrollmentUncheckedCreateWithoutEnrollmentInviteInput = {
+  id?: string
+  childId: string
+  schoolId: string
+  className: string
+  totalSchoolFee: number
+  platformFee: number
+  schoolMinimumFee: number
+  firstPaymentPaid: number
+  remainingBalance: number
+  paymentStatus: $Enums.PaymentStatus
+  installmentFrequency: $Enums.InstallmentFrequency
+  termStartDate: Date | string
+  termEndDate: Date | string
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  payments?: Prisma.PaymentUncheckedCreateNestedManyWithoutEnrollmentInput
+}
+
+export type ChildEnrollmentCreateOrConnectWithoutEnrollmentInviteInput = {
+  where: Prisma.ChildEnrollmentWhereUniqueInput
+  create: Prisma.XOR<Prisma.ChildEnrollmentCreateWithoutEnrollmentInviteInput, Prisma.ChildEnrollmentUncheckedCreateWithoutEnrollmentInviteInput>
+}
+
+export type ChildEnrollmentUpsertWithoutEnrollmentInviteInput = {
+  update: Prisma.XOR<Prisma.ChildEnrollmentUpdateWithoutEnrollmentInviteInput, Prisma.ChildEnrollmentUncheckedUpdateWithoutEnrollmentInviteInput>
+  create: Prisma.XOR<Prisma.ChildEnrollmentCreateWithoutEnrollmentInviteInput, Prisma.ChildEnrollmentUncheckedCreateWithoutEnrollmentInviteInput>
+  where?: Prisma.ChildEnrollmentWhereInput
+}
+
+export type ChildEnrollmentUpdateToOneWithWhereWithoutEnrollmentInviteInput = {
+  where?: Prisma.ChildEnrollmentWhereInput
+  data: Prisma.XOR<Prisma.ChildEnrollmentUpdateWithoutEnrollmentInviteInput, Prisma.ChildEnrollmentUncheckedUpdateWithoutEnrollmentInviteInput>
+}
+
+export type ChildEnrollmentUpdateWithoutEnrollmentInviteInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  className?: Prisma.StringFieldUpdateOperationsInput | string
+  totalSchoolFee?: Prisma.IntFieldUpdateOperationsInput | number
+  platformFee?: Prisma.IntFieldUpdateOperationsInput | number
+  schoolMinimumFee?: Prisma.IntFieldUpdateOperationsInput | number
+  firstPaymentPaid?: Prisma.IntFieldUpdateOperationsInput | number
+  remainingBalance?: Prisma.IntFieldUpdateOperationsInput | number
+  paymentStatus?: Prisma.EnumPaymentStatusFieldUpdateOperationsInput | $Enums.PaymentStatus
+  installmentFrequency?: Prisma.EnumInstallmentFrequencyFieldUpdateOperationsInput | $Enums.InstallmentFrequency
+  termStartDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  termEndDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  child?: Prisma.ChildUpdateOneRequiredWithoutEnrollmentNestedInput
+  school?: Prisma.SchoolUpdateOneRequiredWithoutStudentsNestedInput
+  payments?: Prisma.PaymentUpdateManyWithoutEnrollmentNestedInput
+}
+
+export type ChildEnrollmentUncheckedUpdateWithoutEnrollmentInviteInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  childId?: Prisma.StringFieldUpdateOperationsInput | string
+  schoolId?: Prisma.StringFieldUpdateOperationsInput | string
+  className?: Prisma.StringFieldUpdateOperationsInput | string
+  totalSchoolFee?: Prisma.IntFieldUpdateOperationsInput | number
+  platformFee?: Prisma.IntFieldUpdateOperationsInput | number
+  schoolMinimumFee?: Prisma.IntFieldUpdateOperationsInput | number
+  firstPaymentPaid?: Prisma.IntFieldUpdateOperationsInput | number
+  remainingBalance?: Prisma.IntFieldUpdateOperationsInput | number
+  paymentStatus?: Prisma.EnumPaymentStatusFieldUpdateOperationsInput | $Enums.PaymentStatus
+  installmentFrequency?: Prisma.EnumInstallmentFrequencyFieldUpdateOperationsInput | $Enums.InstallmentFrequency
+  termStartDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  termEndDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  payments?: Prisma.PaymentUncheckedUpdateManyWithoutEnrollmentNestedInput
 }
 
 export type ChildEnrollmentCreateManySchoolInput = {
@@ -992,6 +1151,7 @@ export type ChildEnrollmentCreateManySchoolInput = {
   installmentFrequency: $Enums.InstallmentFrequency
   termStartDate: Date | string
   termEndDate: Date | string
+  enrollmentInviteId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -1010,6 +1170,7 @@ export type ChildEnrollmentUpdateWithoutSchoolInput = {
   termEndDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  enrollmentInvite?: Prisma.EnrollmentInviteUpdateOneWithoutEnrollmentNestedInput
   child?: Prisma.ChildUpdateOneRequiredWithoutEnrollmentNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutEnrollmentNestedInput
 }
@@ -1027,6 +1188,7 @@ export type ChildEnrollmentUncheckedUpdateWithoutSchoolInput = {
   installmentFrequency?: Prisma.EnumInstallmentFrequencyFieldUpdateOperationsInput | $Enums.InstallmentFrequency
   termStartDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   termEndDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  enrollmentInviteId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   payments?: Prisma.PaymentUncheckedUpdateManyWithoutEnrollmentNestedInput
@@ -1045,6 +1207,7 @@ export type ChildEnrollmentUncheckedUpdateManyWithoutSchoolInput = {
   installmentFrequency?: Prisma.EnumInstallmentFrequencyFieldUpdateOperationsInput | $Enums.InstallmentFrequency
   termStartDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   termEndDate?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  enrollmentInviteId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -1094,8 +1257,10 @@ export type ChildEnrollmentSelect<ExtArgs extends runtime.Types.Extensions.Inter
   installmentFrequency?: boolean
   termStartDate?: boolean
   termEndDate?: boolean
+  enrollmentInviteId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
+  enrollmentInvite?: boolean | Prisma.ChildEnrollment$enrollmentInviteArgs<ExtArgs>
   child?: boolean | Prisma.ChildDefaultArgs<ExtArgs>
   school?: boolean | Prisma.SchoolDefaultArgs<ExtArgs>
   payments?: boolean | Prisma.ChildEnrollment$paymentsArgs<ExtArgs>
@@ -1116,8 +1281,10 @@ export type ChildEnrollmentSelectCreateManyAndReturn<ExtArgs extends runtime.Typ
   installmentFrequency?: boolean
   termStartDate?: boolean
   termEndDate?: boolean
+  enrollmentInviteId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
+  enrollmentInvite?: boolean | Prisma.ChildEnrollment$enrollmentInviteArgs<ExtArgs>
   child?: boolean | Prisma.ChildDefaultArgs<ExtArgs>
   school?: boolean | Prisma.SchoolDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["childEnrollment"]>
@@ -1136,8 +1303,10 @@ export type ChildEnrollmentSelectUpdateManyAndReturn<ExtArgs extends runtime.Typ
   installmentFrequency?: boolean
   termStartDate?: boolean
   termEndDate?: boolean
+  enrollmentInviteId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
+  enrollmentInvite?: boolean | Prisma.ChildEnrollment$enrollmentInviteArgs<ExtArgs>
   child?: boolean | Prisma.ChildDefaultArgs<ExtArgs>
   school?: boolean | Prisma.SchoolDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["childEnrollment"]>
@@ -1156,22 +1325,26 @@ export type ChildEnrollmentSelectScalar = {
   installmentFrequency?: boolean
   termStartDate?: boolean
   termEndDate?: boolean
+  enrollmentInviteId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type ChildEnrollmentOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "childId" | "schoolId" | "className" | "totalSchoolFee" | "platformFee" | "schoolMinimumFee" | "firstPaymentPaid" | "remainingBalance" | "paymentStatus" | "installmentFrequency" | "termStartDate" | "termEndDate" | "createdAt" | "updatedAt", ExtArgs["result"]["childEnrollment"]>
+export type ChildEnrollmentOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "childId" | "schoolId" | "className" | "totalSchoolFee" | "platformFee" | "schoolMinimumFee" | "firstPaymentPaid" | "remainingBalance" | "paymentStatus" | "installmentFrequency" | "termStartDate" | "termEndDate" | "enrollmentInviteId" | "createdAt" | "updatedAt", ExtArgs["result"]["childEnrollment"]>
 export type ChildEnrollmentInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  enrollmentInvite?: boolean | Prisma.ChildEnrollment$enrollmentInviteArgs<ExtArgs>
   child?: boolean | Prisma.ChildDefaultArgs<ExtArgs>
   school?: boolean | Prisma.SchoolDefaultArgs<ExtArgs>
   payments?: boolean | Prisma.ChildEnrollment$paymentsArgs<ExtArgs>
   _count?: boolean | Prisma.ChildEnrollmentCountOutputTypeDefaultArgs<ExtArgs>
 }
 export type ChildEnrollmentIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  enrollmentInvite?: boolean | Prisma.ChildEnrollment$enrollmentInviteArgs<ExtArgs>
   child?: boolean | Prisma.ChildDefaultArgs<ExtArgs>
   school?: boolean | Prisma.SchoolDefaultArgs<ExtArgs>
 }
 export type ChildEnrollmentIncludeUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  enrollmentInvite?: boolean | Prisma.ChildEnrollment$enrollmentInviteArgs<ExtArgs>
   child?: boolean | Prisma.ChildDefaultArgs<ExtArgs>
   school?: boolean | Prisma.SchoolDefaultArgs<ExtArgs>
 }
@@ -1179,6 +1352,7 @@ export type ChildEnrollmentIncludeUpdateManyAndReturn<ExtArgs extends runtime.Ty
 export type $ChildEnrollmentPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "ChildEnrollment"
   objects: {
+    enrollmentInvite: Prisma.$EnrollmentInvitePayload<ExtArgs> | null
     child: Prisma.$ChildPayload<ExtArgs>
     school: Prisma.$SchoolPayload<ExtArgs>
     payments: Prisma.$PaymentPayload<ExtArgs>[]
@@ -1197,6 +1371,11 @@ export type $ChildEnrollmentPayload<ExtArgs extends runtime.Types.Extensions.Int
     installmentFrequency: $Enums.InstallmentFrequency
     termStartDate: Date
     termEndDate: Date
+    /**
+     * Set only on a plan created by claiming an enrollment invite. Unique, so one
+     * invite can never mint two enrollments even if two claims race.
+     */
+    enrollmentInviteId: string | null
     createdAt: Date
     updatedAt: Date
   }, ExtArgs["result"]["childEnrollment"]>
@@ -1593,6 +1772,7 @@ readonly fields: ChildEnrollmentFieldRefs;
  */
 export interface Prisma__ChildEnrollmentClient<T, Null = never, ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
   readonly [Symbol.toStringTag]: "PrismaPromise"
+  enrollmentInvite<T extends Prisma.ChildEnrollment$enrollmentInviteArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.ChildEnrollment$enrollmentInviteArgs<ExtArgs>>): Prisma.Prisma__EnrollmentInviteClient<runtime.Types.Result.GetResult<Prisma.$EnrollmentInvitePayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
   child<T extends Prisma.ChildDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.ChildDefaultArgs<ExtArgs>>): Prisma.Prisma__ChildClient<runtime.Types.Result.GetResult<Prisma.$ChildPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
   school<T extends Prisma.SchoolDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.SchoolDefaultArgs<ExtArgs>>): Prisma.Prisma__SchoolClient<runtime.Types.Result.GetResult<Prisma.$SchoolPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
   payments<T extends Prisma.ChildEnrollment$paymentsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.ChildEnrollment$paymentsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$PaymentPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
@@ -1638,6 +1818,7 @@ export interface ChildEnrollmentFieldRefs {
   readonly installmentFrequency: Prisma.FieldRef<"ChildEnrollment", 'InstallmentFrequency'>
   readonly termStartDate: Prisma.FieldRef<"ChildEnrollment", 'DateTime'>
   readonly termEndDate: Prisma.FieldRef<"ChildEnrollment", 'DateTime'>
+  readonly enrollmentInviteId: Prisma.FieldRef<"ChildEnrollment", 'String'>
   readonly createdAt: Prisma.FieldRef<"ChildEnrollment", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"ChildEnrollment", 'DateTime'>
 }
@@ -2038,6 +2219,25 @@ export type ChildEnrollmentDeleteManyArgs<ExtArgs extends runtime.Types.Extensio
    * Limit how many ChildEnrollments to delete.
    */
   limit?: number
+}
+
+/**
+ * ChildEnrollment.enrollmentInvite
+ */
+export type ChildEnrollment$enrollmentInviteArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the EnrollmentInvite
+   */
+  select?: Prisma.EnrollmentInviteSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the EnrollmentInvite
+   */
+  omit?: Prisma.EnrollmentInviteOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.EnrollmentInviteInclude<ExtArgs> | null
+  where?: Prisma.EnrollmentInviteWhereInput
 }
 
 /**

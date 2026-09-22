@@ -1294,6 +1294,296 @@
         ]
       }
     },
+    "/api/v1/enrollment-invites/preview": {
+      "get": {
+        "operationId": "EnrollmentInvitesController_preview",
+        "parameters": [
+          {
+            "name": "x-invite-token",
+            "required": true,
+            "in": "header",
+            "description": "The raw claim token from the invite link.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Preview an enrollment invite before signing in",
+        "tags": [
+          "enrollment-invites"
+        ]
+      }
+    },
+    "/api/v1/enrollment-invites": {
+      "post": {
+        "operationId": "EnrollmentInvitesController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEnrollmentInviteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Invite a parent who already paid the school before Lopay",
+        "tags": [
+          "enrollment-invites"
+        ]
+      },
+      "get": {
+        "operationId": "EnrollmentInvitesController_list",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "DISPUTED",
+                "CLAIMED",
+                "REVOKED",
+                "EXPIRED"
+              ]
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "example": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Clamped server-side by `parsePagination`.",
+            "schema": {
+              "minimum": 1,
+              "example": 25,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List this school's enrollment invites",
+        "tags": [
+          "enrollment-invites"
+        ]
+      }
+    },
+    "/api/v1/enrollment-invites/{id}/revoke": {
+      "post": {
+        "operationId": "EnrollmentInvitesController_revoke",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeEnrollmentInviteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cancel a live invite so it can be re-issued",
+        "tags": [
+          "enrollment-invites"
+        ]
+      }
+    },
+    "/api/v1/enrollment-invites/{id}/amend": {
+      "post": {
+        "operationId": "EnrollmentInvitesController_amend",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AmendMigratedPaymentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Correct the amount recorded on a claimed invite",
+        "tags": [
+          "enrollment-invites"
+        ]
+      }
+    },
+    "/api/v1/enrollment-invites/{id}/release": {
+      "post": {
+        "operationId": "EnrollmentInvitesController_release",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeEnrollmentInviteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove a plan claimed by the wrong person",
+        "tags": [
+          "enrollment-invites"
+        ]
+      }
+    },
+    "/api/v1/enrollment-invites/claim": {
+      "post": {
+        "operationId": "EnrollmentInvitesController_claim",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimEnrollmentInviteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Claim an enrollment invite and activate the plan",
+        "tags": [
+          "enrollment-invites"
+        ]
+      }
+    },
+    "/api/v1/enrollment-invites/dispute": {
+      "post": {
+        "operationId": "EnrollmentInvitesController_dispute",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisputeEnrollmentInviteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Contest the amount recorded on an invite",
+        "tags": [
+          "enrollment-invites"
+        ]
+      }
+    },
     "/api/v1/enrollments/my-children": {
       "get": {
         "operationId": "EnrollmentController_getMyChildren",
@@ -2239,6 +2529,126 @@
         },
         "required": [
           "paymentId"
+        ]
+      },
+      "CreateEnrollmentInviteDto": {
+        "type": "object",
+        "properties": {
+          "studentName": {
+            "type": "string",
+            "example": "Ada Lovelace",
+            "maxLength": 120
+          },
+          "className": {
+            "type": "string",
+            "example": "Basic 1",
+            "maxLength": 60,
+            "description": "Must match an active ClassFee for the school."
+          },
+          "amountAlreadyPaid": {
+            "type": "number",
+            "example": 27500,
+            "description": "Naira the parent has already paid the school directly. May be 0. Cannot exceed the class fee."
+          },
+          "parentPhone": {
+            "type": "string",
+            "example": "+2348012345678",
+            "description": "The parent's WhatsApp number. Becomes the second factor on the claim: only an account whose own verified number matches may claim the invite."
+          },
+          "installmentFrequency": {
+            "type": "string",
+            "enum": [
+              "WEEKLY",
+              "MONTHLY"
+            ],
+            "example": "MONTHLY"
+          },
+          "planStartDate": {
+            "format": "date-time",
+            "type": "string",
+            "example": "2026-09-19T00:00:00.000Z",
+            "description": "When the new plan starts collecting. Anchors the installment schedule and, with the cadence, determines when the plan ends — so it must not be back-dated into a term that has already run, which would open the plan in arrears."
+          },
+          "expiresInDays": {
+            "type": "number",
+            "example": 14,
+            "minimum": 1,
+            "maximum": 30,
+            "description": "How long the claim link stays valid. Defaults to 14 days. Clamped server-side — the token is a bearer credential sitting in a chat thread, so it is not left open-ended."
+          }
+        },
+        "required": [
+          "studentName",
+          "className",
+          "amountAlreadyPaid",
+          "parentPhone",
+          "installmentFrequency",
+          "planStartDate"
+        ]
+      },
+      "RevokeEnrollmentInviteDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "example": "Wrong phone number",
+            "maxLength": 500,
+            "description": "Recorded on the audit trail."
+          }
+        }
+      },
+      "AmendMigratedPaymentDto": {
+        "type": "object",
+        "properties": {
+          "amountAlreadyPaid": {
+            "type": "number",
+            "example": 35000,
+            "description": "The corrected naira figure the parent had already paid."
+          },
+          "reason": {
+            "type": "string",
+            "example": "Bank statement showed a second transfer on 3 September.",
+            "maxLength": 500,
+            "description": "Recorded on the audit trail and shown to the parent."
+          }
+        },
+        "required": [
+          "amountAlreadyPaid"
+        ]
+      },
+      "ClaimEnrollmentInviteDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The raw claim token from the invite link.",
+            "minLength": 43,
+            "maxLength": 43
+          }
+        },
+        "required": [
+          "token"
+        ]
+      },
+      "DisputeEnrollmentInviteDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The raw claim token from the invite link.",
+            "minLength": 43,
+            "maxLength": 43
+          },
+          "reason": {
+            "type": "string",
+            "example": "The school has ₦25,000 but I paid ₦35,000 on 3 September.",
+            "maxLength": 500,
+            "description": "Shown verbatim to the school owner, so it is length-bounded and stored as given. React escapes it on render."
+          }
+        },
+        "required": [
+          "token",
+          "reason"
         ]
       },
       "CreateEnrollmentDto": {

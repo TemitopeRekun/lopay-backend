@@ -7,6 +7,7 @@ import { EventsGateway } from '../events/events.gateway';
 import { DeviceTokensService } from '../device-tokens/device-tokens.service';
 import { FIREBASE_MESSAGING } from '../firebase/firebase.module';
 import type { Messaging } from 'firebase-admin/messaging';
+import { resolveWebAppOrigin } from '../common/web-app-origin';
 
 /**
  * Android notification channel every push is posted to.
@@ -54,23 +55,15 @@ export class NotificationsService {
     @Inject(FIREBASE_MESSAGING) private readonly messaging: Messaging,
     config: ConfigService,
   ) {
-    const explicit = config.get<string>('WEB_APP_URL')?.trim();
-    const firstCorsOrigin = config
-      .get<string>('CORS_ORIGINS')
-      ?.split(',')[0]
-      ?.trim();
-    const candidate = explicit || firstCorsOrigin;
-
-    // Validate rather than trust: a malformed value would produce a link the
+    // Shared with the enrollment-invite claim link, which has to resolve the
+    // same origin. Two copies of "where is the web client?" is how they drift.
+    // Validation lives in the helper: a malformed value would produce a link the
     // browser refuses to open, turning every push click into a no-op.
-    try {
-      this.webAppUrl = candidate ? new URL(candidate).origin : undefined;
-    } catch {
+    this.webAppUrl = resolveWebAppOrigin(config, (candidate) =>
       this.logger.warn(
         `Ignoring unparseable web app origin "${candidate}" — push notification links will be omitted.`,
-      );
-      this.webAppUrl = undefined;
-    }
+      ),
+    );
   }
 
   async create(dto: CreateNotificationDto) {

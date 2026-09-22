@@ -394,6 +394,7 @@ export const ModelName = {
   Child: 'Child',
   Payment: 'Payment',
   ChildEnrollment: 'ChildEnrollment',
+  EnrollmentInvite: 'EnrollmentInvite',
   PlatformSetting: 'PlatformSetting',
   SchedulerLock: 'SchedulerLock',
   WebhookEvent: 'WebhookEvent',
@@ -415,7 +416,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "user" | "session" | "account" | "verification" | "school" | "classFee" | "parent" | "child" | "payment" | "childEnrollment" | "platformSetting" | "schedulerLock" | "webhookEvent" | "notification" | "deviceToken" | "auditLog"
+    modelProps: "user" | "session" | "account" | "verification" | "school" | "classFee" | "parent" | "child" | "payment" | "childEnrollment" | "enrollmentInvite" | "platformSetting" | "schedulerLock" | "webhookEvent" | "notification" | "deviceToken" | "auditLog"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -1159,6 +1160,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    EnrollmentInvite: {
+      payload: Prisma.$EnrollmentInvitePayload<ExtArgs>
+      fields: Prisma.EnrollmentInviteFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.EnrollmentInviteFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EnrollmentInvitePayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.EnrollmentInviteFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EnrollmentInvitePayload>
+        }
+        findFirst: {
+          args: Prisma.EnrollmentInviteFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EnrollmentInvitePayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.EnrollmentInviteFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EnrollmentInvitePayload>
+        }
+        findMany: {
+          args: Prisma.EnrollmentInviteFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EnrollmentInvitePayload>[]
+        }
+        create: {
+          args: Prisma.EnrollmentInviteCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EnrollmentInvitePayload>
+        }
+        createMany: {
+          args: Prisma.EnrollmentInviteCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.EnrollmentInviteCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EnrollmentInvitePayload>[]
+        }
+        delete: {
+          args: Prisma.EnrollmentInviteDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EnrollmentInvitePayload>
+        }
+        update: {
+          args: Prisma.EnrollmentInviteUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EnrollmentInvitePayload>
+        }
+        deleteMany: {
+          args: Prisma.EnrollmentInviteDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.EnrollmentInviteUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.EnrollmentInviteUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EnrollmentInvitePayload>[]
+        }
+        upsert: {
+          args: Prisma.EnrollmentInviteUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EnrollmentInvitePayload>
+        }
+        aggregate: {
+          args: Prisma.EnrollmentInviteAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateEnrollmentInvite>
+        }
+        groupBy: {
+          args: Prisma.EnrollmentInviteGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.EnrollmentInviteGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.EnrollmentInviteCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.EnrollmentInviteCountAggregateOutputType> | number
+        }
+      }
+    }
     PlatformSetting: {
       payload: Prisma.$PlatformSettingPayload<ExtArgs>
       fields: Prisma.PlatformSettingFieldRefs
@@ -1797,11 +1872,42 @@ export const ChildEnrollmentScalarFieldEnum = {
   installmentFrequency: 'installmentFrequency',
   termStartDate: 'termStartDate',
   termEndDate: 'termEndDate',
+  enrollmentInviteId: 'enrollmentInviteId',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
 
 export type ChildEnrollmentScalarFieldEnum = (typeof ChildEnrollmentScalarFieldEnum)[keyof typeof ChildEnrollmentScalarFieldEnum]
+
+
+export const EnrollmentInviteScalarFieldEnum = {
+  id: 'id',
+  schoolId: 'schoolId',
+  createdByUserId: 'createdByUserId',
+  studentName: 'studentName',
+  className: 'className',
+  totalSchoolFee: 'totalSchoolFee',
+  amountAlreadyPaid: 'amountAlreadyPaid',
+  phoneNumber: 'phoneNumber',
+  parentPhoneHash: 'parentPhoneHash',
+  installmentFrequency: 'installmentFrequency',
+  planStartDate: 'planStartDate',
+  termEndDate: 'termEndDate',
+  tokenHash: 'tokenHash',
+  expiresAt: 'expiresAt',
+  status: 'status',
+  disputeReason: 'disputeReason',
+  disputedAt: 'disputedAt',
+  revokedAt: 'revokedAt',
+  revokedByUserId: 'revokedByUserId',
+  claimedByUserId: 'claimedByUserId',
+  claimedAt: 'claimedAt',
+  claimantPhoneMatched: 'claimantPhoneMatched',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type EnrollmentInviteScalarFieldEnum = (typeof EnrollmentInviteScalarFieldEnum)[keyof typeof EnrollmentInviteScalarFieldEnum]
 
 
 export const PlatformSettingScalarFieldEnum = {
@@ -2068,6 +2174,20 @@ export type ListEnumInstallmentFrequencyFieldRefInput<$PrismaModel> = FieldRefIn
 
 
 /**
+ * Reference to a field of type 'EnrollmentInviteStatus'
+ */
+export type EnumEnrollmentInviteStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'EnrollmentInviteStatus'>
+    
+
+
+/**
+ * Reference to a field of type 'EnrollmentInviteStatus[]'
+ */
+export type ListEnumEnrollmentInviteStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'EnrollmentInviteStatus[]'>
+    
+
+
+/**
  * Reference to a field of type 'Json'
  */
 export type JsonFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Json'>
@@ -2242,6 +2362,7 @@ export type GlobalOmitConfig = {
   child?: Prisma.ChildOmit
   payment?: Prisma.PaymentOmit
   childEnrollment?: Prisma.ChildEnrollmentOmit
+  enrollmentInvite?: Prisma.EnrollmentInviteOmit
   platformSetting?: Prisma.PlatformSettingOmit
   schedulerLock?: Prisma.SchedulerLockOmit
   webhookEvent?: Prisma.WebhookEventOmit

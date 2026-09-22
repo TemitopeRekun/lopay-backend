@@ -48,7 +48,13 @@ export const AuditAction = {
   FIRST_PAYMENT_REJECTED: 'FIRST_PAYMENT_REJECTED',
   FIRST_PAYMENT_PAID: 'FIRST_PAYMENT_PAID',
   ENROLLMENT_DEFAULTED: 'ENROLLMENT_DEFAULTED',
-  PAYMENT_DISPUTED: 'PAYMENT_DISPUTED'
+  PAYMENT_DISPUTED: 'PAYMENT_DISPUTED',
+  ENROLLMENT_INVITE_CREATED: 'ENROLLMENT_INVITE_CREATED',
+  ENROLLMENT_INVITE_REVOKED: 'ENROLLMENT_INVITE_REVOKED',
+  ENROLLMENT_INVITE_DISPUTED: 'ENROLLMENT_INVITE_DISPUTED',
+  ENROLLMENT_INVITE_CLAIMED: 'ENROLLMENT_INVITE_CLAIMED',
+  ENROLLMENT_INVITE_RELEASED: 'ENROLLMENT_INVITE_RELEASED',
+  MIGRATED_PAYMENT_AMENDED: 'MIGRATED_PAYMENT_AMENDED'
 } as const
 
 export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction]
@@ -56,10 +62,22 @@ export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction]
 
 export const PaymentType = {
   FIRST_PAYMENT: 'FIRST_PAYMENT',
-  INSTALLMENT: 'INSTALLMENT'
+  INSTALLMENT: 'INSTALLMENT',
+  MIGRATED_PAYMENT: 'MIGRATED_PAYMENT'
 } as const
 
 export type PaymentType = (typeof PaymentType)[keyof typeof PaymentType]
+
+
+export const EnrollmentInviteStatus = {
+  PENDING: 'PENDING',
+  DISPUTED: 'DISPUTED',
+  CLAIMED: 'CLAIMED',
+  REVOKED: 'REVOKED',
+  EXPIRED: 'EXPIRED'
+} as const
+
+export type EnrollmentInviteStatus = (typeof EnrollmentInviteStatus)[keyof typeof EnrollmentInviteStatus]
 
 
 export const PaymentReceiver = {

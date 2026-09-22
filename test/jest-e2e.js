@@ -17,6 +17,15 @@ module.exports = {
     '^@thallesp/nestjs-better-auth$': '<rootDir>/mocks/nestjs-better-auth.ts',
   },
 
+  // Abort the whole run unless DATABASE_URL resolves to a loopback host.
+  //
+  // These suites are destructive and take their connection from `.env` via
+  // ConfigModule, so without this a stale `.env` silently points them at a
+  // deployed database and they pass by truncating it. globalSetup rather than a
+  // per-suite call so it cannot be forgotten by the next suite added here.
+  // See require-local-database.ts.
+  globalSetup: '<rootDir>/require-local-database.ts',
+
   // The suites share ONE database, so they must not run concurrently.
   //
   // In parallel, one suite's writes land in the middle of another's
