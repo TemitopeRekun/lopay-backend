@@ -215,6 +215,26 @@ model School {
   payments      Payment[]
   invites       EnrollmentInvite[]
 
+  /// The instant this school may no longer ISSUE enrollment invites.
+  ///
+  /// Migration is free (`MIGRATED_ENROLLMENT_PLATFORM_FEE_RATE` is zero), priced
+  /// in as one-time acquisition: it puts an existing fee-paying family onto a
+  /// Lopay plan, and the NEXT term's enrollment is a normal paid one. That trade
+  /// only holds if migration is genuinely one-time. Unbounded, a school could
+  /// tell each term's families to pay it directly and then migrate them for
+  /// free, and the platform would never earn on that school at all.
+  ///
+  /// STORED rather than derived from `createdAt` on read. A derived rule would
+  /// mean that tuning the default later silently moves every school's deadline —
+  /// including REOPENING windows that had already closed — and it leaves no way
+  /// to grant one school more time without granting it to all of them. A column
+  /// is auditable, adjustable per school, and unaffected by changing the default.
+  ///
+  /// It governs ISSUING only. A parent claiming a link after this date still
+  /// succeeds: the invite carries its own `expiresAt`, and stranding a family
+  /// because their school was slow to send is not the behaviour this is for.
+  migrationDeadline DateTime @default(dbgenerated("(now() + interval '60 days')"))
+
   createdAt     DateTime @default(now())
 
   @@index([deletedAt])

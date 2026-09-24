@@ -44,6 +44,59 @@ export const MAX_INVITE_EXPIRY_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * How long a school may go on ISSUING enrollment invites, from onboarding.
+ *
+ * ## Why there is a limit at all
+ *
+ * Migration is free — `MIGRATED_ENROLLMENT_PLATFORM_FEE_RATE` is zero — and
+ * that is priced as one-time acquisition: it puts an existing fee-paying family
+ * onto a Lopay plan, and the family's NEXT term is a normal paid enrollment.
+ * The trade only works if migration really is one-time. Unbounded, a school
+ * could tell each term's families to pay it directly and migrate them free
+ * every term, and the platform would never earn on that school at all.
+ *
+ * ## Why sixty days
+ *
+ * The binding constraint is not setup — every school in production published
+ * its fees the same day it was onboarded — it is the campaign: entering each
+ * student by hand, then chasing each parent to claim.
+ *
+ *   - An invite defaults to `DEFAULT_INVITE_EXPIRY_DAYS` (14). A school that
+ *     misses a parent needs a second pass, so thirty days is one expiry cycle
+ *     plus a public holiday and it is gone.
+ *   - A term runs three months (`MONTHLY_INSTALLMENTS`), so ninety days is the
+ *     whole of one — long enough to migrate the NEXT intake too, which is the
+ *     thing this exists to prevent.
+ *
+ * Sixty days is two unhurried expiry cycles and still safely inside a single
+ * term. It is the DEFAULT, not the rule: the deadline is stored per school on
+ * `School.migrationDeadline` and a platform admin can extend one school without
+ * moving anyone else.
+ */
+export const MIGRATION_WINDOW_DAYS = 60;
+
+/**
+ * Whether this school may still issue invites.
+ *
+ * Deliberately consulted ONLY when issuing. Claiming is not gated on it: a
+ * parent opening a link on day sixty-one, for an invite their school sent on
+ * day fifty-eight, must still succeed. The invite already carries its own
+ * `expiresAt`, and stranding a family because their school was slow to send is
+ * not what this rule is for.
+ */
+export function isMigrationWindowOpen(deadline: Date, now: Date): boolean {
+  return deadline.getTime() > now.getTime();
+}
+
+/** Whole days left in the window, floored at zero. For display only. */
+export function migrationDaysRemaining(deadline: Date, now: Date): number {
+  return Math.max(
+    0,
+    Math.ceil((deadline.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)),
+  );
+}
+
+/**
  * Statuses that still occupy the one-invite-per-student slot.
  *
  * PENDING and DISPUTED are live. CLAIMED is included because the invite became a

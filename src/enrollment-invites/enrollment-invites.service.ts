@@ -32,13 +32,11 @@ import {
   derivePlanEnd,
   expiryFrom,
   hasExpired,
+  isMigrationWindowOpen,
+  migrationDaysRemaining,
   validatePlanStart,
 } from './invite-policy';
-import {
-  toParentInviteView,
-  toSchoolInviteView,
-  type SchoolInviteView,
-} from './invite-view';
+import { toParentInviteView, toSchoolInviteView } from './invite-view';
 import type {
   AmendMigratedPaymentDto,
   ListEnrollmentInvitesDto,
@@ -118,7 +116,8 @@ export class EnrollmentInvitesService {
    * rejected request never leaves a half-formed invite or burns a slot.
    */
   async create(dto: CreateEnrollmentInviteDto, actor: AuthUser) {
-    const schoolId = await this.assertOwnsSchool(actor);
+    const { id: schoolId, migrationDeadline } =
+      await this.assertOwnsSchool(actor);
     const now = new Date();
 
     // Resolved FIRST, before the row exists, because this is the one input that
@@ -130,6 +129,20 @@ export class EnrollmentInvitesService {
     // owner could not resend it and could not see why. Failing here costs the
     // school a 500 and nothing else.
     const origin = this.webAppOrigin();
+
+    // The migration window, checked before anything else about the request.
+    // It is a property of the SCHOOL rather than of this invite, so a closed
+    // window means every field below is moot — and failing here keeps the
+    // message about the thing the owner actually has to act on.
+    if (!isMigrationWindowOpen(migrationDeadline, now)) {
+      throw new BadRequestException(
+        'Your migration window has closed, so new invites cannot be issued. ' +
+          'Migration is a one-time, free onboarding step for families who had ' +
+          'already paid you before joining Lopay — enrol new students normally ' +
+          'from here. If you still have families to migrate, contact Lopay to ' +
+          'have the window extended.',
+      );
+    }
 
     const parentPhone = canonicalizePhone(dto.parentPhone);
     const parentPhoneHash = phoneBlindIndex(dto.parentPhone);
@@ -152,6 +165,14 @@ export class EnrollmentInvitesService {
       dto.planStartDate,
       dto.installmentFrequency,
     );
+
+    // Already migrated, in any class, at any time — checked BEFORE the fee
+    // lookup because it is terminal in a way the fee is not. A school migrating
+    // Ada into Basic 2 when she was migrated in Basic 1 would otherwise be told
+    // "no fee is published for Basic 2" and sent to publish one that will not
+    // help them, only to be refused again for the real reason. Order the
+    // refusals so the first one names the thing the owner has to act on.
+    await this.assertNotAlreadyMigrated(schoolId, dto.studentName);
 
     // The fee is the school's PUBLISHED one, never a number typed per-invite.
     const classFee = await this.prisma.classFee.findFirst({
@@ -242,11 +263,9 @@ export class EnrollmentInvitesService {
   }
 
   /** The school owner's invites, newest first, filtered by status. */
-  async list(
-    actor: AuthUser,
-    filters: ListEnrollmentInvitesDto,
-  ): Promise<ReturnType<typeof paginate<SchoolInviteView>>> {
-    const schoolId = await this.assertOwnsSchool(actor);
+  async list(actor: AuthUser, filters: ListEnrollmentInvitesDto) {
+    const { id: schoolId, migrationDeadline } =
+      await this.assertOwnsSchool(actor);
     const { page, limit, skip } = parsePagination(filters.page, filters.limit, {
       defaultLimit: 25,
     });
@@ -274,12 +293,23 @@ export class EnrollmentInvitesService {
       this.prisma.enrollmentInvite.count({ where }),
     ]);
 
-    return paginate(
-      rows.map((row) => toSchoolInviteView(row, now)),
-      total,
-      page,
-      limit,
-    );
+    // The window rides on the list response rather than needing its own call.
+    // The screen has to state it BEFORE the owner fills in a form and is
+    // refused — a rule the UI only discovers by being told "no" is a rule the
+    // UI has failed to explain.
+    return {
+      ...paginate(
+        rows.map((row) => toSchoolInviteView(row, now)),
+        total,
+        page,
+        limit,
+      ),
+      migrationWindow: {
+        closesAt: migrationDeadline,
+        daysRemaining: migrationDaysRemaining(migrationDeadline, now),
+        isOpen: isMigrationWindowOpen(migrationDeadline, now),
+      },
+    };
   }
 
   /**
@@ -294,7 +324,7 @@ export class EnrollmentInvitesService {
    * family paying against it. Correcting that is `amend`.
    */
   async revoke(inviteId: string, actor: AuthUser, reason?: string) {
-    const schoolId = await this.assertOwnsSchool(actor);
+    const { id: schoolId } = await this.assertOwnsSchool(actor);
 
     const invite = await this.prisma.enrollmentInvite.findFirst({
       where: { id: inviteId, schoolId },
@@ -349,7 +379,7 @@ export class EnrollmentInvitesService {
    * owns the school.
    */
   async amend(inviteId: string, dto: AmendMigratedPaymentDto, actor: AuthUser) {
-    const schoolId = await this.assertOwnsSchool(actor);
+    const { id: schoolId } = await this.assertOwnsSchool(actor);
 
     const invite = await this.prisma.enrollmentInvite.findFirst({
       where: { id: inviteId, schoolId },
@@ -402,7 +432,7 @@ export class EnrollmentInvitesService {
    * one-live-invite-per-student slot.
    */
   async release(inviteId: string, actor: AuthUser, reason?: string) {
-    const schoolId = await this.assertOwnsSchool(actor);
+    const { id: schoolId } = await this.assertOwnsSchool(actor);
 
     const invite = await this.prisma.enrollmentInvite.findFirst({
       where: { id: inviteId, schoolId },
@@ -517,6 +547,17 @@ export class EnrollmentInvitesService {
     // Resolved before the transaction so a claim never waits on it, and so the
     // value written is the one that was true when the claim was made.
     const phoneMatched = await this.claimantPhoneMatches(invite, user.userId);
+
+    // Already migrated under a DIFFERENT invite.
+    //
+    // Reachable without any race: a school may issue an invite for Ada in
+    // Basic 1 and another for Ada in Basic 2, because the slot index is scoped
+    // per class and both are live. Claiming the first is fine; the second would
+    // violate `EnrollmentInvite_migrated_student_key` deep inside the
+    // transaction and surface as the generic "please try again", which is the
+    // one piece of advice that cannot work — retrying does the same thing.
+    // Checked here so the answer names the actual situation.
+    await this.assertNotAlreadyMigrated(invite.schoolId, invite.studentName);
 
     // `deletedAt` is checked, not just existence. The foreign key guarantees the
     // row is there, but a school can be soft-deleted while its invites are still
@@ -649,6 +690,22 @@ export class EnrollmentInvitesService {
       return await this.prisma.$transaction(work);
     } catch (error) {
       if (!EnrollmentInvitesService.isUniqueViolation(error)) throw error;
+
+      // The one-migration-per-student index is NOT a losable race: a second
+      // claim for a student already migrated fails identically however many
+      // times it is retried, so telling the parent to try again would be a
+      // loop. The pre-check in `claim` catches this in almost every case; this
+      // covers two claims landing in the same instant.
+      if (EnrollmentInvitesService.isAlreadyMigratedViolation(error)) {
+        this.logger.warn(
+          `Claim refused: student already migrated — ${errorMessage(error)}`,
+        );
+        throw new BadRequestException(
+          'This student has already been migrated onto Lopay. Ask your school to ' +
+            'check their plan rather than sending another invite.',
+        );
+      }
+
       this.logger.warn(
         `Claim lost a write race and was rolled back: ${errorMessage(error)}`,
       );
@@ -779,7 +836,9 @@ export class EnrollmentInvitesService {
    * three were exposed to. A rule that lives in one place cannot be forgotten by
    * the next method; the cost is a single indexed primary-key lookup.
    */
-  private async assertOwnsSchool(actor: AuthUser): Promise<string> {
+  private async assertOwnsSchool(
+    actor: AuthUser,
+  ): Promise<{ id: string; migrationDeadline: Date }> {
     if (actor.role !== UserRole.SCHOOL_OWNER || !actor.schoolId) {
       throw new ForbiddenException(
         'Only a school owner can manage enrollment invites',
@@ -788,7 +847,7 @@ export class EnrollmentInvitesService {
 
     const school = await this.prisma.school.findFirst({
       where: { id: actor.schoolId, ownerId: actor.userId, deletedAt: null },
-      select: { id: true },
+      select: { id: true, migrationDeadline: true },
     });
     if (!school) {
       throw new ForbiddenException(
@@ -796,7 +855,9 @@ export class EnrollmentInvitesService {
       );
     }
 
-    return school.id;
+    // The deadline rides along because `create` needs it and this is the one
+    // read that has already proven the caller may see this school at all.
+    return school;
   }
 
   /**
@@ -818,6 +879,9 @@ export class EnrollmentInvitesService {
     studentName: string,
     className: string,
   ): Promise<void> {
+    // NOTE: the permanent "already migrated in any class" rule is NOT here — it
+    // runs earlier in `create`, ahead of the fee lookup, because it is terminal
+    // and the fee is not. This method owns only the per-class slot.
     const existing = await this.prisma.enrollmentInvite.findFirst({
       where: {
         schoolId,
@@ -833,6 +897,40 @@ export class EnrollmentInvitesService {
       existing.status === EnrollmentInviteStatus.CLAIMED
         ? `${studentName} (${className}) has already been migrated and has a Lopay plan.`
         : `There is already a live invite for ${studentName} in ${className}. Cancel it before issuing another.`,
+    );
+  }
+
+  /**
+   * Refuse a student who has already been migrated once, whatever class they
+   * were in at the time.
+   *
+   * Matched case-insensitively for the same reason the slot check is, and with
+   * more at stake: the database index behind this one folds case too
+   * (`lower("studentName")`), unlike the older slot index, because retyping a
+   * child's name with different capitalisation would otherwise buy a second free
+   * migration — and retyping is exactly how the name gets entered.
+   *
+   * Scoped to CLAIMED, so a released claim frees the student again. That is what
+   * `release` is for: the claim reached the wrong person and never should have
+   * counted.
+   */
+  private async assertNotAlreadyMigrated(
+    schoolId: string,
+    studentName: string,
+  ): Promise<void> {
+    const migrated = await this.prisma.enrollmentInvite.findFirst({
+      where: {
+        schoolId,
+        studentName: { equals: studentName, mode: 'insensitive' },
+        status: EnrollmentInviteStatus.CLAIMED,
+      },
+      select: { className: true },
+    });
+    if (!migrated) return;
+
+    throw new BadRequestException(
+      `${studentName} has already been migrated onto Lopay (in ${migrated.className}), ` +
+        'and migration is a one-time step per student. Enrol them normally for this term.',
     );
   }
 
@@ -1129,6 +1227,32 @@ export class EnrollmentInvitesService {
    * does inspect the target, because there it genuinely has to tell two
    * reachable collisions apart.
    */
+  /**
+   * True when the violated constraint is the permanent one-migration-per-student
+   * index, rather than any of the recoverable collisions.
+   *
+   * Named by index, deliberately, where `isUniqueViolation` refuses to be: the
+   * two cases need OPPOSITE advice. Every other unique collision here is a race
+   * whose recovery genuinely is "try again, the retry's reads see the row that
+   * beat it". This one is a rule, and retrying it forever produces the same
+   * refusal. Getting that backwards sends a parent into a loop.
+   */
+  private static isAlreadyMigratedViolation(error: unknown): boolean {
+    if (
+      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+      error.code !== 'P2002'
+    ) {
+      return false;
+    }
+    const target: unknown = error.meta?.target;
+    const asText = Array.isArray(target)
+      ? target.filter((p): p is string => typeof p === 'string').join(',')
+      : typeof target === 'string'
+        ? target
+        : '';
+    return asText.includes('EnrollmentInvite_migrated_student_key');
+  }
+
   private static isUniqueViolation(error: unknown): boolean {
     return (
       error instanceof Prisma.PrismaClientKnownRequestError &&

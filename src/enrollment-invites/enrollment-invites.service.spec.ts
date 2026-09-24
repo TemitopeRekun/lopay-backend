@@ -102,6 +102,31 @@ describe('EnrollmentInvitesService', () => {
     ...overrides,
   });
 
+  /**
+   * Stub `enrollmentInvite.findFirst` the way the database behaves.
+   *
+   * `create` now makes TWO lookups through it — "already migrated, any class"
+   * (CLAIMED only) and "a live invite for this class" (PENDING/DISPUTED/CLAIMED)
+   * — so a mock that ignores `where.status` lets the first answer for the
+   * second, and the wrong refusal comes back.
+   */
+  const stubInviteLookup = (
+    row: { status: EnrollmentInviteStatus; className?: string } | null,
+  ) =>
+    prisma.enrollmentInvite.findFirst.mockImplementation(
+      ({ where }: { where: { status?: unknown } }) => {
+        if (!row) return Promise.resolve(null);
+        const wanted = where.status;
+        const matches =
+          typeof wanted === 'string'
+            ? wanted === row.status
+            : Array.isArray((wanted as { in?: unknown[] })?.in)
+              ? (wanted as { in: unknown[] }).in.includes(row.status)
+              : true;
+        return Promise.resolve(matches ? row : null);
+      },
+    );
+
   beforeEach(() => {
     prisma = {
       enrollmentInvite: {
@@ -121,6 +146,9 @@ describe('EnrollmentInvitesService', () => {
           id: 'school-1',
           name: 'Acme Academy',
           ownerId: 'owner-1',
+          // Migration window open by default; the tests that care about it
+          // closed say so explicitly.
+          migrationDeadline: futureDate(30),
         }),
         findUnique: jest.fn().mockResolvedValue({ ownerId: 'owner-1' }),
       },
@@ -421,17 +449,151 @@ describe('EnrollmentInvitesService', () => {
     });
 
     it('refuses a second live invite for the same student', async () => {
-      prisma.enrollmentInvite.findFirst.mockResolvedValue({
-        status: EnrollmentInviteStatus.PENDING,
-      });
+      stubInviteLookup({ status: EnrollmentInviteStatus.PENDING });
       await expect(service.create(validDto(), OWNER)).rejects.toThrow(
         /already a live invite/,
       );
       expect(prisma.enrollmentInvite.create).not.toHaveBeenCalled();
     });
 
+    /**
+     * The migration window bounds ISSUING.
+     *
+     * Free migration is priced as one-time acquisition, redeemed when the family
+     * enrols normally next term. Unbounded, a school could tell each term's
+     * families to pay it directly and migrate them free for ever, and the
+     * platform would never earn on that school at all.
+     */
+    describe('the migration window', () => {
+      const closeWindow = (daysAgo = 1) =>
+        prisma.school.findFirst.mockResolvedValue({
+          id: 'school-1',
+          name: 'Acme Academy',
+          ownerId: 'owner-1',
+          migrationDeadline: new Date(Date.now() - daysAgo * DAY_MS),
+        });
+
+      it('refuses a new invite once the window has closed', async () => {
+        closeWindow();
+
+        await expect(service.create(validDto(), OWNER)).rejects.toThrow(
+          /migration window has closed/i,
+        );
+        expect(prisma.enrollmentInvite.create).not.toHaveBeenCalled();
+      });
+
+      it('tells the owner what to do instead, and that it can be extended', async () => {
+        closeWindow();
+
+        // A refusal that only says "no" turns into a support ticket. This one
+        // has to name both the ordinary path and the exception.
+        await expect(service.create(validDto(), OWNER)).rejects.toThrow(
+          /enrol new students normally/i,
+        );
+        await expect(service.create(validDto(), OWNER)).rejects.toThrow(
+          /contact Lopay/i,
+        );
+      });
+
+      it('checks the window BEFORE anything else about the request', async () => {
+        closeWindow();
+
+        // A closed window makes every other field moot, and a school told
+        // "that phone number is invalid" would fix the phone and be refused
+        // again for the real reason.
+        await expect(
+          service.create(validDto({ parentPhone: 'nonsense' }), OWNER),
+        ).rejects.toThrow(/migration window has closed/i);
+      });
+
+      it('still issues while the window is open', async () => {
+        prisma.enrollmentInvite.create.mockResolvedValue(storedInvite());
+
+        await expect(service.create(validDto(), OWNER)).resolves.toBeDefined();
+      });
+
+      it('does NOT block a parent claiming after the window closes', async () => {
+        // The window governs issuing. An invite sent on day 58 and opened on
+        // day 61 must still work — the invite has its own expiry, and stranding
+        // a family because their school was slow to send is not the point.
+        closeWindow();
+        prisma.enrollmentInvite.findUnique.mockResolvedValue(storedInvite());
+
+        await expect(service.claim(VALID_TOKEN, PARENT)).resolves.toMatchObject(
+          { enrollmentId: 'enrollment-1' },
+        );
+      });
+
+      it('reports the window alongside the list, so the UI can say it first', async () => {
+        const page = await service.list(OWNER, {});
+
+        expect(page.migrationWindow).toMatchObject({ isOpen: true });
+        expect(page.migrationWindow.daysRemaining).toBeGreaterThan(0);
+      });
+
+      it('reports a closed window as closed, with zero days left', async () => {
+        closeWindow(5);
+
+        const page = await service.list(OWNER, {});
+        expect(page.migrationWindow).toMatchObject({
+          isOpen: false,
+          daysRemaining: 0,
+        });
+      });
+    });
+
+    /**
+     * One migration per student, ever — whatever class they were in.
+     *
+     * The slot rule is per class, because two live invites for one class are a
+     * duplicate. className changes every term, so on its own it would let Ada be
+     * migrated in Basic 1 this year and Basic 2 the next, free each time.
+     */
+    describe('one migration per student', () => {
+      it('refuses a student already migrated in a DIFFERENT class', async () => {
+        stubInviteLookup({
+          className: 'Basic 1',
+          status: EnrollmentInviteStatus.CLAIMED,
+        });
+
+        await expect(
+          service.create(validDto({ className: 'Basic 2' }), OWNER),
+        ).rejects.toThrow(/already been migrated onto Lopay \(in Basic 1\)/);
+        expect(prisma.enrollmentInvite.create).not.toHaveBeenCalled();
+      });
+
+      it('names the ordinary path rather than just refusing', async () => {
+        stubInviteLookup({
+          className: 'Basic 1',
+          status: EnrollmentInviteStatus.CLAIMED,
+        });
+
+        await expect(
+          service.create(validDto({ className: 'Basic 2' }), OWNER),
+        ).rejects.toThrow(/enrol them normally for this term/i);
+      });
+
+      it('ignores className when looking for a previous migration', async () => {
+        stubInviteLookup(null);
+        prisma.enrollmentInvite.create.mockResolvedValue(storedInvite());
+
+        await service.create(validDto({ className: 'Basic 2' }), OWNER);
+
+        const migratedCheck = prisma.enrollmentInvite.findFirst.mock.calls.find(
+          ([arg]) => arg.where.status === EnrollmentInviteStatus.CLAIMED,
+        );
+        expect(migratedCheck).toBeDefined();
+        expect(migratedCheck![0].where).not.toHaveProperty('className');
+        // Case-folded, because retyping a name is how it gets entered.
+        expect(migratedCheck![0].where.studentName).toMatchObject({
+          mode: 'insensitive',
+        });
+      });
+    });
+
     it('says so plainly when the student was already migrated', async () => {
-      prisma.enrollmentInvite.findFirst.mockResolvedValue({
+      stubInviteLookup({
+        className: 'Basic 1',
         status: EnrollmentInviteStatus.CLAIMED,
       });
       await expect(service.create(validDto(), OWNER)).rejects.toThrow(
@@ -491,9 +653,7 @@ describe('EnrollmentInvitesService', () => {
       // The partial unique index compares exactly, and a register typed twice
       // gives "Ada Lovelace" and "ada lovelace". Two live invites, two claims,
       // two Child rows. The service check is deliberately the wider of the two.
-      prisma.enrollmentInvite.findFirst.mockResolvedValue({
-        status: EnrollmentInviteStatus.PENDING,
-      });
+      stubInviteLookup({ status: EnrollmentInviteStatus.PENDING });
 
       await expect(service.create(validDto(), OWNER)).rejects.toThrow(
         /already a live invite/,
