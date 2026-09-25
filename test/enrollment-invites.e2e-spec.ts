@@ -1122,6 +1122,141 @@ describe('Enrollment invites (real DB)', () => {
     expect(row.status).toBe(EnrollmentInviteStatus.CLAIMED);
   });
 
+  // ===================== bounding free migration ===========================
+
+  /**
+   * Free migration is priced as one-time acquisition — the family's NEXT term is
+   * a normal paid enrollment. These two rules are what make "one-time" true;
+   * without them a school could route every term's families through migration
+   * and the platform would never earn on that school at all.
+   */
+  describe('the migration window', () => {
+    const setDeadline = (at: Date) =>
+      prisma.school.update({
+        where: { id: schoolId },
+        data: { migrationDeadline: at },
+      });
+
+    afterEach(() => setDeadline(new Date(Date.now() + 60 * DAY_MS)));
+
+    it('refuses to issue once the window has closed', async () => {
+      await setDeadline(new Date(Date.now() - DAY_MS));
+
+      await expect(createInvite()).rejects.toThrow(
+        /migration window has closed/i,
+      );
+      expect(await prisma.enrollmentInvite.count({ where: { schoolId } })).toBe(
+        0,
+      );
+    });
+
+    it('lets a parent claim an invite issued BEFORE the window closed', async () => {
+      // The rule bounds issuing, not claiming. An invite sent on day 58 and
+      // opened on day 61 must still work, or families are stranded by their
+      // school's slowness.
+      const created = await createInvite();
+      await setDeadline(new Date(Date.now() - DAY_MS));
+
+      await expect(
+        invites.claim(tokenFrom(created.claimUrl), parent),
+      ).resolves.toMatchObject({ studentName: 'Ada Lovelace' });
+    });
+
+    it('reports the window on the list so the screen can say it first', async () => {
+      await setDeadline(new Date(Date.now() + 10 * DAY_MS));
+
+      const page = await invites.list(owner, {});
+      expect(page.migrationWindow.isOpen).toBe(true);
+      expect(page.migrationWindow.daysRemaining).toBe(10);
+    });
+
+    it('cannot be left unset by any insert path', async () => {
+      // The onboarding service sets this explicitly, but it is not the only way
+      // a School row comes into existence — a seed, a backfill or a future
+      // script could all skip it. A NULL here would mean "window state unknown",
+      // and the code would have to guess; the column default removes the
+      // question instead of answering it.
+      //
+      // Asserted against the schema rather than by inserting a school, because
+      // `School.ownerId` is unique and a second school needs a whole second
+      // owner — setup that would test Prisma, not this guarantee.
+      const [column] = await prisma.$queryRaw<
+        { is_nullable: string; column_default: string | null }[]
+      >`SELECT is_nullable, column_default
+          FROM information_schema.columns
+         WHERE table_name = 'School' AND column_name = 'migrationDeadline'`;
+
+      expect(column.is_nullable).toBe('NO');
+      expect(column.column_default).toContain('interval');
+
+      // And the default really does land in the future, not merely exist.
+      const [probe] = await prisma.$queryRaw<{ ahead: boolean }[]>`
+        SELECT (now() + interval '60 days') > now() AS ahead`;
+      expect(probe.ahead).toBe(true);
+    });
+  });
+
+  describe('one migration per student, ever', () => {
+    it('refuses a second invite for a student already migrated in another class', async () => {
+      const created = await createInvite();
+      await invites.claim(tokenFrom(created.claimUrl), parent);
+
+      await expect(createInvite({ className: 'Basic 2' })).rejects.toThrow(
+        /already been migrated onto Lopay/i,
+      );
+    });
+
+    /**
+     * The index is the guarantee, and it folds case.
+     *
+     * The older slot index compares `studentName` exactly, which is fine because
+     * the service check in front of it is wider. This one is the permanent,
+     * money-bearing rule: an exact comparison would make "Ada Lovelace" and
+     * "ada lovelace" two free migrations for one child, reachable by retyping a
+     * name — which is exactly how names get entered.
+     */
+    it('is enforced by the database even when the service check is bypassed', async () => {
+      const created = await createInvite();
+      await invites.claim(tokenFrom(created.claimUrl), parent);
+
+      // Straight to the database, past every service-level guard, with the name
+      // in different case and a different class.
+      await expect(
+        prisma.enrollmentInvite.create({
+          data: {
+            schoolId,
+            createdByUserId: ownerUserId,
+            studentName: 'ADA LOVELACE',
+            className: 'Basic 2',
+            totalSchoolFee: 10_000_000,
+            amountAlreadyPaid: 0,
+            phoneNumber: '+2348012345678',
+            parentPhoneHash: 'whatever',
+            installmentFrequency: 'MONTHLY',
+            planStartDate: new Date(),
+            termEndDate: new Date(Date.now() + 90 * DAY_MS),
+            tokenHash: `dup_${randomUUID()}`,
+            expiresAt: new Date(Date.now() + DAY_MS),
+            status: 'CLAIMED',
+          },
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('frees the student again once a wrong claim is released', async () => {
+      // Release exists because the claim reached the wrong person; it must not
+      // burn the student's one migration. The index is scoped to CLAIMED, so a
+      // released (REVOKED) invite stops holding the slot.
+      const created = await createInvite();
+      await invites.claim(tokenFrom(created.claimUrl), parent);
+      await invites.release(created.invite.id, owner, 'wrong parent');
+
+      await expect(createInvite()).resolves.toMatchObject({
+        invite: { studentName: 'Ada Lovelace' },
+      });
+    });
+  });
+
   it('hides one school’s invites from another', async () => {
     await createInvite();
 

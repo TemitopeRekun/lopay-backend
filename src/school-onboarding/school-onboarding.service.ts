@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { MIGRATION_WINDOW_DAYS } from '../enrollment-invites/invite-policy';
 import { AuthService } from '@thallesp/nestjs-better-auth';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserRole } from '../generated/prisma/client';
@@ -74,6 +75,13 @@ export class SchoolOnboardingService {
           accountName: dto.accountName,
           accountNumber: dto.accountNumber,
           ownerId: ownerUserId,
+          // Migration is free and priced as one-time acquisition, so the window
+          // to issue invites opens now and closes on its own. Set explicitly as
+          // well as defaulted in the database, so the rule is visible at the one
+          // place a school comes into existence rather than only in a migration.
+          migrationDeadline: new Date(
+            Date.now() + MIGRATION_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+          ),
         },
       });
       const user = await this.prisma.user.findUniqueOrThrow({

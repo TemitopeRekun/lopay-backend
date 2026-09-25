@@ -10,13 +10,16 @@ import {
   MAX_INVITE_EXPIRY_DAYS,
   MAX_PLAN_START_BACKDATE_MS,
   MAX_PLAN_START_FUTURE_DAYS,
+  MIGRATION_WINDOW_DAYS,
   MIN_INVITE_EXPIRY_DAYS,
   SLOT_HOLDING_STATUSES,
+  derivePlanEnd,
   expiryFrom,
   hasExpired,
   isActionable,
+  isMigrationWindowOpen,
+  migrationDaysRemaining,
   resolveExpiryDays,
-  derivePlanEnd,
   validatePlanStart,
 } from './invite-policy';
 
@@ -270,5 +273,82 @@ describe('invite policy', () => {
 
       expect(end.toISOString().slice(0, 10)).toBe('2026-04-30');
     });
+  });
+});
+
+/**
+ * The migration window.
+ *
+ * Migration is free, and that is only affordable because it is one-time: the
+ * family's NEXT term is a normal paid enrollment. Without a bound, a school
+ * could route every term's families through it and never generate revenue.
+ */
+describe('isMigrationWindowOpen', () => {
+  const now = new Date('2026-09-22T12:00:00.000Z');
+
+  it('is open while the deadline is ahead', () => {
+    expect(isMigrationWindowOpen(new Date('2026-10-01T00:00:00Z'), now)).toBe(
+      true,
+    );
+  });
+
+  it('is closed once the deadline has passed', () => {
+    expect(isMigrationWindowOpen(new Date('2026-09-01T00:00:00Z'), now)).toBe(
+      false,
+    );
+  });
+
+  it('is closed exactly ON the deadline', () => {
+    // Strictly-after, so the boundary is not a coin flip between two callers
+    // reading the same instant.
+    expect(isMigrationWindowOpen(now, now)).toBe(false);
+  });
+
+  it('is open one millisecond before it', () => {
+    expect(isMigrationWindowOpen(new Date(now.getTime() + 1), now)).toBe(true);
+  });
+});
+
+describe('migrationDaysRemaining', () => {
+  const now = new Date('2026-09-22T12:00:00.000Z');
+
+  it('rounds partial days UP, so "1 day left" never means "already closed"', () => {
+    // Shown to a school owner deciding whether to finish today. Rounding down
+    // would display "0 days left" for a window that is still open.
+    expect(migrationDaysRemaining(new Date('2026-09-23T01:00:00Z'), now)).toBe(
+      1,
+    );
+  });
+
+  it('never goes negative', () => {
+    expect(migrationDaysRemaining(new Date('2026-08-01T00:00:00Z'), now)).toBe(
+      0,
+    );
+  });
+
+  it('counts a full window', () => {
+    expect(
+      migrationDaysRemaining(
+        new Date(now.getTime() + MIGRATION_WINDOW_DAYS * 24 * 60 * 60 * 1000),
+        now,
+      ),
+    ).toBe(MIGRATION_WINDOW_DAYS);
+  });
+});
+
+describe('MIGRATION_WINDOW_DAYS', () => {
+  it('is long enough for two invite expiry cycles', () => {
+    // A school that misses a parent has to re-issue, so a window shorter than
+    // two DEFAULT_INVITE_EXPIRY_DAYS cycles cannot absorb one missed round.
+    expect(MIGRATION_WINDOW_DAYS).toBeGreaterThanOrEqual(
+      DEFAULT_INVITE_EXPIRY_DAYS * 2,
+    );
+  });
+
+  it('is shorter than a term, so it cannot cover the next intake', () => {
+    // A term is MONTHLY_INSTALLMENTS months. A window that spans one would let
+    // a school migrate the following term's families too — the thing it exists
+    // to prevent.
+    expect(MIGRATION_WINDOW_DAYS).toBeLessThan(MONTHLY_INSTALLMENTS * 30);
   });
 });

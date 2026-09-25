@@ -163,6 +163,7 @@ export const SchoolScalarFieldEnum = {
   paystackSubaccountCode: 'paystackSubaccountCode',
   paystackSubaccountActive: 'paystackSubaccountActive',
   deletedAt: 'deletedAt',
+  migrationDeadline: 'migrationDeadline',
   createdAt: 'createdAt'
 } as const
 
