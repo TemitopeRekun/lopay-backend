@@ -1,6 +1,6 @@
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
-import { bearer, customSession } from 'better-auth/plugins';
+import { bearer, customSession, oneTimeToken } from 'better-auth/plugins';
 import type { PrismaClient } from '../generated/prisma/client';
 import {
   guardUserCreate,
@@ -99,6 +99,51 @@ export function createAuth(prisma: PrismaClient) {
       // just ours. Better Auth's reader (`decryptOAuthToken`) sniffs the ciphertext
       // shape, so any rows written before this was enabled keep working.
       encryptOAuthTokens: true,
+
+      // Attach Google to an account that already exists under the same email.
+      //
+      // ## Why both flags are needed, and why the first alone does nothing
+      //
+      // `handleOAuthUserInfo` refuses to link when
+      //
+      //     (!isTrustedProvider && !userInfo.emailVerified)
+      //       || (requireLocalEmailVerified && !dbUser.user.emailVerified)
+      //
+      // Only the SECOND clause was ever firing here. `trustedProviders` alone
+      // would have changed nothing: `requireLocalEmailVerified` defaults to true,
+      // this app sends no verification mail, and every row in `User` therefore
+      // has `emailVerified = false` — all 21 of them in production, checked.
+      // So "Continue with Google" on an existing email/password account failed
+      // 100% of the time, redirected to `errorCallbackURL`, and (until the web
+      // client learned to read `?error=`) said nothing at all.
+      //
+      // ## The risk this accepts, and what bounds it
+      //
+      // Password sign-up proves nothing about the mailbox. So an attacker who
+      // registers `victim@gmail.com` BEFORE the victim does, and waits, has their
+      // password merged into the victim's account the moment the victim arrives
+      // via Google. That vector is real and is the reason this was off.
+      //
+      // Two things bound it, and neither is a substitute for verifying email:
+      //
+      //   - it is a race the attacker has to win, against a specific person, on
+      //     a platform they have to know that person is about to join;
+      //   - it closes per account on first use. Google asserts `email_verified`,
+      //     so the link sets `emailVerified = true` on the row (see the same
+      //     function), and `requireLocalEmailVerified` stops being the thing
+      //     standing between that account and a link.
+      //
+      // `OAuthHandoffController` narrows the window further by revoking every
+      // other session on the account at link time, so an attacker already signed
+      // in is cut off rather than left alongside the owner.
+      //
+      // The durable fix is email verification; when a mail provider exists, set
+      // `requireLocalEmailVerified` back to true and this whole trade goes away.
+      accountLinking: {
+        enabled: true,
+        trustedProviders: ['google'],
+        requireLocalEmailVerified: false,
+      },
     },
 
     // Route Better Auth's own diagnostics through the Nest logger with PII
@@ -190,6 +235,42 @@ export function createAuth(prisma: PrismaClient) {
 
     plugins: [
       bearer(),
+
+      // How a browser-wide OAuth redirect hands a session to a SPA on another
+      // origin, without either side depending on a cross-site cookie.
+      //
+      // The web client lives on `lopay.netlify.app` and this API on
+      // `lopay-backend.onrender.com`. They are different SITES, so every cookie
+      // this server sets is third-party to the SPA — and the OAuth handshake
+      // needs a cookie to travel in the one direction that guarantees a miss:
+      // the state cookie is WRITTEN during a cross-origin fetch (partition: the
+      // SPA's site) and READ during a top-level navigation where this API is
+      // first-party (partition: this API's site). Safari blocks the write
+      // outright, Firefox partitions it into a jar the callback never consults,
+      // and `Partitioned`/CHIPS makes it worse rather than better for exactly
+      // that reason. `OAuthHandoffController` fixes the write side by starting
+      // the flow as a top-level navigation; this plugin fixes the read side.
+      //
+      // At the end of a successful callback the handoff route mints one of these
+      // and puts it in the FRAGMENT of the redirect back to the SPA — never the
+      // query string, so it reaches no access log and no `Referer`. The SPA
+      // exchanges it at `POST /api/auth/one-time-token/verify`, an ordinary CORS
+      // request carrying no cookies, and the `bearer` plugin above turns that
+      // response's session cookie into the `set-auth-token` header the client
+      // already persists. Nothing in the path needs a cookie to cross a site
+      // boundary, which is what makes it work identically in Safari, Firefox,
+      // a Chrome incognito window and the Capacitor shell.
+      //
+      // `storeToken: 'hashed'` for the same reason `EnrollmentInvite.tokenHash`
+      // is hashed: this is a bearer credential that exchanges for a full
+      // session, and a database dump must not contain a replayable copy. Three
+      // minutes is a redirect hop, not a session — it is consumed within a
+      // second of being minted, and the row is deleted on use.
+      oneTimeToken({
+        expiresIn: 3,
+        storeToken: 'hashed',
+      }),
+
       customSession(async ({ user, session }) => {
         // Better Auth's base user type doesn't include our `role` column; read it
         // off a narrowed view rather than `any`.

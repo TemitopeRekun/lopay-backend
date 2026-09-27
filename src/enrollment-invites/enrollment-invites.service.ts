@@ -371,6 +371,128 @@ export class EnrollmentInvitesService {
   }
 
   /**
+   * Mint a fresh link for an invite whose own link is gone.
+   *
+   * ## Why this has to exist
+   *
+   * The raw token is returned exactly once and stored only as a SHA-256 digest,
+   * so no endpoint can reproduce it — a property worth keeping, and the reason
+   * `buildShare` says so on screen. But "worth keeping" is not the same as
+   * "the school should pay for it". Before this, a closed tab meant the owner
+   * had to revoke the invite and re-enter every field by hand, and re-entering
+   * is exactly where the already-paid figure gets mistyped — a number the
+   * parent is then asked to confirm as their own balance.
+   *
+   * Re-issuing in place costs nothing and keeps the security property intact:
+   * `tokenHash` is overwritten, so the previous link is dead the moment this
+   * returns, whoever is holding it.
+   *
+   * ## Why the row is updated rather than replaced
+   *
+   * A revoke-and-recreate pair would work, but it churns the one-live-invite
+   * slot inside a transaction for no gain and leaves the school's list showing
+   * two rows for one child — with the dead one carrying the history. Updating
+   * keeps one row per student, which is what every other part of this feature
+   * assumes, and the audit trail records the re-issue against the same entity.
+   *
+   * ## What it refuses, and why each
+   *
+   *   - **CLAIMED** — there is a live plan and a family paying against it.
+   *     Correcting the figure is `amend`; undoing the wrong claimant is
+   *     `release`. Minting a second link would be neither.
+   *   - **DISPUTED** — the parent has said the amount is wrong. Handing them
+   *     the same figures again is not a resend, it is ignoring them.
+   *   - **REVOKED** — the school cancelled it deliberately, almost always
+   *     because a detail was wrong. Re-issuing the same details would restore
+   *     the mistake they took an action to remove.
+   *
+   * PENDING (lost the link) and EXPIRED (nobody claimed in time) are the two
+   * that mean "send it again", and they are the two allowed.
+   */
+  async reissue(inviteId: string, actor: AuthUser) {
+    const { id: schoolId, migrationDeadline } =
+      await this.assertOwnsSchool(actor);
+    const now = new Date();
+
+    // Resolved before anything is written, for the same reason `create` does
+    // it: the raw token is the only copy and it dies with the stack frame if
+    // this throws after the update.
+    const origin = this.webAppOrigin();
+
+    // Gated on the window exactly as issuing is, because that is what this is.
+    // Claiming is deliberately NOT gated (see `isMigrationWindowOpen`) — a
+    // parent must be able to open a link their school sent before the deadline
+    // — but minting a NEW credential after it has passed would make the bound
+    // on free migration unenforceable by simply re-issuing forever.
+    if (!isMigrationWindowOpen(migrationDeadline, now)) {
+      throw new BadRequestException(
+        'Your migration window has closed, so new invite links cannot be issued. ' +
+          'Contact Lopay if you still have families to migrate.',
+      );
+    }
+
+    const invite = await this.prisma.enrollmentInvite.findFirst({
+      where: { id: inviteId, schoolId },
+    });
+    if (!invite) throw new NotFoundException('Invite not found');
+
+    const token = mintInviteToken();
+    const expiresAt = expiryFrom(now);
+
+    // Conditional, like every other write here: two owners tapping at once, or
+    // a re-issue racing a claim, must resolve to exactly one winner rather than
+    // both "succeeding" — and the loser must not be the one whose link the
+    // school actually sent.
+    const reissued = await this.prisma.enrollmentInvite.updateMany({
+      where: {
+        id: inviteId,
+        schoolId,
+        status: {
+          in: [EnrollmentInviteStatus.PENDING, EnrollmentInviteStatus.EXPIRED],
+        },
+      },
+      data: {
+        status: EnrollmentInviteStatus.PENDING,
+        tokenHash: token.tokenHash,
+        expiresAt,
+      },
+    });
+
+    if (reissued.count === 0) {
+      throw new BadRequestException(REISSUE_REFUSALS[invite.status]);
+    }
+
+    await this.audit.record({
+      // Deliberately the CREATED action rather than a new one: what happened is
+      // that a fresh claim credential was minted for this student, which is
+      // what that action already means. `reissuedFrom` is what tells the two
+      // apart for anyone reading the trail.
+      action: AuditAction.ENROLLMENT_INVITE_CREATED,
+      entityType: 'EnrollmentInvite',
+      entityId: inviteId,
+      actor: { userId: actor.userId, role: actor.role },
+      schoolId,
+      before: { status: invite.status, expiresAt: invite.expiresAt },
+      after: { status: EnrollmentInviteStatus.PENDING, expiresAt },
+      metadata: {
+        reissuedFrom: invite.status,
+        studentName: invite.studentName,
+        className: invite.className,
+        // As in `create`: neither the phone number nor its blind index is
+        // recorded here. See the note there.
+      },
+    });
+
+    return {
+      invite: toSchoolInviteView({ ...invite, expiresAt }, now),
+      ...EnrollmentInvitesService.buildShare(origin, token.token, {
+        ...invite,
+        expiresAt,
+      }),
+    };
+  }
+
+  /**
    * Correct the already-paid figure on a plan that came from an invite —
    * including one the parent disputed after claiming.
    *
@@ -634,21 +756,14 @@ export class EnrollmentInvitesService {
     // told about in the abstract ("claimed by their parent") is one nobody can
     // check. `release` is what they do about it.
     const claimant = await this.describeClaimant(user.userId);
-    await this.notifyUser(school.ownerId, {
-      title: phoneMatched
-        ? 'Migration invite claimed'
-        : 'Migration invite claimed — check this one',
-      message: phoneMatched
-        ? `${invite.studentName} (${invite.className}) was claimed by ${claimant} and now has an active Lopay plan.`
-        : `${invite.studentName} (${invite.className}) was claimed by ${claimant}, whose phone number is NOT the one you addressed the invite to. ` +
-          'If this is not the right parent, open the invite and remove the claim.',
-      type: phoneMatched ? NotificationType.PAYMENT : NotificationType.ALERT,
-      // A mismatch needs the invite list, which is where `release` lives; a
-      // clean claim belongs on the dashboard, where the roster is. There is no
-      // `/school/students` route and the web app has no catch-all, so a link
-      // that guesses renders a blank screen.
-      link: phoneMatched ? '/school-owner-dashboard' : '/school/invites',
-    });
+    await this.notifyUser(
+      school.ownerId,
+      EnrollmentInvitesService.claimNotification(
+        invite,
+        claimant,
+        phoneMatched,
+      ),
+    );
 
     const { enrollment } = result;
     return {
@@ -784,24 +899,140 @@ export class EnrollmentInvitesService {
   // ================================ upkeep =================================
 
   /**
-   * Retire invites whose window has closed. Driven by the scheduler.
+   * Retire invites whose window has closed, and tell the school which ones.
    *
    * Every read path re-checks the clock, so an un-swept invite is never
-   * claimable — this exists so the school's list tells the truth and so the
-   * student's slot is released without anyone having to notice.
+   * claimable — the sweep exists so the school's list tells the truth and so
+   * the student's slot is released without anyone having to notice.
+   *
+   * The notification is the part that was missing, and its absence is how a
+   * migration campaign fails quietly: an invite lapsed, a row changed colour on
+   * a screen nobody had open, and the family was simply never migrated. A
+   * school only finds out by going and looking, which is precisely the thing
+   * they have no reason to do.
+   *
+   * Rows are read BEFORE the update because afterwards there is no way to tell
+   * which ones this sweep retired from the ones already sitting at EXPIRED.
    */
   async expireStale(now: Date = new Date()): Promise<number> {
-    const { count } = await this.prisma.enrollmentInvite.updateMany({
+    const due = await this.prisma.enrollmentInvite.findMany({
       where: {
         status: { in: [...EXPIRABLE_STATUSES] },
         expiresAt: { lte: now },
       },
+      select: { id: true, schoolId: true, studentName: true, className: true },
+    });
+    if (due.length === 0) return 0;
+
+    const { count } = await this.prisma.enrollmentInvite.updateMany({
+      where: { id: { in: due.map((invite) => invite.id) } },
       data: { status: EnrollmentInviteStatus.EXPIRED },
     });
-    if (count > 0) {
-      this.logger.log(`Expired ${count} enrollment invite(s)`);
-    }
+    this.logger.log(`Expired ${count} enrollment invite(s)`);
+
+    await this.notifySchools(due, (students, ownerId) =>
+      this.notifyUser(ownerId, {
+        title: 'Migration invites expired unclaimed',
+        message:
+          `${describeStudents(students)} did not confirm before the link expired, so ` +
+          'nothing has been added to their account. Open the invite and send a new link.',
+        type: NotificationType.ALERT,
+        link: '/school/invites',
+      }),
+    );
+
     return count;
+  }
+
+  /**
+   * Warn a school about links about to lapse, while there is still time to
+   * chase the family.
+   *
+   * ## Why the school and not the parent
+   *
+   * Because there is no way to reach the parent. The whole premise of this
+   * feature is that they have no Lopay account yet, so there is no `userId` to
+   * write a notification against — `NotificationsService.create` requires one —
+   * and this platform has no SMS or email provider to fall back on. The only
+   * party with a channel to that family is the school, which already has the
+   * thread the link was sent in. Telling them, in time, IS the reminder;
+   * anything addressed to the parent would need a messaging provider this app
+   * does not have.
+   *
+   * ## Why a fixed window and no `remindedAt` column
+   *
+   * Each daily run selects the invites lapsing in exactly one 24-hour bucket,
+   * `[now + 3d, now + 4d)`. Every PENDING invite passes through exactly one
+   * such bucket in its life, so it is reminded once — without a column to track
+   * it, and without a migration to add one.
+   *
+   * The trade is that a run missed entirely — a deploy, an outage — skips that
+   * day's cohort rather than catching them late. Acceptable: this is a courtesy
+   * nudge, not a correctness guarantee. Nothing about whether an invite can be
+   * claimed depends on it, and the expiry notice above still fires.
+   *
+   * DISPUTED is excluded deliberately. Those have not gone quiet — the parent
+   * answered, and said the figure is wrong. The school already has that
+   * notification, and chasing them for a confirmation they have refused to give
+   * would be the wrong ask.
+   */
+  async remindExpiring(now: Date = new Date()): Promise<number> {
+    const from = new Date(now.getTime() + EXPIRY_REMINDER_LEAD_MS);
+    const to = new Date(from.getTime() + DAY_IN_MS);
+
+    const soon = await this.prisma.enrollmentInvite.findMany({
+      where: {
+        status: EnrollmentInviteStatus.PENDING,
+        expiresAt: { gte: from, lt: to },
+      },
+      select: { id: true, schoolId: true, studentName: true, className: true },
+    });
+    if (soon.length === 0) return 0;
+
+    await this.notifySchools(soon, (students, ownerId) =>
+      this.notifyUser(ownerId, {
+        title: 'Migration invites expire in 3 days',
+        message:
+          `${describeStudents(students)} have not confirmed yet. Send a reminder, ` +
+          'or the link will expire and you will need to issue a new one.',
+        type: NotificationType.ALERT,
+        link: '/school/invites',
+      }),
+    );
+
+    this.logger.log(`Reminded schools about ${soon.length} expiring invite(s)`);
+    return soon.length;
+  }
+
+  /**
+   * Group invites by school and notify each owner once.
+   *
+   * One notification per school rather than per invite, because a school
+   * migrating thirty families would otherwise get thirty notifications in one
+   * tick — which lands the same as getting none. A school soft-deleted since
+   * the invites were issued is skipped rather than notified about a roster it
+   * no longer has.
+   */
+  private async notifySchools(
+    invites: readonly InviteSummary[],
+    notify: (students: InviteSummary[], ownerId: string) => Promise<void>,
+  ): Promise<void> {
+    const bySchool = new Map<string, InviteSummary[]>();
+    for (const invite of invites) {
+      const group = bySchool.get(invite.schoolId);
+      if (group) group.push(invite);
+      else bySchool.set(invite.schoolId, [invite]);
+    }
+
+    const schools = await this.prisma.school.findMany({
+      where: { id: { in: [...bySchool.keys()] }, deletedAt: null },
+      select: { id: true, ownerId: true },
+    });
+
+    for (const school of schools) {
+      const students = bySchool.get(school.id);
+      if (students?.length) await notify(students, school.ownerId);
+    }
   }
 
   // =============================== internals ===============================
@@ -1008,21 +1239,40 @@ export class EnrollmentInvitesService {
    * actually be handled — by telling the school who claimed, flagging a number
    * that does not match, and letting them undo it (`release`).
    *
-   * A null `phoneHash` on the account returns false rather than throwing: it
-   * means "we have nothing to compare", which is worth showing the school and is
-   * not grounds to refuse anyone.
+   * ## Why the answer is three-valued, not two
+   *
+   * Because "we compared and they differ" and "there was nothing to compare"
+   * are different facts, and only the first is worth a school's attention.
+   *
+   * This returned `false` for both, which was survivable only while Google
+   * sign-in was broken — no claimant could arrive without a number, so the
+   * ambiguous case never occurred in practice. Now that it works, it is the
+   * COMMON case: a Google account carries no phone number at all
+   * (`signup-guard.ts` makes it optional precisely so that path works), so
+   * every parent who signs in that way would be reported to their school as
+   * "whose phone number is NOT the one you addressed the invite to" — which is
+   * not merely unhelpful, it is false.
+   *
+   * That matters more than a wording nit, because this signal is the ONLY
+   * compensating control for a claim authorised by holding a link. A warning
+   * that fires on most legitimate claims is a warning schools learn to dismiss,
+   * and the one genuine misdirected claim goes with it. So: `true` matched,
+   * `false` compared and differed, `null` nothing to compare.
+   *
+   * `null` is what the column and `SchoolInviteView` already meant by it, and
+   * `EnrollmentInvitesScreen` already keys its warning off `=== false`, so the
+   * third state lands where the rest of the feature was already expecting it.
    */
   private async claimantPhoneMatches(
     invite: { parentPhoneHash: string },
     userId: string,
-  ): Promise<boolean> {
+  ): Promise<boolean | null> {
     const account = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { phoneHash: true },
     });
-    return Boolean(
-      account?.phoneHash && account.phoneHash === invite.parentPhoneHash,
-    );
+    if (!account?.phoneHash) return null;
+    return account.phoneHash === invite.parentPhoneHash;
   }
 
   /**
@@ -1181,6 +1431,75 @@ export class EnrollmentInvitesService {
   }
 
   /**
+   * What the school is told when an invite is claimed.
+   *
+   * ## Why this is three messages and not two
+   *
+   * Because holding the link is the whole authorisation, this notification is
+   * the school's first and best chance to notice that a link reached the wrong
+   * person — and `release` is what they do about it. A claim reported in the
+   * abstract ("claimed by their parent") is one nobody can check, which is why
+   * the claimant is named and the number comparison is stated.
+   *
+   * The comparison has three outcomes and they need three different messages:
+   *
+   *   - **matched** — nothing to do; this belongs on the dashboard with the
+   *     rest of the roster.
+   *   - **differed** — worth a look, and the only one that should read as an
+   *     alarm. Links to the invite list, where `release` lives.
+   *   - **nothing to compare** — the claimant signed in with Google and has no
+   *     number on their account. Reporting this as a mismatch would be false,
+   *     and (since Google sign-in works) it would be the majority of claims,
+   *     which is how a school learns to dismiss the one warning that matters.
+   *     Stated plainly instead, as information rather than an alert.
+   *
+   * There is no `/school/students` route and the web app has no catch-all, so a
+   * link that guesses renders a blank screen — hence only the two that exist.
+   */
+  private static claimNotification(
+    invite: { studentName: string; className: string },
+    claimant: string,
+    phoneMatched: boolean | null,
+  ): {
+    title: string;
+    message: string;
+    type: NotificationType;
+    link: string;
+  } {
+    const who = `${invite.studentName} (${invite.className})`;
+
+    if (phoneMatched === true) {
+      return {
+        title: 'Migration invite claimed',
+        message: `${who} was claimed by ${claimant} and now has an active Lopay plan.`,
+        type: NotificationType.PAYMENT,
+        link: '/school-owner-dashboard',
+      };
+    }
+
+    if (phoneMatched === false) {
+      return {
+        title: 'Migration invite claimed — check this one',
+        message:
+          `${who} was claimed by ${claimant}, whose phone number is NOT the one you addressed the invite to. ` +
+          'If this is not the right parent, open the invite and remove the claim.',
+        type: NotificationType.ALERT,
+        link: '/school/invites',
+      };
+    }
+
+    return {
+      title: 'Migration invite claimed',
+      message:
+        `${who} was claimed by ${claimant} and now has an active Lopay plan. ` +
+        'They signed in with Google, so there was no phone number on their account to check ' +
+        'against the one you addressed the invite to. If this is not the right parent, open the invite and remove the claim.',
+      type: NotificationType.PAYMENT,
+      link: '/school-owner-dashboard',
+    };
+  }
+
+  /**
    * The share payload: the link, and a pre-written message to go with it.
    *
    * Delivery is the school's own. There is no automated send and no deep link
@@ -1276,5 +1595,74 @@ export class EnrollmentInvitesService {
  * probing tokens which guesses were structurally right or once existed, and
  * tells a parent with a genuine link nothing they can act on that this does not.
  */
+/** The columns the sweeps read. Narrower than the row, and all the copy needs. */
+interface InviteSummary {
+  readonly schoolId: string;
+  readonly studentName: string;
+  readonly className: string;
+}
+
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How far ahead of expiry a school is warned.
+ *
+ * Three days, because the action it asks for is "go and chase a parent", and
+ * that needs to survive a weekend or a day the head teacher is out. Much longer
+ * and the link is not yet urgent enough to act on; much shorter and there is no
+ * time left to act at all.
+ */
+const EXPIRY_REMINDER_LEAD_MS = 3 * DAY_IN_MS;
+
+/** How many students a notification names before it starts counting instead. */
+const MAX_NAMED_STUDENTS = 3;
+
+/**
+ * Name the students, up to a point.
+ *
+ * A school migrating a whole class produces a list no notification row can
+ * render and a push payload truncates somewhere arbitrary. Naming the first few
+ * and counting the rest keeps the message recognisable, which is the whole
+ * point: the owner should be able to tell WHICH families without opening the
+ * app.
+ */
+function describeStudents(students: readonly InviteSummary[]): string {
+  const named = students
+    .slice(0, MAX_NAMED_STUDENTS)
+    .map((student) => `${student.studentName} (${student.className})`);
+  const remaining = students.length - named.length;
+
+  if (remaining > 0) {
+    const plural = remaining === 1 ? '' : 's';
+    return `${named.join(', ')} and ${remaining} other${plural}`;
+  }
+  if (named.length === 1) return named[0];
+  const last = named[named.length - 1];
+  return `${named.slice(0, -1).join(', ')} and ${last}`;
+}
+
+/**
+ * Why a re-issue was refused, by the status that refused it.
+ *
+ * Each names the action that IS right for that state, because "no" on its own
+ * leaves a school owner guessing between three buttons that all sound plausible.
+ */
+const REISSUE_REFUSALS: Record<EnrollmentInviteStatus, string> = {
+  CLAIMED:
+    'This invite has already been claimed, so a new link would do nothing. ' +
+    'To correct the amount use "Correct amount"; if the wrong person claimed it, remove the claim.',
+  DISPUTED:
+    'This parent says the recorded amount is wrong. Sending the same link again ' +
+    'will not resolve it — cancel this invite and issue a corrected one.',
+  REVOKED:
+    'This invite was cancelled, so re-sending it would restore whatever was wrong with it. ' +
+    'Create a new invite for this student instead.',
+  // Both reachable only by losing the race in `reissue`'s conditional write.
+  PENDING:
+    'This invite was just changed by someone else — reload and try again.',
+  EXPIRED:
+    'This invite was just changed by someone else — reload and try again.',
+};
+
 const INVITE_UNAVAILABLE =
   'This invite link is not valid. It may have expired or already been used — ask your school to send a new one.';

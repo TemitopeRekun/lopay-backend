@@ -84,8 +84,20 @@ export interface SchoolInviteView {
    * Whether that person's phone was the number the invite was addressed to.
    *
    * A signal, not a verdict — claiming is authorised by holding the link alone
-   * (see `EnrollmentInvitesService.claimantPhoneMatches`). `false` means "worth
-   * a look"; `null` means not claimed, or claimed before this was recorded.
+   * (see `EnrollmentInvitesService.claimantPhoneMatches`). Three-valued on
+   * purpose, because "we compared and they differ" and "there was nothing to
+   * compare" are different facts and only the first is worth a school's
+   * attention:
+   *
+   *   - `true`  — the claimant's own number is the one you addressed it to.
+   *   - `false` — it is not. The only value that should read as a warning.
+   *   - `null`  — nothing to compare (the claimant signed in with Google and
+   *     has no number on their account), or the invite is not claimed, or it
+   *     was claimed before this was recorded.
+   *
+   * Consumers must key a warning off `=== false`, never off falsiness. Since
+   * Google sign-in works, `null` is the ordinary case rather than a curiosity,
+   * and a warning that fires on it is a warning schools stop reading.
    */
   claimantPhoneMatched: boolean | null;
 }

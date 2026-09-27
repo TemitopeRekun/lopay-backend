@@ -94,8 +94,13 @@ export class CreateEnrollmentInviteDto {
   @ApiProperty({
     example: '+2348012345678',
     description:
-      "The parent's WhatsApp number. Becomes the second factor on the claim: " +
-      'only an account whose own verified number matches may claim the invite.',
+      "The parent's WhatsApp number — who the invite is addressed to, and the " +
+      'number the school will recognise on the claim notification. It does NOT ' +
+      'gate the claim: holding the link is the whole authorisation (Lopay ' +
+      'verifies no phone number anywhere, so a match proved only that someone ' +
+      'typed it into a signup form). The claimant is compared against it and ' +
+      'the school is told the result, so a link that reached the wrong person ' +
+      'can be spotted and undone.',
   })
   @IsString()
   @IsNotEmpty()

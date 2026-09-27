@@ -55,4 +55,47 @@ export class InviteExpiryService {
       );
     }
   }
+
+  /**
+   * Warn schools about links lapsing in three days, once a day.
+   *
+   * ## Why this is daily and the sweep above is hourly
+   *
+   * They answer different questions. The sweep keeps the DATA honest, and an
+   * invite that lapses at 14:05 should not still read PENDING at 15:00 — so it
+   * runs often and cheaply. This one asks a human to go and chase a parent, and
+   * the same request repeated every hour is one a school stops reading.
+   *
+   * Daily is also what makes the reminder exactly-once without a column to
+   * track it: `remindExpiring` selects a 24-hour bucket, so one run per day
+   * means every invite is selected once in its life. Running it hourly would
+   * send the same school the same nudge twenty-four times. The cadence is not
+   * a tuning choice — it is load-bearing for the dedupe.
+   *
+   * Eight in the morning UTC is nine in Lagos: inside the school day, early
+   * enough that acting on it is still today's work.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  async remindExpiringInvites(): Promise<void> {
+    // Held for well over the run, and comfortably under the 24h gap to the next
+    // one, so a second instance cannot double-send.
+    const ran = await this.prisma.withLeaderLock(
+      'enrollment-invite-expiry-reminder',
+      30 * 60 * 1000,
+      async () => {
+        try {
+          await this.invites.remindExpiring();
+        } catch (error) {
+          this.logger.error(
+            `Invite expiry reminder failed: ${errorMessage(error)}`,
+          );
+        }
+      },
+    );
+    if (!ran) {
+      this.logger.log(
+        'Invite expiry reminder skipped (lock held by another instance)',
+      );
+    }
+  }
 }

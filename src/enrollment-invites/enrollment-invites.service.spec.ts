@@ -151,6 +151,12 @@ describe('EnrollmentInvitesService', () => {
           migrationDeadline: futureDate(30),
         }),
         findUnique: jest.fn().mockResolvedValue({ ownerId: 'owner-1' }),
+        // Used by the expiry sweeps to resolve each school's owner. Returns the
+        // live school by default; `deletedAt: null` is part of that query, so
+        // the "school has left the platform" case returns [] instead.
+        findMany: jest
+          .fn()
+          .mockResolvedValue([{ id: 'school-1', ownerId: 'owner-1' }]),
       },
       classFee: {
         findFirst: jest.fn().mockResolvedValue({ feeAmount: 10_000_000 }),
@@ -911,16 +917,42 @@ describe('EnrollmentInvitesService', () => {
       expect(data.claimantPhoneMatched).toBe(false);
     });
 
-    it('lets a claimant with NO phone through, and records that too', async () => {
+    it('records NULL, not false, for a claimant with no phone at all', async () => {
       // The Google sign-in path: `signup-guard.ts` makes the number optional, so
-      // an account without one is ordinary. "Nothing to compare" is a fact worth
-      // showing the school and is not grounds to refuse anyone.
+      // an account without one is ordinary — and now that Google sign-in
+      // actually works it is the COMMON case rather than a curiosity.
+      //
+      // `false` would be a lie. "We compared and they differ" and "there was
+      // nothing to compare" are different facts, and only the first deserves a
+      // school's attention. Recording them identically made the majority of
+      // legitimate claims raise the one warning that is supposed to mean
+      // something, which is how a school learns to ignore it.
       prisma.user.findUnique.mockResolvedValue({ phoneHash: null });
 
       await expect(service.claim(VALID_TOKEN, PARENT)).resolves.toBeDefined();
 
       const [{ data }] = prisma.enrollmentInvite.updateMany.mock.calls.at(-1)!;
-      expect(data.claimantPhoneMatched).toBe(false);
+      expect(data.claimantPhoneMatched).toBeNull();
+    });
+
+    it('tells the school there was nothing to check, without crying wolf', async () => {
+      prisma.user.findUnique.mockResolvedValue({ phoneHash: null });
+
+      await service.claim(VALID_TOKEN, PARENT);
+
+      const payloads = notifications.create.mock.calls.map(
+        ([payload]: [{ title: string; message: string; type: string }]) =>
+          payload,
+      );
+      const toSchool = payloads.find((p) => p.title.includes('claimed'));
+
+      expect(toSchool).toBeDefined();
+      // Not an alarm: no "check this one", and not an ALERT.
+      expect(toSchool!.title).not.toContain('check this one');
+      expect(toSchool!.type).not.toBe('ALERT');
+      // But still says what happened, and still offers the way to undo it.
+      expect(toSchool!.message).toContain('no phone number');
+      expect(toSchool!.message).toContain('remove the claim');
     });
 
     it('records a match when the number IS the one the school addressed', async () => {
@@ -1367,32 +1399,318 @@ describe('EnrollmentInvitesService', () => {
 
   // ============================== expireStale ===============================
 
+  /**
+   * Sending the link again when the school no longer has it.
+   *
+   * The raw token is returned exactly once and stored only as a digest, so
+   * nothing can reproduce it. That property is worth keeping — but before this,
+   * the school PAID for it: a closed tab meant revoking and re-entering every
+   * field by hand, and re-entering is exactly where the already-paid figure
+   * gets mistyped. That number becomes a family's opening balance, which they
+   * are then asked to confirm as their own.
+   */
+  describe('reissue', () => {
+    const live = (status: EnrollmentInviteStatus) => ({
+      id: 'invite-1',
+      schoolId: 'school-1',
+      studentName: 'Ada Lovelace',
+      className: 'Basic 1',
+      totalSchoolFee: 9_000_000,
+      amountAlreadyPaid: 2_500_000,
+      phoneNumber: '+2348012345678',
+      installmentFrequency: 'MONTHLY',
+      planStartDate: futureDate(1),
+      termEndDate: futureDate(90),
+      expiresAt: futureDate(2),
+      status,
+      disputeReason: null,
+      disputedAt: null,
+      revokedAt: null,
+      claimedAt: null,
+      claimantPhoneMatched: null,
+      createdAt: new Date(),
+    });
+
+    it('kills the old link and hands back a new one', async () => {
+      prisma.enrollmentInvite.findFirst.mockResolvedValue(
+        live(EnrollmentInviteStatus.PENDING),
+      );
+      prisma.enrollmentInvite.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.reissue('invite-1', OWNER);
+
+      const [{ data }] = prisma.enrollmentInvite.updateMany.mock.calls.at(-1)!;
+      // The security property the one-shot token exists for: whoever is holding
+      // the previous link cannot use it after this returns.
+      expect(data.tokenHash).toEqual(expect.any(String));
+      expect(data.status).toBe(EnrollmentInviteStatus.PENDING);
+      expect(data.expiresAt.getTime()).toBeGreaterThan(Date.now());
+
+      expect(result.claimUrl).toContain('/#/claim-invite?token=');
+      // The message goes with it — the school pastes a sentence, not a bare URL.
+      expect(result.message).toContain('Ada Lovelace');
+    });
+
+    it('revives an invite that lapsed, which is the whole point', async () => {
+      prisma.enrollmentInvite.findFirst.mockResolvedValue(
+        live(EnrollmentInviteStatus.EXPIRED),
+      );
+      prisma.enrollmentInvite.updateMany.mockResolvedValue({ count: 1 });
+
+      await expect(service.reissue('invite-1', OWNER)).resolves.toBeDefined();
+
+      const [{ where }] = prisma.enrollmentInvite.updateMany.mock.calls.at(-1)!;
+      expect(where.status.in).toEqual([
+        EnrollmentInviteStatus.PENDING,
+        EnrollmentInviteStatus.EXPIRED,
+      ]);
+    });
+
+    // Each refusal names the action that IS right for that state, because "no"
+    // on its own leaves an owner guessing between three buttons that all sound
+    // plausible:
+    //
+    //   CLAIMED  — a live plan sits behind it; the remedies are amend/release.
+    //   DISPUTED — the parent answered and said the figure is wrong; handing
+    //              them the same one again ignores them.
+    //   REVOKED  — the school cancelled it deliberately, almost always because
+    //              a detail was wrong; restoring it restores the mistake.
+    it.each([
+      [EnrollmentInviteStatus.CLAIMED, 'already been claimed'],
+      [EnrollmentInviteStatus.DISPUTED, 'recorded amount is wrong'],
+      [EnrollmentInviteStatus.REVOKED, 'was cancelled'],
+    ])(
+      'refuses a %s invite, and says what to do instead',
+      async (status, wording) => {
+        prisma.enrollmentInvite.findFirst.mockResolvedValue(live(status));
+        prisma.enrollmentInvite.updateMany.mockResolvedValue({ count: 0 });
+
+        await expect(service.reissue('invite-1', OWNER)).rejects.toThrow(
+          wording,
+        );
+      },
+    );
+
+    it('refuses once the migration window has closed', async () => {
+      // A re-issue mints a NEW credential, so it is issuing — and issuing is
+      // what the window bounds. Claiming deliberately is not, so a link sent
+      // before the deadline still works after it.
+      prisma.school.findFirst.mockResolvedValue({
+        id: 'school-1',
+        name: 'Acme Academy',
+        ownerId: 'owner-1',
+        migrationDeadline: new Date(Date.now() - DAY_MS),
+      });
+
+      await expect(service.reissue('invite-1', OWNER)).rejects.toThrow(
+        /migration window has closed/i,
+      );
+      expect(prisma.enrollmentInvite.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses an invite belonging to another school', async () => {
+      prisma.enrollmentInvite.findFirst.mockResolvedValue(null);
+
+      await expect(service.reissue('invite-1', OWNER)).rejects.toThrow(
+        'Invite not found',
+      );
+    });
+
+    it('records the re-issue against the same invite', async () => {
+      prisma.enrollmentInvite.findFirst.mockResolvedValue(
+        live(EnrollmentInviteStatus.EXPIRED),
+      );
+      prisma.enrollmentInvite.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.reissue('invite-1', OWNER);
+
+      const [entry] = audit.record.mock.calls.at(-1)!;
+      expect(entry.entityId).toBe('invite-1');
+      // `reissuedFrom` is what tells a re-issue apart from a first issue in the
+      // trail, since both are legitimately CREATED actions.
+      expect(entry.metadata.reissuedFrom).toBe(EnrollmentInviteStatus.EXPIRED);
+      // Neither the phone number nor its blind index, as in `create`.
+      expect(JSON.stringify(entry.metadata)).not.toContain('2348012345678');
+    });
+  });
+
   describe('expireStale', () => {
-    it('retires only lapsed pending and disputed invites', async () => {
-      prisma.enrollmentInvite.updateMany.mockResolvedValue({ count: 3 });
+    const lapsed = [
+      {
+        id: 'inv-1',
+        schoolId: 'school-1',
+        studentName: 'Ada Lovelace',
+        className: 'Basic 1',
+      },
+      {
+        id: 'inv-2',
+        schoolId: 'school-1',
+        studentName: 'Grace Hopper',
+        className: 'Basic 2',
+      },
+    ];
+
+    it('selects only lapsed pending and disputed invites', async () => {
+      // The status filter moved from the UPDATE to the SELECT when the sweep
+      // started reporting what it retired: afterwards there is no way to tell
+      // the rows it just expired from the ones already sitting at EXPIRED.
+      prisma.enrollmentInvite.findMany.mockResolvedValue(lapsed);
+      prisma.enrollmentInvite.updateMany.mockResolvedValue({ count: 2 });
       const now = new Date();
 
-      await expect(service.expireStale(now)).resolves.toBe(3);
+      await expect(service.expireStale(now)).resolves.toBe(2);
 
-      expect(prisma.enrollmentInvite.updateMany).toHaveBeenCalledWith({
-        where: {
-          status: {
-            in: [
-              EnrollmentInviteStatus.PENDING,
-              EnrollmentInviteStatus.DISPUTED,
-            ],
+      expect(prisma.enrollmentInvite.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            status: {
+              in: [
+                EnrollmentInviteStatus.PENDING,
+                EnrollmentInviteStatus.DISPUTED,
+              ],
+            },
+            expiresAt: { lte: now },
           },
-          expiresAt: { lte: now },
-        },
+        }),
+      );
+      expect(prisma.enrollmentInvite.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['inv-1', 'inv-2'] } },
         data: { status: EnrollmentInviteStatus.EXPIRED },
       });
     });
 
     it('never touches a claimed invite', async () => {
+      prisma.enrollmentInvite.findMany.mockResolvedValue(lapsed);
+
       await service.expireStale();
+
       const statuses =
-        prisma.enrollmentInvite.updateMany.mock.calls[0][0].where.status.in;
+        prisma.enrollmentInvite.findMany.mock.calls[0][0].where.status.in;
       expect(statuses).not.toContain(EnrollmentInviteStatus.CLAIMED);
+    });
+
+    it('does nothing at all when nothing has lapsed', async () => {
+      prisma.enrollmentInvite.findMany.mockResolvedValue([]);
+
+      await expect(service.expireStale()).resolves.toBe(0);
+
+      expect(prisma.enrollmentInvite.updateMany).not.toHaveBeenCalled();
+      expect(notifications.create).not.toHaveBeenCalled();
+    });
+
+    it('tells the school which families lapsed, in ONE notification', async () => {
+      // The gap this closes: the sweep used to flip a status and tell nobody,
+      // so a school found out only by going and looking — which is exactly the
+      // thing they have no reason to do. A migration simply never happened.
+      //
+      // One notification per school, not per invite: a school migrating thirty
+      // families would otherwise get thirty, which lands the same as none.
+      prisma.enrollmentInvite.findMany.mockResolvedValue(lapsed);
+
+      await service.expireStale();
+
+      expect(notifications.create).toHaveBeenCalledTimes(1);
+      const [payload] = notifications.create.mock.calls[0];
+      expect(payload.userId).toBe('owner-1');
+      expect(payload.message).toContain('Ada Lovelace (Basic 1)');
+      expect(payload.message).toContain('Grace Hopper (Basic 2)');
+      // Names a remedy that is now a real one — see `reissue`.
+      expect(payload.message).toContain('send a new link');
+    });
+
+    it('does not notify a school that has left the platform', async () => {
+      prisma.enrollmentInvite.findMany.mockResolvedValue(lapsed);
+      prisma.enrollmentInvite.updateMany.mockResolvedValue({ count: 2 });
+      prisma.school.findMany.mockResolvedValue([]);
+
+      // Still swept — the rows are retired either way; only the telling is
+      // skipped, because there is nobody left to tell.
+      await expect(service.expireStale()).resolves.toBe(2);
+
+      expect(notifications.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('remindExpiring', () => {
+    const soon = [
+      {
+        id: 'inv-1',
+        schoolId: 'school-1',
+        studentName: 'Ada Lovelace',
+        className: 'Basic 1',
+      },
+    ];
+
+    it('selects exactly one 24-hour bucket, three days out', async () => {
+      // This is what makes the reminder exactly-once without a `remindedAt`
+      // column: every PENDING invite passes through exactly one such bucket in
+      // its life, PROVIDED the job runs once a day. The daily cadence in
+      // `InviteExpiryService` is load-bearing for that, not a tuning choice.
+      prisma.enrollmentInvite.findMany.mockResolvedValue(soon);
+      const now = new Date('2026-09-27T08:00:00.000Z');
+
+      await expect(service.remindExpiring(now)).resolves.toBe(1);
+
+      const [{ where }] = prisma.enrollmentInvite.findMany.mock.calls[0];
+      expect(where.status).toBe(EnrollmentInviteStatus.PENDING);
+      expect(where.expiresAt.gte).toEqual(new Date('2026-09-30T08:00:00.000Z'));
+      expect(where.expiresAt.lt).toEqual(new Date('2026-10-01T08:00:00.000Z'));
+    });
+
+    it('leaves DISPUTED invites alone', async () => {
+      // Those have not gone quiet — the parent answered, and said the figure is
+      // wrong. Chasing them for a confirmation they have refused to give is the
+      // wrong ask, and the school already has the dispute notification.
+      prisma.enrollmentInvite.findMany.mockResolvedValue(soon);
+
+      await service.remindExpiring();
+
+      const [{ where }] = prisma.enrollmentInvite.findMany.mock.calls[0];
+      expect(where.status).toBe(EnrollmentInviteStatus.PENDING);
+    });
+
+    it('warns the school while there is still time to chase', async () => {
+      // Addressed to the SCHOOL because there is no way to reach the parent:
+      // they have no account yet, so there is no userId to notify, and this
+      // platform has no SMS or email provider to fall back on.
+      prisma.enrollmentInvite.findMany.mockResolvedValue(soon);
+
+      await service.remindExpiring();
+
+      expect(notifications.create).toHaveBeenCalledTimes(1);
+      const [payload] = notifications.create.mock.calls[0];
+      expect(payload.userId).toBe('owner-1');
+      expect(payload.title).toContain('3 days');
+      expect(payload.message).toContain('Ada Lovelace (Basic 1)');
+    });
+
+    it('stays silent when nothing is lapsing', async () => {
+      prisma.enrollmentInvite.findMany.mockResolvedValue([]);
+
+      await expect(service.remindExpiring()).resolves.toBe(0);
+
+      expect(notifications.create).not.toHaveBeenCalled();
+    });
+
+    it('names a few students and counts the rest', async () => {
+      // A whole class produces a list no notification row can render and a push
+      // payload truncates arbitrarily. The owner still has to be able to tell
+      // WHICH families without opening the app.
+      prisma.enrollmentInvite.findMany.mockResolvedValue(
+        Array.from({ length: 6 }, (_, index) => ({
+          id: 'inv-' + index,
+          schoolId: 'school-1',
+          studentName: 'Student ' + index,
+          className: 'Basic 1',
+        })),
+      );
+
+      await service.remindExpiring();
+
+      const [payload] = notifications.create.mock.calls[0];
+      expect(payload.message).toContain('Student 0 (Basic 1)');
+      expect(payload.message).toContain('and 3 others');
+      expect(payload.message).not.toContain('Student 5');
     });
   });
 
