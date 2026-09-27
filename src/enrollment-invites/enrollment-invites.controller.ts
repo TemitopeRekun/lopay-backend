@@ -105,6 +105,26 @@ export class EnrollmentInvitesController {
   }
 
   /**
+   * Mint a fresh link for an invite whose link the school no longer has.
+   *
+   * Throttled at the same rate as `revoke` rather than tighter: losing a link
+   * is an ordinary mistake and the remedy must not feel rationed. It mints a
+   * bearer credential, so it is not unbounded either.
+   */
+  @Post(':id/reissue')
+  @ApiBearerAuth()
+  @Roles(UserRole.SCHOOL_OWNER)
+  @Throttle({ default: { ttl: 60_000, limit: 30 } })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOperation({ summary: 'Send a new claim link for an existing invite' })
+  reissue(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.reissue(id, user);
+  }
+
+  /**
    * Correct the already-paid figure on a plan that has already been claimed.
    * Separate from revoke because there is a live plan behind it — see
    * `LedgerService.amendMigratedPayment`.

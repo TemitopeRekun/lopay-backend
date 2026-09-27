@@ -36,6 +36,7 @@ import { FirebaseModule } from './firebase/firebase.module';
 import { SupabaseModule } from './supabase/supabase.module';
 import { DeviceTokensModule } from './device-tokens/device-tokens.module';
 import { EnrollmentInvitesModule } from './enrollment-invites/enrollment-invites.module';
+import { OAuthHandoffModule } from './auth/oauth-handoff.module';
 
 @Module({
   imports: [
@@ -237,6 +238,7 @@ import { EnrollmentInvitesModule } from './enrollment-invites/enrollment-invites
     NotificationsModule,
     DeviceTokensModule,
     EnrollmentInvitesModule,
+    OAuthHandoffModule,
     PrismaModule,
     EnrollmentModule,
     AdminModule,
