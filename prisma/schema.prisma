@@ -50,6 +50,8 @@ enum AuditAction {
   ENROLLMENT_INVITE_CLAIMED
   ENROLLMENT_INVITE_RELEASED
   MIGRATED_PAYMENT_AMENDED
+  /// A platform admin moved a school's free-migration deadline.
+  MIGRATION_WINDOW_CHANGED
 }
 
 enum PaymentType {

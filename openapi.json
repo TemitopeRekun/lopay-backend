@@ -1930,6 +1930,66 @@
         ]
       }
     },
+    "/api/v1/admin/migration-windows": {
+      "get": {
+        "operationId": "AdminController_getMigrationWindows",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Per-school free-migration deadlines and usage",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/schools/{schoolId}/migration-window": {
+      "patch": {
+        "operationId": "AdminController_setMigrationWindow",
+        "parameters": [
+          {
+            "name": "schoolId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMigrationWindowDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Move a school’s free-migration deadline (extend or stop)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/pending-first-payments": {
       "get": {
         "operationId": "AdminController_getPendingFirstPayments",
@@ -2746,6 +2806,26 @@
       "ConfirmEnrollmentDto": {
         "type": "object",
         "properties": {}
+      },
+      "SetMigrationWindowDto": {
+        "type": "object",
+        "properties": {
+          "closesAt": {
+            "format": "date-time",
+            "type": "string",
+            "example": "2026-11-30T00:00:00.000Z",
+            "description": "When this school stops being able to ISSUE migration invites. Must be within a year from now, and no earlier than yesterday — a date in the past closes migration immediately, which is allowed on purpose so a school can be stopped as well as extended."
+          },
+          "reason": {
+            "type": "string",
+            "example": "Still migrating 120 families; agreed a further month on 23 Sep.",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "closesAt",
+          "reason"
+        ]
       }
     }
   }
