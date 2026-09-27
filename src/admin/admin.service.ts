@@ -5,6 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditAction,
+  EnrollmentInviteStatus,
+  NotificationType,
   PaymentType,
   PaymentReceiver,
   PaymentStatus,
@@ -20,6 +23,10 @@ import { LedgerService } from '../ledger/ledger.service';
 import { SchoolOnboardingService } from '../school-onboarding/school-onboarding.service';
 import { Money } from '../common/money';
 import { MOVED_THROUGH_LOPAY } from '../common/migrated-plan';
+import {
+  isMigrationWindowOpen,
+  migrationDaysRemaining,
+} from '../enrollment-invites/invite-policy';
 import { computeArrears } from '../common/arrears';
 import { errorMessage } from '../common/errors';
 import { toPaymentView, type PaymentView } from '../common/payment-dto';
@@ -540,6 +547,158 @@ export class AdminService {
     });
 
     return paginate(items, total, p, l);
+  }
+
+  // ====================== free-migration windows =========================
+
+  /**
+   * Every school's free-migration deadline, with how much of it they have used.
+   *
+   * Exists because the rule it reports on is otherwise invisible. A school whose
+   * window is closing finds out by being refused, and the platform finds out
+   * when they telephone — neither is a position to take a commercial decision
+   * from. `migratedStudents` is the other half: it is the number that says
+   * whether a school asking for more time has migrated four families or four
+   * hundred.
+   *
+   * Deliberately NOT folded into `getSchoolsPayoutStatus`, the other admin list
+   * of schools. That one makes a Paystack call per school and is cached for it;
+   * hanging two cheap local columns off an expensive remote lookup would make
+   * this screen inherit Paystack's latency and its outages for no reason.
+   */
+  async getMigrationWindows() {
+    const now = new Date();
+    const schools = await this.prisma.school.findMany({
+      where: { deletedAt: null },
+      select: {
+        id: true,
+        name: true,
+        createdAt: true,
+        migrationDeadline: true,
+      },
+      orderBy: { migrationDeadline: 'asc' },
+    });
+
+    // One grouped count, not a query per school.
+    const claimed = await this.prisma.enrollmentInvite.groupBy({
+      by: ['schoolId'],
+      where: { status: EnrollmentInviteStatus.CLAIMED },
+      _count: { _all: true },
+    });
+    const claimedBySchool = new Map(
+      claimed.map((c) => [c.schoolId, c._count._all]),
+    );
+
+    return schools.map((school) => ({
+      schoolId: school.id,
+      schoolName: school.name,
+      joinedAt: school.createdAt,
+      closesAt: school.migrationDeadline,
+      isOpen: isMigrationWindowOpen(school.migrationDeadline, now),
+      daysRemaining: migrationDaysRemaining(school.migrationDeadline, now),
+      migratedStudents: claimedBySchool.get(school.id) ?? 0,
+    }));
+  }
+
+  /**
+   * Move one school's free-migration deadline.
+   *
+   * ## What the bounds protect against
+   *
+   * Not malice — this is a platform-admin route — but a mistyped date, which is
+   * silent and long-lived. A year entered as 2126 would give that school free
+   * migration for a century and nothing downstream would ever complain: every
+   * check simply passes. So the far edge is a year out, and anything past it is
+   * refused with the date read back.
+   *
+   * The near edge is YESTERDAY, not now, and that is deliberate. A date in the
+   * past is how a school gets STOPPED, which is a real need if one is abusing
+   * free migration — so it must be expressible. A day of slack keeps a timezone
+   * confusion from being rejected as "in the past" when the admin meant today.
+   */
+  async setMigrationWindow(
+    schoolId: string,
+    closesAt: Date,
+    actor: AuditActor,
+    reason: string,
+  ) {
+    const now = new Date();
+    if (!(closesAt instanceof Date) || Number.isNaN(closesAt.getTime())) {
+      throw new BadRequestException('Provide a valid date');
+    }
+
+    const DAY = 24 * 60 * 60 * 1000;
+    if (closesAt.getTime() < now.getTime() - DAY) {
+      throw new BadRequestException(
+        'That date is more than a day in the past. To stop a school migrating, ' +
+          'set the deadline to today — it takes effect immediately either way.',
+      );
+    }
+    if (closesAt.getTime() > now.getTime() + 365 * DAY) {
+      throw new BadRequestException(
+        'A free-migration deadline cannot be more than a year away. You entered ' +
+          `${closesAt.toISOString().slice(0, 10)}.`,
+      );
+    }
+
+    const school = await this.prisma.school.findFirst({
+      where: { id: schoolId, deletedAt: null },
+      select: { id: true, name: true, migrationDeadline: true, ownerId: true },
+    });
+    if (!school) throw new NotFoundException('School not found');
+
+    const previous = school.migrationDeadline;
+    const updated = await this.prisma.school.update({
+      where: { id: schoolId },
+      data: { migrationDeadline: closesAt },
+      select: { migrationDeadline: true },
+    });
+
+    await this.audit.record({
+      action: AuditAction.MIGRATION_WINDOW_CHANGED,
+      entityType: 'School',
+      entityId: schoolId,
+      actor,
+      schoolId,
+      reason,
+      before: { closesAt: previous },
+      after: { closesAt: updated.migrationDeadline },
+    });
+
+    // Told, not left to discover. A school that asked for more time needs to
+    // know it was granted; one that has just been stopped needs to know before
+    // it tries to issue and reads the refusal as a bug. Best-effort — the
+    // deadline is already committed, and a notification failure must not be
+    // reported as a failed change.
+    const extended = updated.migrationDeadline.getTime() > previous.getTime();
+    const on = updated.migrationDeadline.toISOString().slice(0, 10);
+    try {
+      await this.notificationsService.create({
+        userId: school.ownerId,
+        title: extended
+          ? 'Migration period extended'
+          : 'Migration period updated',
+        message:
+          (extended
+            ? `You can send migration invites until ${on}.`
+            : `Your migration period now ends ${on}.`) + ` Reason: ${reason}`,
+        type: NotificationType.ALERT,
+        link: '/school/invites',
+      });
+    } catch (error) {
+      this.logger.error(
+        `Migration window changed but could not notify owner ${school.ownerId}: ${errorMessage(error)}`,
+      );
+    }
+
+    return {
+      schoolId,
+      schoolName: school.name,
+      previousClosesAt: previous,
+      closesAt: updated.migrationDeadline,
+      isOpen: isMigrationWindowOpen(updated.migrationDeadline, now),
+      daysRemaining: migrationDaysRemaining(updated.migrationDeadline, now),
+    };
   }
 
   /** Platform revenue summary (cached, short TTL). */

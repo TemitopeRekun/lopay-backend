@@ -1,14 +1,25 @@
-import { Controller, Get, Post, Param, Body, Query } from '@nestjs/common';
 import {
-  ApiTags,
+  Controller,
+  Get,
+  Patch,
+  Post,
+  Param,
+  ParseUUIDPipe,
+  Body,
+  Query,
+} from '@nestjs/common';
+import {
   ApiBearerAuth,
   ApiOperation,
+  ApiParam,
   ApiQuery,
+  ApiTags,
 } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole, PaymentTransactionStatus } from '../generated/prisma/client';
 import { CreateSchoolDto } from './dto/create.school.dto';
+import { SetMigrationWindowDto } from './dto/migration-window.dto';
 import { CurrentUser, AuthUser } from '../common/decorators/user.decorator';
 
 // Auth + roles are enforced globally (BetterAuthGuard + RolesGuard).
@@ -67,6 +78,47 @@ export class AdminController {
   })
   createSubaccount(@Param('schoolId') schoolId: string) {
     return this.adminService.createSubaccountForSchool(schoolId);
+  }
+
+  /**
+   * Every school's free-migration deadline and how much of it they have used.
+   *
+   * The rule is otherwise invisible from this side: a school finds out its
+   * window is closing by being refused, and the platform finds out when they
+   * ring up. `migratedStudents` is what turns "they want more time" into a
+   * decision — four families is a different conversation from four hundred.
+   */
+  @Get('migration-windows')
+  @ApiOperation({
+    summary: 'Per-school free-migration deadlines and usage',
+  })
+  getMigrationWindows() {
+    return this.adminService.getMigrationWindows();
+  }
+
+  /**
+   * Grant a school more time to migrate, or stop it migrating.
+   *
+   * The same edit in both directions — the body states the resulting date
+   * rather than a motion, so there is no ambiguity about what the school ends
+   * up with. `reason` is required: this changes what a school is given for free.
+   */
+  @Patch('schools/:schoolId/migration-window')
+  @ApiParam({ name: 'schoolId', format: 'uuid' })
+  @ApiOperation({
+    summary: 'Move a school’s free-migration deadline (extend or stop)',
+  })
+  setMigrationWindow(
+    @Param('schoolId', ParseUUIDPipe) schoolId: string,
+    @Body() dto: SetMigrationWindowDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.adminService.setMigrationWindow(
+      schoolId,
+      dto.closesAt,
+      { userId: user.userId, role: user.role },
+      dto.reason,
+    );
   }
 
   /** View pending first payments (paginated, optionally one school) */
